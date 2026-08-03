@@ -34,6 +34,17 @@ SET revoked_at = now()
 WHERE org_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL;
 
 -- name: ListInvitations :many
-SELECT * FROM invitations
-WHERE org_id = $1
-ORDER BY created_at DESC;
+-- ⛔ LEFT JOIN, NOT JOIN. invitations.invited_by_user_id is ON DELETE SET NULL, so the inviter
+-- can be gone — and an inner join would silently DROP those rows, hiding outstanding invitations
+-- precisely because the person who sent them left. That is the failure this endpoint exists to
+-- end, so it must not be reintroduced by the join.
+-- ⛔ COALESCE, NOT A BARE CAST. `u.email::text` makes sqlc type the column NON-NULLABLE (*string),
+-- but a LEFT JOIN against a deleted inviter yields NULL and the scan fails with
+-- "cannot scan NULL into *string" — a 500 on the whole list. Caught on the review stack by the
+-- fixture row seeded for exactly this case; without that row it would have shipped and broken the
+-- first time an inviter was deleted, which is the one moment the list matters most.
+SELECT i.*, COALESCE(u.email::text, '')::text AS invited_by_email
+FROM invitations i
+LEFT JOIN users u ON u.id = i.invited_by_user_id
+WHERE i.org_id = $1
+ORDER BY i.created_at DESC;

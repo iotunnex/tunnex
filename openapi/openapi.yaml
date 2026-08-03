@@ -1641,6 +1641,27 @@ paths:
         in: path
         required: true
         schema: { type: string, format: uuid }
+    get:
+      operationId: listInvitations
+      summary: List the organization's invitations
+      description: |
+        Returns every invitation row for the org, newest first, with its lifecycle timestamps.
+        Gated on `member:invite` — the same permission as the three verbs it exists to serve.
+        Reading which addresses are outstanding is only actionable to someone who can resend or
+        revoke them, so this deliberately reuses that permission rather than minting a read-only
+        one whose grant table would have to answer "who may see who was invited, but do nothing".
+        The secret token is NEVER returned: it is shown once, by `createInvitation`.
+      tags: [invitations]
+      responses:
+        "200":
+          description: Invitations, newest first.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Invitation" }
+        default: { $ref: "#/components/responses/Error" }
     post:
       operationId: createInvitation
       summary: Invite a user to the organization
@@ -3025,6 +3046,26 @@ components:
       additionalProperties: false
       properties:
         message: { type: string }
+
+    Invitation:
+      type: object
+      required: [id, email, role, expires_at, created_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        role: { type: string, enum: [owner, admin, member] }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        # ⛔ THE THREE TERMINAL STATES ARE TIMESTAMPS, NOT A STATUS ENUM — the table stores them that way
+        # and the client derives `pending | accepted | revoked | expired` from them plus the clock. EXPIRED
+        # is derived and never stored, so a status field would go stale the moment it was written.
+        accepted_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        # NULLABLE ON PURPOSE: invitations.invited_by_user_id is ON DELETE SET NULL, so the inviter can be
+        # gone. The render needs an arm for that; it is the `managed_by_machine` shape again.
+        invited_by_user_id: { type: string, format: uuid, nullable: true }
+        invited_by_email: { type: string, nullable: true }
 
     InviteCreated:
       type: object

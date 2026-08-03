@@ -1,6 +1,13 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
 import {
   api,
+  apiErrorCode,
   apiErrorMessage,
   type Device,
   type Member,
@@ -19,6 +26,19 @@ import {
   Modal,
 } from "../components/ui";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
+import {
+  REVOKED_CAUSE_NOTE,
+  canResend,
+  canRevoke,
+  invitationState,
+  inviteErrorCopy,
+  inviteGate,
+  inviterLabel,
+  orderInvitations,
+  outstandingCount,
+  stateLabel,
+  type Invitation,
+} from "../lib/invitationview";
 import {
   deviceCountFor,
   deviceCountLabel,
@@ -52,6 +72,9 @@ export default function Users() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [isEnterprise, setIsEnterprise] = useState(false);
+  const [invites, setInvites] = useState<Invitation[] | null>(null);
+  const [inviteErr, setInviteErr] = useState<string | null>(null);
+  const [inviteBusy, setInviteBusy] = useState<string | null>(null);
   // ⛔ `null` MEANS "NOT LOADED", AND IT IS NOT THE SAME AS `[]`. An empty array is a fetched answer; null is
   // the absence of one, and deviceCountFor / groupAccessState each have a DISTINCT arm for it. Initialising
   // these to `[]` would make a page that has not finished loading claim every member owns nothing.
@@ -206,6 +229,40 @@ export default function Users() {
     );
   };
 
+  // ⛔ THE READ THAT MAKES RESEND AND REVOKE REACHABLE. Both are keyed by EMAIL, and until S14.15
+  // nothing served the addresses — so an invitation could be created and then never seen, resent or
+  // revoked. Gated on the same permission as the verbs it serves.
+  const loadInvites = useCallback(async () => {
+    if (!org || !myRole || inviteGate(myRole).kind !== "ready") return;
+    const { data, error } = await api.GET(
+      "/api/v1/organizations/{orgId}/invitations",
+      { params: { path: { orgId: org.id } } },
+    );
+    if (error) return setInviteErr(inviteErrorCopy(apiErrorCode(error)));
+    setInviteErr(null);
+    setInvites((data as Invitation[] | undefined) ?? []);
+  }, [org, myRole]);
+
+  useEffect(() => {
+    void loadInvites();
+  }, [loadInvites]);
+
+  async function inviteAction(kind: "resend" | "revoke", email: string) {
+    setInviteBusy(email + kind);
+    setInviteErr(null);
+    const path =
+      kind === "resend"
+        ? ("/api/v1/organizations/{orgId}/invitations/resend" as const)
+        : ("/api/v1/organizations/{orgId}/invitations/revoke" as const);
+    const { error } = await api.POST(path, {
+      params: { path: { orgId: org!.id } },
+      body: { email },
+    });
+    setInviteBusy(null);
+    if (error) return setInviteErr(inviteErrorCopy(apiErrorCode(error)));
+    await loadInvites();
+  }
+
   const shape = rosterShape({ role: myRole, isEnterprise });
   // ⛔ ACTIONS IS ABSENT WHEN NO ROW HAS ONE — the same rule as the Devices column, for the same reason.
   //
@@ -231,6 +288,103 @@ export default function Users() {
       <h1 className="text-xl font-semibold text-white">Users</h1>
       <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
       <ErrorText>{error}</ErrorText>
+
+      {/* ── Pending invitations ───────────────────────────────────────────────────────────────────────────
+          ⛔ THE ONLY WRITE-ONLY STATE IN THE PRODUCT THAT IS ITSELF AN ACCESS GRANT. `resendInvitation` and
+          `revokeInvitation` are keyed by EMAIL and nothing served the addresses, so an invitation could be
+          created and then never seen, resent or revoked — while remaining redeemable into a membership.
+          The other write-only items are CONFIGURATION whose effect shows up elsewhere; this one has no
+          observable effect until the moment it becomes a member. */}
+      {invites !== null && inviteGate(myRole).kind === "ready" && (
+        <div className="mt-6">
+          <Card>
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-sm font-semibold text-white">Invitations</h2>
+              {/* The count names OUTSTANDING rows only — pending plus expired. An accepted invitation is a
+                  member now and is already counted on the roster; counting it here would overstate how many
+                  people have a live path into the org, which is the number this panel exists to show. */}
+              <span className="text-xs text-slate-400">
+                {outstandingCount(invites, new Date())} outstanding
+              </span>
+            </div>
+            {invites.length === 0 ? (
+              <p className="mt-2 text-xs text-slate-500">
+                No invitations have been created for this organization.
+              </p>
+            ) : (
+              <ul className="mt-3 space-y-1">
+                {orderInvitations(invites, new Date()).map((inv) => {
+                  const st = invitationState(inv, new Date());
+                  return (
+                    <li
+                      key={inv.id}
+                      data-testid={`invite-${inv.id}`}
+                      data-state={st}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white/5 px-3 py-1.5 text-sm"
+                    >
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="text-slate-200">{inv.email}</span>
+                        <span
+                          className={
+                            "rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold " +
+                            (st === "pending"
+                              ? "border-accent-500/40 bg-accent-500/10 text-accent-300"
+                              : st === "expired"
+                                ? "border-warn/40 bg-warn/10 text-warn"
+                                : "border-slate-700 bg-slate-900 text-slate-500")
+                          }
+                        >
+                          {stateLabel(st)}
+                        </span>
+                        <span className="text-xs text-slate-500">{inv.role}</span>
+                        {/* The inviter can be GONE — invited_by_user_id is ON DELETE SET NULL, and the
+                            LEFT JOIN keeps the row rather than hiding an outstanding invitation because
+                            its sender left. */}
+                        <span className="text-xs text-slate-600">
+                          invited by {inviterLabel(inv)}
+                        </span>
+                      </span>
+                      <span className="flex gap-2">
+                        {/* Controls appear ONLY where the server would act. Revoke matches
+                            `accepted_at IS NULL AND revoked_at IS NULL`, so on a terminal row it would
+                            change nothing and report success — worse than absent. */}
+                        {canResend(st) && (
+                          <Button
+                            variant="ghost"
+                            disabled={inviteBusy === inv.email + "resend"}
+                            onClick={() => void inviteAction("resend", inv.email)}
+                          >
+                            {inviteBusy === inv.email + "resend"
+                              ? "Resending…"
+                              : "Resend"}
+                          </Button>
+                        )}
+                        {canRevoke(st) && (
+                          <Button
+                            variant="danger"
+                            disabled={inviteBusy === inv.email + "revoke"}
+                            onClick={() => void inviteAction("revoke", inv.email)}
+                          >
+                            {inviteBusy === inv.email + "revoke"
+                              ? "Revoking…"
+                              : "Revoke"}
+                          </Button>
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {/* A revocation the operator may not have performed — SupersedePendingInvites clears pending
+                invites on a domain-capture JIT join, and the table records no cause. Named, not claimed. */}
+            {invites.some((i) => i.revoked_at) && (
+              <p className="mt-3 text-xs text-slate-600">{REVOKED_CAUSE_NOTE}</p>
+            )}
+            <ErrorText>{inviteErr}</ErrorText>
+          </Card>
+        </div>
+      )}
 
       {/* ── Access posture ────────────────────────────────────────────────────────────────────────────────
           The wireframe's subtitle promises `role hierarchy · MFA coverage · authentication sources` and the

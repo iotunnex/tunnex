@@ -634,3 +634,49 @@ VALUES ('01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000
        ('01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000a0007',
         '01900000-0000-7000-8000-0000000b0005', 'idp_sync', now() - interval '40 days')
 ON CONFLICT (group_id, user_id) DO NOTHING;
+
+-- ══════════════════════════════════════════════════════════════════════════════════════════════
+-- S14.15 · INVITATIONS — the third unmeasured fixture ZERO, and the one that mattered most.
+--
+-- `invitations` was empty on every stack, so the panel that finally makes resend/revoke reachable
+-- had nothing to render. All FOUR lifecycle states are seeded, because the render derives them
+-- from TIMESTAMPS and a clock rather than a status column — a fixture that only covered `pending`
+-- would leave three of the four arms unexercised on the review stack.
+--
+-- ⛔ `expired` IS THE ONE A FIXTURE CAN GET WRONG SILENTLY: it is DERIVED (expires_at < now()),
+-- never stored, so the interval below is load-bearing — move it forward and the row renders as
+-- pending and the expired arm is never seen.
+--
+-- token_hash values are inert filler. The raw token is returned exactly once by createInvitation
+-- and is NOT recoverable from a hash, so these cannot be redeemed — which is the point: a fixture
+-- must not create an accepted-shaped invitation that anyone could actually use.
+INSERT INTO invitations (id, org_id, email, role, token_hash, expires_at, accepted_at, revoked_at,
+                         invited_by_user_id, created_at)
+VALUES
+  -- PENDING — the row resend/revoke exist for, and the one nobody could see before this story.
+  ('01900000-0000-7000-8000-0000000c0001', '01900000-0000-7000-8000-000000000001',
+   'priya.raman@acme.io', 'member', '\x01'::bytea, now() + interval '5 days',
+   NULL, NULL, '01900000-0000-7000-8000-000000000002', now() - interval '2 days'),
+  -- EXPIRED — pending in the database, expired only against the clock. Derived, not stored.
+  ('01900000-0000-7000-8000-0000000c0002', '01900000-0000-7000-8000-000000000001',
+   'stale.invite@acme.io', 'admin', '\x02'::bytea, now() - interval '3 days',
+   NULL, NULL, '01900000-0000-7000-8000-000000000002', now() - interval '10 days'),
+  -- ACCEPTED — proves the panel does not offer resend/revoke on a redeemed invitation.
+  ('01900000-0000-7000-8000-0000000c0003', '01900000-0000-7000-8000-000000000001',
+   'member@demo.tunnex.local', 'member', '\x03'::bytea, now() + interval '1 day',
+   now() - interval '20 days', NULL, '01900000-0000-7000-8000-000000000002', now() - interval '25 days'),
+  -- REVOKED — and deliberately NOT revoked by a human. SupersedePendingInvites clears pending
+  -- invites when a user joins another way (domain-capture JIT), so an operator can meet a
+  -- revocation they did not perform. The panel must not imply they did it.
+  ('01900000-0000-7000-8000-0000000c0004', '01900000-0000-7000-8000-000000000001',
+   'jit.joiner@acme.io', 'member', '\x04'::bytea, now() + interval '2 days',
+   NULL, now() - interval '1 day', '01900000-0000-7000-8000-000000000002', now() - interval '6 days'),
+  -- ⛔ INVITER GONE — invited_by_user_id is ON DELETE SET NULL, so this NULL is a state the
+  -- product can really reach. The LEFT JOIN keeps the row; an inner join would DROP it, hiding an
+  -- outstanding invitation precisely because its sender left.
+  ('01900000-0000-7000-8000-0000000c0005', '01900000-0000-7000-8000-000000000001',
+   'orphaned.invite@acme.io', 'member', '\x05'::bytea, now() + interval '4 days',
+   NULL, NULL, NULL, now() - interval '4 days')
+ON CONFLICT (id) DO UPDATE
+  SET expires_at = EXCLUDED.expires_at, accepted_at = EXCLUDED.accepted_at,
+      revoked_at = EXCLUDED.revoked_at, invited_by_user_id = EXCLUDED.invited_by_user_id;

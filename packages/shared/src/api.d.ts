@@ -1284,7 +1284,17 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List the organization's invitations
+         * @description Returns every invitation row for the org, newest first, with its lifecycle timestamps.
+         *     Gated on `member:invite` — the same permission as the three verbs it exists to serve.
+         *     Reading which addresses are outstanding is only actionable to someone who can resend or
+         *     revoke them, so this deliberately reuses that permission rather than minting a read-only
+         *     one whose grant table would have to answer "who may see who was invited, but do nothing".
+         *     The secret token is NEVER returned: it is shown once, by `createInvitation`.
+         *
+         */
+        get: operations["listInvitations"];
         put?: never;
         /** Invite a user to the organization */
         post: operations["createInvitation"];
@@ -2401,6 +2411,25 @@ export interface components {
         };
         GenericMessage: {
             message: string;
+        };
+        Invitation: {
+            /** Format: uuid */
+            id: string;
+            /** Format: email */
+            email: string;
+            /** @enum {string} */
+            role: "owner" | "admin" | "member";
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            accepted_at?: string | null;
+            /** Format: date-time */
+            revoked_at?: string | null;
+            /** Format: uuid */
+            invited_by_user_id?: string | null;
+            invited_by_email?: string | null;
         };
         InviteCreated: {
             message: string;
@@ -4861,6 +4890,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GenericMessage"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listInvitations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invitations, newest first. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invitation"][];
                 };
             };
             default: components["responses"]["Error"];

@@ -167,6 +167,13 @@ const (
 	IdpSyncHealthProviderMicrosoft IdpSyncHealthProvider = "microsoft"
 )
 
+// Defines values for InvitationRole.
+const (
+	InvitationRoleAdmin  InvitationRole = "admin"
+	InvitationRoleMember InvitationRole = "member"
+	InvitationRoleOwner  InvitationRole = "owner"
+)
+
 // Defines values for InviteRequestRole.
 const (
 	InviteRequestRoleAdmin  InviteRequestRole = "admin"
@@ -930,6 +937,22 @@ type IdpSyncHealth struct {
 
 // IdpSyncHealthProvider defines model for IdpSyncHealth.Provider.
 type IdpSyncHealthProvider string
+
+// Invitation defines model for Invitation.
+type Invitation struct {
+	AcceptedAt      *time.Time          `json:"accepted_at"`
+	CreatedAt       time.Time           `json:"created_at"`
+	Email           openapi_types.Email `json:"email"`
+	ExpiresAt       time.Time           `json:"expires_at"`
+	Id              openapi_types.UUID  `json:"id"`
+	InvitedByEmail  *string             `json:"invited_by_email"`
+	InvitedByUserId *openapi_types.UUID `json:"invited_by_user_id"`
+	RevokedAt       *time.Time          `json:"revoked_at"`
+	Role            InvitationRole      `json:"role"`
+}
+
+// InvitationRole defines model for Invitation.Role.
+type InvitationRole string
 
 // InviteCreated defines model for InviteCreated.
 type InviteCreated struct {
@@ -1969,6 +1992,9 @@ type ClientInterface interface {
 
 	// TriggerIdpSync request
 	TriggerIdpSync(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListInvitations request
+	ListInvitations(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateInvitationWithBody request with any body
 	CreateInvitationWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3213,6 +3239,18 @@ func (c *Client) GetIdpSyncHealth(ctx context.Context, orgId openapi_types.UUID,
 
 func (c *Client) TriggerIdpSync(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewTriggerIdpSyncRequest(c.Server, orgId, provider)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListInvitations(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListInvitationsRequest(c.Server, orgId)
 	if err != nil {
 		return nil, err
 	}
@@ -6800,6 +6838,40 @@ func NewTriggerIdpSyncRequest(server string, orgId openapi_types.UUID, provider 
 	return req, nil
 }
 
+// NewListInvitationsRequest generates requests for ListInvitations
+func NewListInvitationsRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/invitations", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewCreateInvitationRequest calls the generic CreateInvitation builder with application/json body
 func NewCreateInvitationRequest(server string, orgId openapi_types.UUID, body CreateInvitationJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -9689,6 +9761,9 @@ type ClientWithResponsesInterface interface {
 	// TriggerIdpSyncWithResponse request
 	TriggerIdpSyncWithResponse(ctx context.Context, orgId openapi_types.UUID, provider string, reqEditors ...RequestEditorFn) (*TriggerIdpSyncResponse, error)
 
+	// ListInvitationsWithResponse request
+	ListInvitationsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListInvitationsResponse, error)
+
 	// CreateInvitationWithBodyWithResponse request with any body
 	CreateInvitationWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateInvitationResponse, error)
 
@@ -11260,6 +11335,29 @@ func (r TriggerIdpSyncResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r TriggerIdpSyncResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListInvitationsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]Invitation
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListInvitationsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListInvitationsResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -13364,6 +13462,15 @@ func (c *ClientWithResponses) TriggerIdpSyncWithResponse(ctx context.Context, or
 		return nil, err
 	}
 	return ParseTriggerIdpSyncResponse(rsp)
+}
+
+// ListInvitationsWithResponse request returning *ListInvitationsResponse
+func (c *ClientWithResponses) ListInvitationsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListInvitationsResponse, error) {
+	rsp, err := c.ListInvitations(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListInvitationsResponse(rsp)
 }
 
 // CreateInvitationWithBodyWithResponse request with arbitrary body returning *CreateInvitationResponse
@@ -15953,6 +16060,39 @@ func ParseTriggerIdpSyncResponse(rsp *http.Response) (*TriggerIdpSyncResponse, e
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest IdpSyncHealth
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListInvitationsResponse parses an HTTP response from a ListInvitationsWithResponse call
+func ParseListInvitationsResponse(rsp *http.Response) (*ListInvitationsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListInvitationsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []Invitation
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

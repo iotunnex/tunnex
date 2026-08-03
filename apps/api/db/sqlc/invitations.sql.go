@@ -112,20 +112,46 @@ func (q *Queries) GetInvitationByTokenHash(ctx context.Context, tokenHash []byte
 }
 
 const listInvitations = `-- name: ListInvitations :many
-SELECT id, org_id, email, role, token_hash, expires_at, accepted_at, revoked_at, invited_by_user_id, created_at, updated_at FROM invitations
-WHERE org_id = $1
-ORDER BY created_at DESC
+SELECT i.id, i.org_id, i.email, i.role, i.token_hash, i.expires_at, i.accepted_at, i.revoked_at, i.invited_by_user_id, i.created_at, i.updated_at, COALESCE(u.email::text, '')::text AS invited_by_email
+FROM invitations i
+LEFT JOIN users u ON u.id = i.invited_by_user_id
+WHERE i.org_id = $1
+ORDER BY i.created_at DESC
 `
 
-func (q *Queries) ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invitation, error) {
+type ListInvitationsRow struct {
+	ID              uuid.UUID          `json:"id"`
+	OrgID           uuid.UUID          `json:"org_id"`
+	Email           string             `json:"email"`
+	Role            string             `json:"role"`
+	TokenHash       []byte             `json:"token_hash"`
+	ExpiresAt       time.Time          `json:"expires_at"`
+	AcceptedAt      pgtype.Timestamptz `json:"accepted_at"`
+	RevokedAt       pgtype.Timestamptz `json:"revoked_at"`
+	InvitedByUserID pgtype.UUID        `json:"invited_by_user_id"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+	InvitedByEmail  string             `json:"invited_by_email"`
+}
+
+// ⛔ LEFT JOIN, NOT JOIN. invitations.invited_by_user_id is ON DELETE SET NULL, so the inviter
+// can be gone — and an inner join would silently DROP those rows, hiding outstanding invitations
+// precisely because the person who sent them left. That is the failure this endpoint exists to
+// end, so it must not be reintroduced by the join.
+// ⛔ COALESCE, NOT A BARE CAST. `u.email::text` makes sqlc type the column NON-NULLABLE (*string),
+// but a LEFT JOIN against a deleted inviter yields NULL and the scan fails with
+// "cannot scan NULL into *string" — a 500 on the whole list. Caught on the review stack by the
+// fixture row seeded for exactly this case; without that row it would have shipped and broken the
+// first time an inviter was deleted, which is the one moment the list matters most.
+func (q *Queries) ListInvitations(ctx context.Context, orgID uuid.UUID) ([]ListInvitationsRow, error) {
 	rows, err := q.db.Query(ctx, listInvitations, orgID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Invitation{}
+	items := []ListInvitationsRow{}
 	for rows.Next() {
-		var i Invitation
+		var i ListInvitationsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.OrgID,
@@ -138,6 +164,7 @@ func (q *Queries) ListInvitations(ctx context.Context, orgID uuid.UUID) ([]Invit
 			&i.InvitedByUserID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.InvitedByEmail,
 		); err != nil {
 			return nil, err
 		}
