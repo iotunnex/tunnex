@@ -3063,3 +3063,35 @@ question has to be asked per endpoint, not inferred from the count.
 
 **MEASURED SIZE (S14.12): 19 of 80 mutating operations have no web call site; 12 are genuinely unreachable
 capability.** Registered as its own story, not folded.
+
+---
+
+## A MUTATION THAT FAILS TO APPLY PROVES NOTHING — AND LOOKS EXACTLY LIKE ONE THAT WAS CAUGHT
+
+**S14.12 (founder-filed on my own output).** Proving the new `empty_group_members` census, I twice inserted a
+row to break the state, re-seeded, and read the verdict. Both proofs "passed."
+
+**Both inserts had failed.** `group_members.org_id` is `NOT NULL` and I omitted it:
+
+```
+ERROR: null value in column "org_id" of relation "group_members" violates not-null constraint
+```
+
+**The state was never broken, so the census never saw a non-zero.** I had proved that a guard reports success
+when nothing is wrong — which is not a property worth having.
+
+> ### **A FAILED MUTATION AND A CAUGHT MUTATION PRODUCE THE SAME FINAL READING. The guard says "fine" either**
+> ### **way, and the error scrolls past above it — in my case printed on the very line before the result I**
+> ### **then reported.**
+
+**THE CHECK, and it is one extra read:** after applying a mutation and before reading the guard's verdict,
+**confirm the mutation actually changed the subject.** Count the rows. Diff the file. Assert the broken state
+exists. Only then ask the guard.
+
+Re-run with `org_id` supplied: the insert took (`INSERT 0 1`, members `1`), the seed **restored** it to `0`,
+and with the restore removed the census **rejected** — `seed_fixtures_incomplete`, `interns_members: 1`,
+`will NOT render`. **That is the proof; the first two were theatre.**
+
+**SIBLING:** the S14.11 wedge test that failed identically with and without the fix (a nil map, not the
+defect). Same family — *a red for the wrong reason* and *a green for the wrong reason* are the same error with
+opposite signs, and both are caught by asking what the test's subject was actually in.

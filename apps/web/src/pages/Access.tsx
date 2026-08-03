@@ -53,6 +53,8 @@ import {
   flowGraphState,
   flowGraphNote,
   flowLayout,
+  cascadeConfirmCopy,
+  cascadeConfirmSatisfied,
   srcGroupEmptyWarn,
   srcGroupEmptyBadge,
   srcGroupEmptyExplain,
@@ -1415,6 +1417,19 @@ function GroupsResourcesSection({
   // The roster, for the "add a member" picker. A failed read leaves it EMPTY, which hides the picker rather
   // than offering an empty one — the add control is absent, not broken.
   const [orgMembers, setOrgMembers] = useState<Member[]>([]);
+  // ⛔ COUNTS ON EVERY ROW, FETCHED LAZILY, REMEMBERED ONCE KNOWN — founder-ruled, REVERSING the earlier
+  // on-expansion-only ruling, and the reversal has a reason: the earlier argument was REQUEST COST, and
+  // CACHING ANSWERS COST WITHOUT BUYING SILENCE. One fetch per group per session, not per render.
+  //   "0 members" IS THE SINGLE MOST IMPORTANT THING THIS PANEL CAN TELL AN OPERATOR, and hiding it behind an
+  //   expansion hides the exact state src_group_empty exists to warn about.
+  // undefined = not yet fetched (render nothing), null = fetched and FAILED (say so), number = the answer.
+  // ⛔ SAME CASCADE AS A GROUP (dst_resource_id ON DELETE CASCADE), so the same typed guard.
+  const [confirmRes, setConfirmRes] = useState<{ id: string; name: string } | null>(null);
+  const [memberCounts, setMemberCounts] = useState<Map<string, number | null>>(new Map());
+  const noteCount = useCallback(
+    (gid: string, n: number | null) => setMemberCounts((m) => new Map(m).set(gid, n)),
+    [],
+  );
   const [resources, setResources] = useState<Resource[]>([]);
   const [groupsError, setGroupsError] = useState<string | null>(null);
   const [resourcesError, setResourcesError] = useState<string | null>(null);
@@ -1456,6 +1471,19 @@ function GroupsResourcesSection({
     // rather than offering an empty one — an absent control, never a broken one.
     setOrgMembers(mr.ok ? (mr.data as Member[]) : []);
     setGroupsError(gr.ok ? null : gr.error);
+    // One pass over the groups, cached in `memberCounts`. Bounded by group count and done ONCE.
+    if (gr.ok) {
+      void Promise.all(
+        (gr.data as UserGroup[]).map(async (g) => {
+          const r = (await loadOne(() =>
+            api.GET("/api/v1/organizations/{orgId}/groups/{groupId}/members", {
+              params: { path: { orgId, groupId: g.id } },
+            }),
+          )) as Loaded<GroupMember[]>;
+          return [g.id, r.ok ? r.data.length : null] as const;
+        }),
+      ).then((pairs) => setMemberCounts(new Map(pairs)));
+    }
     setResourcesError(resr.ok ? null : resr.error);
     if (gr.ok) setGroups(gr.data as UserGroup[]);
     if (resr.ok) setResources(resr.data as Resource[]);
@@ -1567,6 +1595,8 @@ function GroupsResourcesSection({
                     orgId={orgId}
                     group={g}
                     members={orgMembers}
+                    count={memberCounts.get(g.id)}
+                    onCount={noteCount}
                     canManage={canManage}
                     onDelete={() => delGroup(g.id)}
                     onMembershipChange={onSubjectsChanged}
@@ -1613,7 +1643,7 @@ function GroupsResourcesSection({
                     {canManage && (
                       <Button
                         variant="danger"
-                        onClick={() => delResource(r.id)}
+                        onClick={() => setConfirmRes({ id: r.id, name: r.name })}
                       >
                         Delete
                       </Button>
@@ -1697,6 +1727,18 @@ function GroupsResourcesSection({
           )}
         </div>
       </div>
+      {confirmRes && (
+        <CascadeDeleteModal
+          kind="resource"
+          name={confirmRes.name}
+          onCancel={() => setConfirmRes(null)}
+          onConfirm={() => {
+            const id = confirmRes.id;
+            setConfirmRes(null);
+            void delResource(id);
+          }}
+        />
+      )}
     </Card>
   );
 }
@@ -2085,6 +2127,52 @@ function PostureChecksSection({
   );
 }
 
+// ⛔ ONE TYPED CONFIRM FOR BOTH CASCADING DELETES. Groups and resources have the SAME cascade
+// (ON DELETE CASCADE on src_group_id / dst_group_id / dst_resource_id) and the SAME silence (a 204 with no
+// body), so they get the same guard rather than two that can drift apart.
+function CascadeDeleteModal({
+  kind, name, onCancel, onConfirm,
+}: {
+  kind: "group" | "resource";
+  name: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const copy = cascadeConfirmCopy(kind, name);
+  const ok = cascadeConfirmSatisfied(typed, name);
+  return (
+    <Modal
+      title={copy.title}
+      danger
+      onDismiss={onCancel}
+      actions={
+        <>
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+          {/* The control is DISABLED until the name matches — the guard is the typing, not a second click. */}
+          <Button variant="danger" disabled={!ok} onClick={onConfirm}>
+            Delete {kind}
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm text-slate-300">{copy.body}</p>
+      <div className="mt-3">
+        <Field label={`Type “${copy.typeToConfirm}” to confirm`}>
+          <Input
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            placeholder={copy.typeToConfirm}
+            autoFocus
+          />
+        </Field>
+      </div>
+    </Modal>
+  );
+}
+
 // ── GROUP MEMBERSHIP — the surface for three endpoints that shipped in S7.5.2 with one consumer ──────────
 //
 // `addGroupMember` and `removeGroupMember` have existed since S7.5.2 and the web app has NEVER called them.
@@ -2101,12 +2189,14 @@ function PostureChecksSection({
 // ⛔ AND LAZY COUNTS LOSE THE VISIBLY-EMPTY PROPERTY, which is why `src_group_empty` exists on the RULE ROW —
 // it restores it where the operator's attention already is, at no request cost. Two decisions, one problem.
 function GroupRow({
-  orgId, group, members, canManage, onDelete, onMembershipChange,
+  orgId, group, members, canManage, count, onCount, onDelete, onMembershipChange,
 }: {
   orgId: string;
   group: UserGroup;
   members: Member[];
   canManage: boolean;
+  count: number | null | undefined;
+  onCount: (groupId: string, n: number | null) => void;
   onDelete: () => void;
   onMembershipChange: () => void;
 }) {
@@ -2114,6 +2204,7 @@ function GroupRow({
   // THREE ARMS, as everywhere else: null = not asked, {ok:false} = asked and failed, {ok:true} = the answer.
   const [loaded, setLoaded] = useState<Loaded<GroupMember[]> | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const fetchMembers = useCallback(async () => {
     const r = (await loadOne(() =>
@@ -2122,7 +2213,8 @@ function GroupRow({
       }),
     )) as Loaded<GroupMember[]>;
     setLoaded(r);
-  }, [orgId, group.id]);
+    onCount(group.id, r.ok ? r.data.length : null); // keep the row's cached count in step with a mutation
+  }, [orgId, group.id, onCount]);
 
   const toggle = () => {
     const next = !open;
@@ -2154,18 +2246,23 @@ function GroupRow({
           className="flex-1 text-left hover:text-white"
         >
           {group.name}
-          {/* ⛔ THE COUNT APPEARS ONLY ONCE ASKED. Collapsed shows NOTHING — never a 0 it did not fetch. */}
-          {open && loaded?.ok && (
+          {/* ⛔ RENDERED ON EVERY ROW, collapsed or not — but only once ASKED. `undefined` (not yet fetched)
+              renders NOTHING; it must never become a 0 nobody fetched. A count of 0 is the loudest thing
+              here, so it is styled as a warning rather than as metadata. */}
+          {count === 0 && (
+            <span className="ml-2 text-xs font-semibold text-warn">0 members</span>
+          )}
+          {typeof count === "number" && count > 0 && (
             <span className="ml-2 text-xs text-slate-500">
-              {rows.length === 1 ? "1 member" : `${rows.length} members`}
+              {count === 1 ? "1 member" : `${count} members`}
             </span>
           )}
-          {open && loaded && !loaded.ok && (
+          {count === null && (
             <span className="ml-2 text-xs text-warn">members could not be loaded</span>
           )}
         </button>
         {canManage && (
-          <Button variant="danger" onClick={onDelete}>
+          <Button variant="danger" onClick={() => setConfirming(true)}>
             Delete
           </Button>
         )}
@@ -2231,6 +2328,17 @@ function GroupRow({
             </div>
           )}
         </div>
+      )}
+      {confirming && (
+        <CascadeDeleteModal
+          kind="group"
+          name={group.name}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => {
+            setConfirming(false);
+            onDelete();
+          }}
+        />
       )}
     </li>
   );

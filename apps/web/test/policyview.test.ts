@@ -22,6 +22,8 @@ import {
   flowCrossings,
   flowGlyph,
   flowTag,
+  cascadeConfirmCopy,
+  cascadeConfirmSatisfied,
   srcGroupEmptyWarn,
   srcGroupEmptyBadge,
   srcGroupEmptyExplain,
@@ -1268,5 +1270,35 @@ describe("srcGroupEmptyWarn — the fourth warn kind, admitted by the test that 
     expect(t).toMatch(/matches no device/i);
     expect(t).toMatch(/grants nothing/i);
     expect(t).toMatch(/add members|delete the rule/i);
+  });
+});
+
+describe("cascadeConfirmCopy — names the risk, never a count we do not own", () => {
+  it("⛔ states that rules are DELETED, and never asserts a number", () => {
+    const c = cascadeConfirmCopy("group", "Interns");
+    expect(c.body).toMatch(/deletes every access rule/i);
+    expect(c.body).toMatch(/cannot be undone/i);
+    // NO cascade-preview endpoint exists; a client-computed count would be a second source of truth about
+    // what the server is about to do.
+    expect(c.body).not.toMatch(/\d+ rule/);
+  });
+
+  it("says rules VANISH rather than becoming reviewable-broken — the measured behaviour", () => {
+    // ON DELETE CASCADE: the rows go. An operator who expects orphaned-but-visible rules is wrong.
+    expect(cascadeConfirmCopy("group", "X").body).toMatch(/do not remain/i);
+  });
+
+  it("group and resource differ in the ROLE they name", () => {
+    expect(cascadeConfirmCopy("group", "X").body).toMatch(/source or destination/);
+    expect(cascadeConfirmCopy("resource", "X").body).toMatch(/rule destination/);
+  });
+
+  it("⛔ the typed guard requires an EXACT name — both directions", () => {
+    expect(cascadeConfirmSatisfied("Interns", "Interns")).toBe(true);
+    expect(cascadeConfirmSatisfied("interns", "Interns")).toBe(false);
+    expect(cascadeConfirmSatisfied("Intern", "Interns")).toBe(false);
+    expect(cascadeConfirmSatisfied("", "Interns")).toBe(false);
+    // a trailing space is a typo, not a refusal
+    expect(cascadeConfirmSatisfied("  Interns  ", "Interns")).toBe(true);
   });
 });

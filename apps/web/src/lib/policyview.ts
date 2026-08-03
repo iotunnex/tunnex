@@ -982,3 +982,46 @@ export function srcGroupEmptyExplain(w: GroupEmptyWarn): string | null {
     ? "This rule's source group has no members, so it matches no device and grants nothing. Add members to the group, or delete the rule."
     : null;
 }
+
+// ── CASCADE CONFIRM: NAME THE RISK, NEVER ASSERT A COUNT THE SERVER HAS NOT GIVEN ───────────────────────
+//
+// ⛔ MEASURED, AND IT IS THE MOST DESTRUCTIVE UNGUARDED VERB FOUND IN THIS EPIC:
+//
+//     policy_rules_src_group_id_fkey     ON DELETE CASCADE
+//     policy_rules_dst_group_id_fkey     ON DELETE CASCADE
+//     policy_rules_dst_resource_id_fkey  ON DELETE CASCADE
+//
+// Deleting a group or a resource SILENTLY DELETES EVERY RULE REFERENCING IT. The rules do not orphan and do
+// not compile to nothing — THE ROWS VANISH. `DeleteGroup` authorizes, checks the edition, and deletes; the
+// 204 carries no body, so the server never says how many it took. An operator removing a stale group can
+// destroy access rules they never saw.
+//
+// ⛔ AND WE CANNOT NAME THE COUNT HONESTLY TODAY. The wireframe's pattern is "Removing ap-lan deletes 2 rules
+// referencing it… Counts come from the server's cascade preview." THERE IS NO CASCADE-PREVIEW ENDPOINT
+// (measured: zero operationIds mention it). Computing the count client-side from the loaded rules would be a
+// SECOND SOURCE OF TRUTH about what the server is about to do — wrong the moment two admins act at once, and
+// refused everywhere else this epic (the last-owner 403, the reactive-403 precedent).
+//
+// So: state the RISK, which is certain, and omit the NUMBER, which we do not own. Registered: a server
+// cascade-preview endpoint, after which this copy names counts the server itself computed.
+export function cascadeConfirmCopy(kind: "group" | "resource", name: string): {
+  title: string;
+  body: string;
+  typeToConfirm: string;
+} {
+  const what = kind === "group" ? "group" : "resource";
+  const role = kind === "group" ? "a rule source or destination" : "a rule destination";
+  return {
+    title: `Delete ${what} “${name}”?`,
+    body:
+      `Deleting this ${what} also deletes every access rule that uses it as ${role}. ` +
+      `Those rules are removed outright — they do not remain as broken rules you can review afterwards. ` +
+      `This cannot be undone.`,
+    typeToConfirm: name,
+  };
+}
+
+/** The typed guard: the name must match EXACTLY. Trimmed, because a trailing space is a typo, not a refusal. */
+export function cascadeConfirmSatisfied(typed: string, name: string): boolean {
+  return typed.trim() === name;
+}

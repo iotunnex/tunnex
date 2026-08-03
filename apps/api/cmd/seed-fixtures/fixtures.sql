@@ -520,6 +520,19 @@ ON CONFLICT (id) DO NOTHING;
 -- matches no device when the group has no members, and no surface existed to put anyone in it.
 --
 -- DO NOT "FIX" THIS BY ADDING A MEMBER. The emptiness is the fixture's purpose.
+--
+-- ⛔ AND THE EMPTINESS IS RE-ASSERTED ON EVERY SEED, NOT MERELY CREATED ONCE.
+--
+-- A reviewer exercised the new "Add a member" picker on THIS group during the S14.12 pass — the obvious thing
+-- to try, on the one group that had an add control and no members — and the permanently-reviewable state was
+-- gone in four seconds.
+--
+--   A REVIEWABLE STATE THAT ANYONE CAN DESTROY BY USING THE PRODUCT IS NOT PERMANENTLY REVIEWABLE.
+--   Creating it once is not seeding it; the seed must be RE-RUNNABLE INTO the state it describes, which is
+--   the same law the `ON CONFLICT DO UPDATE` class already carries for time-relative values.
+--
+-- Org-scoped by construction: the group id belongs to exactly one org.
+DELETE FROM group_members WHERE group_id = '01900000-0000-7000-8000-0000000a0004';
 INSERT INTO user_groups (id, org_id, name, description, origin, created_at, updated_at)
 VALUES ('01900000-0000-7000-8000-0000000a0004', '01900000-0000-7000-8000-000000000001',
         'Interns', 'Seeded EMPTY on purpose: the src_group_empty subject. Do not add members.',

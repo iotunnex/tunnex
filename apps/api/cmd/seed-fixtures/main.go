@@ -221,6 +221,29 @@ func main() {
 	//      its ONLY consumer is the founder review. A lenient default therefore preserves exactly the failure
 	//      mode it exists to eliminate — a review of a screen whose severest state is silently absent.
 	//      `TUNNEX_SEED_STRICT=false` is the escape hatch for anyone who wants the SQL half regardless.
+	// ⛔ THE EMPTY GROUP IS A CENSUSED STATE, NOT JUST A SEEDED ROW.
+	//
+	// `Interns` exists so `src_group_empty` has a permanent subject. A reviewer exercised the new
+	// "Add a member" picker on it during the S14.12 pass — the obvious thing to try, on the one group with an
+	// add control and no members — and the state was gone in four seconds. The SQL now deletes its members on
+	// every seed, and this COUNTS the result, because a fixture that merely creates a state cannot tell you
+	// the state survived.
+	//
+	//   A REVIEWABLE STATE THAT ANYONE CAN DESTROY BY USING THE PRODUCT IS NOT PERMANENTLY REVIEWABLE.
+	var emptyGroupMembers int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM group_members WHERE group_id = '01900000-0000-7000-8000-0000000a0004'`,
+	).Scan(&emptyGroupMembers); err != nil {
+		emptyGroupMembers = -1 // unknown; strict below treats it as a failure rather than a pass
+	}
+	if emptyGroupMembers != 0 && os.Getenv("TUNNEX_SEED_STRICT") != "false" {
+		logger.Error("seed_fixtures_incomplete",
+			slog.String("missing", "src_group_empty subject"),
+			slog.Int("interns_members", emptyGroupMembers),
+			slog.String("consequence", "`SOURCE GROUP EMPTY` has no subject and will NOT render on any rule row"))
+		os.Exit(1)
+	}
+
 	if !postureBlocked && os.Getenv("TUNNEX_SEED_STRICT") != "false" {
 		logger.Error("seed_fixtures_incomplete",
 			slog.String("missing", "posture_blocked"),
@@ -235,7 +258,8 @@ func main() {
 		slog.Int("k8s_clusters", clusters), slog.Int("k8s_services", services),
 		slog.Int("policy_rules", rules),
 		// TRUE = the severest posture state exists and the screen can be reviewed against it.
-		slog.Bool("posture_blocked", postureBlocked), slog.Int("user_groups", groups), slog.Int("group_members", members),
+		slog.Bool("posture_blocked", postureBlocked),
+		slog.Int("empty_group_members", emptyGroupMembers), // 0 = the src_group_empty subject is intact slog.Int("user_groups", groups), slog.Int("group_members", members),
 		slog.Int("resources", resources), slog.Int("access_events", accessEvents),
 		slog.Int("cli_credentials", cliCreds), slog.Int("machine_credentials", machineCreds),
 		slog.String("note", "totals as they now EXIST (fixture + make seed), counted after the write; health kinds are DERIVED, not seeded"),
