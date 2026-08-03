@@ -19,8 +19,13 @@ import { HERO_HEADLINE, HERO_SUBHEAD } from "../lib/authhero";
  */
 export function AuthLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-full flex-col">
-      <main className="relative flex flex-1 flex-col lg:flex-row">
+    /* ⛔ THE LOGIN PAGE MUST NOT SCROLL. `min-h-full` lets the content set the height, so the hero
+       column grew past the viewport and the whole page scrolled — on the one screen where there is
+       nothing below the fold to find. `h-dvh` + `overflow-hidden` fixes the frame to the viewport
+       and makes the mesh shrink into whatever is left, which is what a hero should do.
+       `dvh` rather than `vh` because mobile browsers' chrome changes vh mid-scroll. */
+    <div className="flex h-dvh flex-col overflow-hidden">
+      <main className="relative flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* ── HERO ─────────────────────────────────────────────────────────────────────────── */}
         <div
           className="relative hidden min-w-0 flex-1 flex-col overflow-hidden px-10 py-8 lg:flex"
@@ -61,7 +66,9 @@ export function AuthLayout({ children }: { children: ReactNode }) {
         </div>
 
         {/* ── FORM RAIL ────────────────────────────────────────────────────────────────────── */}
-        <div className="flex w-full flex-col justify-center border-white/5 px-6 py-10 lg:w-[420px] lg:shrink-0 lg:border-l">
+        {/* The rail is the ONE thing allowed to scroll, and only if a short viewport forces it —
+            a 2FA step with a recovery warning is taller than a bare sign-in. */}
+        <div className="flex w-full min-h-0 flex-col justify-center overflow-y-auto border-white/5 px-6 py-8 lg:w-[420px] lg:shrink-0 lg:border-l">
           {/* The mark repeats here only where the hero is hidden — otherwise it is duplicated. */}
           <Logo className="mb-6 lg:hidden" />
           <div className="mx-auto w-full max-w-sm">{children}</div>
