@@ -47,9 +47,19 @@ Stories build one at a time, decision-first:
    commit with content behind it, because more work landed after the checkpoint was written and it had to be
    re-pointed (S14.14, then S14.17–19). **Both times the rule was fine and the SEQUENCING was wrong.** A
    procedure gap, not a rule gap, and the fix costs nothing: nothing goes in after the checkpoint except the
-   merge itself. If something must, re-point it in the same breath rather than at merge time. Still carry **both** identifiers — the PR number
-   (survives rebase) and the content-tip sha (identifies the merge unambiguously); it is one commit behind
-   `main`'s literal head **by construction, and that is the point, not a defect**.
+   merge itself. If something must, re-point it in the same breath rather than at merge time. It is one commit
+   behind `main`'s literal head **by construction, and that is the point, not a defect**.
+   ⛔ **THE PR NUMBER IS THE IDENTIFIER; THE SHA IS AN ANNOTATION** (ruled S14.20, from the first merge under
+   this rule). Merge commits are DISABLED on this repo for linear history, so **rebase-merge is the only
+   method available and it re-parents every commit** — the sha written inside the PR is *guaranteed* not to be
+   the sha that lands on `main`. Trees stay byte-identical; shas do not survive. So write the checkpoint as
+   **`PR #<n>`, content tip `<post-merge sha>` (`<pre-merge sha>` pre-merge)** — the pre-merge sha is all that
+   is knowable while the PR is open, and it is recorded AS a pre-merge sha rather than passed off as the
+   merged one. Filling in the post-merge sha is a **docs correction on `main`, never a story commit**, and it
+   is NOT a check bypass: the content it points at was already green under all three required checks.
+   ⚠ **And the check that missed this was correctly run at the wrong subject** — three prior PRs' head shas
+   were confirmed present on `main` unchanged, without confirming those PRs were merged by the same method.
+   A preservation result from an unknown method predicts nothing.
 
 7. **Merge only on explicit in-session sign-off.** A merge instruction executes in the session
    that receives it, or is RE-CONFIRMED at re-entry — a sign-off read out of a summary/handoff
