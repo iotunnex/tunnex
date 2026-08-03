@@ -8,6 +8,7 @@ import {
   type Member,
   type Role,
   type SsoConfigView,
+  type UserGroup,
   type ResizeConflict,
 } from "../lib/api";
 import { relativeAge } from "../lib/format";
@@ -26,6 +27,21 @@ import {
   txtInstruction,
   type DomainClaimState,
 } from "../lib/domainview";
+import {
+  FAIL_STATIC_NOTE,
+  UNMAP_CONSEQUENCES,
+  UNSUPPORTED_NOTE,
+  idpConfigState,
+  idpErrorCopy,
+  idpGate,
+  idpGroupIdHelp,
+  mappedGroups,
+  syncTier,
+  tierCopy,
+  unmapConfirmSatisfied,
+  type IdpConfigState,
+  type IdpHealth,
+} from "../lib/idpsyncview";
 import {
   RESIZE_ATOMIC_NOTE,
   orphanReasonCopy,
@@ -112,6 +128,31 @@ export default function Settings() {
       <div className="mt-6">
         <MfaSettings />
       </div>
+
+      {/* Directory sync renders OUTSIDE the `isAdmin` block, on purpose but NOT because of a
+          live defect — the honest version, after a mutation survivor sent me to measure.
+          Settings gates its org panels on `org:update`; every idp-sync handler gates on
+          `policy:manage`. Today those are held by the same user-assignable roles (owner, admin),
+          so nesting would change nothing observable. `operator` holds policy:manage WITHOUT
+          org:update but is MACHINE-ONLY — `memberships` CHECKs role IN (owner, admin, member),
+          so it never renders a UI and cannot make the difference visible.
+          It is out here so the panel is governed by ONE gate — its own, matching the server —
+          rather than silently ANDed with a different permission that merely happens to coincide.
+          `idpGate` is the authority; a test pins the coincidence so a divergence is loud. */}
+      {org && (
+        <>
+          {PROVIDERS.map((pv) => (
+            <IdpSyncSection
+              key={pv}
+              orgId={org.id}
+              provider={pv}
+              role={myRole}
+              isEnterprise={meta?.edition === "enterprise"}
+              canEdit={emailVerified}
+            />
+          ))}
+        </>
+      )}
 
       {org && !isAdmin && (
         <Card className="mt-6">
@@ -475,6 +516,445 @@ function PoolSection({
       </Card>
     </form>
   );
+}
+
+// IdpSyncSection — directory sync (S14.14). The consuming layer for FIVE endpoints that had
+// ZERO call sites: putIdpSyncConfig, getIdpSyncHealth, triggerIdpSync, mapIdpGroup, unmapIdpGroup.
+//
+// ⛔ GATED ON POLICY PERMISSIONS, NOT ORG ONES — measured from the handlers, not from the screen
+// it lives on. An operator with org:update and without policy:manage sees Settings and does not
+// see this panel, rather than seeing a control that can only ever 403.
+function IdpSyncSection({
+  orgId,
+  provider,
+  role,
+  isEnterprise,
+  canEdit,
+}: {
+  orgId: string;
+  provider: Provider;
+  role: Role | undefined;
+  isEnterprise: boolean;
+  canEdit: boolean;
+}) {
+  const gate = idpGate({ role: role ?? null, isEnterprise });
+  const [state, setState] = useState<IdpConfigState>({ kind: "unknown" });
+  const [groups, setGroups] = useState<UserGroup[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [tenantId, setTenantId] = useState("");
+  const [idpGroupId, setIdpGroupId] = useState("");
+  const [newName, setNewName] = useState("");
+  const [unmapping, setUnmapping] = useState<UserGroup | null>(null);
+  const [confirmText, setConfirmText] = useState("");
+
+  const ready = gate.kind === "ready";
+
+  const load = async (isCancelled: () => boolean) => {
+    const { data, error } = await api.GET(
+      "/api/v1/organizations/{orgId}/idp-sync/{provider}/health",
+      { params: { path: { orgId, provider } } },
+    );
+    if (isCancelled()) return;
+    // ⛔ NOT CONFIGURED IS A STATE; A FAILED READ IS NOT. The server answers 404 with a stable
+    // `idp_sync_not_configured` (service.go:141), so existence is knowable and only a NON-404
+    // failure is `unknown`. Third instance of this shape, first one built right up front.
+    setState(
+      idpConfigState({
+        errorCode: apiErrorCode(error),
+        failed: Boolean(error),
+        health: (data as IdpHealth | undefined) ?? null,
+      }),
+    );
+    const { data: gs } = await api.GET(
+      "/api/v1/organizations/{orgId}/groups",
+      { params: { path: { orgId } } },
+    );
+    if (!isCancelled() && gs) setGroups(gs as UserGroup[]);
+  };
+
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    void load(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId, provider, ready]);
+
+  if (gate.kind === "hidden") return null;
+  if (gate.kind === "upsell")
+    return (
+      <Card className="mt-4">
+        <h2 className="text-sm font-semibold text-slate-300">
+          Directory sync — {providerLabel(provider)}
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Syncing groups from {providerLabel(provider)} is a Tunnex Enterprise
+          feature.
+        </p>
+      </Card>
+    );
+
+  const mapped = mappedGroups(groups, provider);
+  const emptyManual = groups.filter(
+    (g) => (g.origin ?? "manual") === "manual",
+  );
+
+  async function saveConfig(e: FormEvent) {
+    e.preventDefault();
+    setBusy("config");
+    setErr(null);
+    const { error } = await api.PUT(
+      "/api/v1/organizations/{orgId}/idp-sync/{provider}",
+      {
+        params: { path: { orgId, provider } },
+        body: {
+          client_id: clientId,
+          client_secret: clientSecret,
+          tenant_id: tenantId || undefined,
+          enabled: true,
+        },
+      },
+    );
+    setBusy(null);
+    if (error) return setErr(idpErrorCopy(apiErrorCode(error)));
+    setClientSecret(""); // never keep a secret in page state after the write
+    setShowForm(false);
+    await load(() => false);
+  }
+
+  async function trigger() {
+    setBusy("trigger");
+    setErr(null);
+    const { data, error } = await api.POST(
+      "/api/v1/organizations/{orgId}/idp-sync/{provider}/trigger",
+      { params: { path: { orgId, provider } } },
+    );
+    setBusy(null);
+    if (error) return setErr(idpErrorCopy(apiErrorCode(error)));
+    // ⛔ RENDER WHAT THE SERVER RETURNED, NOT "SYNC COMPLETE". Trigger answers with the resulting
+    // HEALTH SNAPSHOT, so a sync that ran and FAILED comes back here as degraded/escalated. A
+    // success toast would state an outcome the response contradicts.
+    if (data) setState({ kind: "configured", health: data as IdpHealth });
+  }
+
+  async function mapGroup(e: FormEvent) {
+    e.preventDefault();
+    setBusy("map");
+    setErr(null);
+    const { error } = await api.POST(
+      "/api/v1/organizations/{orgId}/idp-sync/{provider}/groups",
+      {
+        params: { path: { orgId, provider } },
+        body: { idp_group_id: idpGroupId, name: newName || undefined },
+      },
+    );
+    setBusy(null);
+    if (error) return setErr(idpErrorCopy(apiErrorCode(error)));
+    setIdpGroupId("");
+    setNewName("");
+    await load(() => false);
+  }
+
+  async function unmap(g: UserGroup) {
+    setBusy("unmap");
+    setErr(null);
+    const { error } = await api.DELETE(
+      "/api/v1/organizations/{orgId}/idp-sync/{provider}/groups/{groupId}",
+      { params: { path: { orgId, provider, groupId: g.id } } },
+    );
+    setBusy(null);
+    setUnmapping(null);
+    setConfirmText("");
+    if (error) return setErr(idpErrorCopy(apiErrorCode(error)));
+    await load(() => false);
+  }
+
+  const tier = state.kind === "configured" ? syncTier(state.health) : null;
+  const copy = tier ? tierCopy(tier) : null;
+
+  return (
+    <Card className="mt-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="text-sm font-semibold text-slate-300">
+          Directory sync — {providerLabel(provider)}
+        </h2>
+        {copy && (
+          <span
+            data-testid={`idp-tier-${provider}`}
+            className={
+              "rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold " +
+              (tier === "ok"
+                ? "border-accent-500/40 bg-accent-500/10 text-accent-300"
+                : tier === "degraded"
+                  ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                  : "border-danger/50 bg-danger/10 text-danger")
+            }
+          >
+            {copy.label}
+          </span>
+        )}
+      </div>
+
+      {/* ⛔ THE FOURTH ARM, and only the SERVED payload revealed it: the spec enum lists google
+          for every idp-sync path, but the server answers 400 provider_not_supported. Rendering a
+          Configure form here would offer a credential the server refuses to store. */}
+      {state.kind === "unsupported" && (
+        <p className="mt-1 text-xs text-slate-500">{UNSUPPORTED_NOTE}</p>
+      )}
+
+      {/* ⛔ THE THIRD ARM. A failed read never renders the Configure form — offering it over a
+          live credential is the S14.13 destructive path, and this is the same class. */}
+      {state.kind === "unknown" && (
+        <>
+          <p className="mt-2 text-sm text-slate-400">
+            Directory-sync status unknown — the health read failed, so we cannot
+            tell whether this provider is configured.
+          </p>
+          <Button
+            type="button"
+            className="mt-3"
+            onClick={() => void load(() => false)}
+          >
+            Retry
+          </Button>
+        </>
+      )}
+
+      {state.kind === "unconfigured" && !showForm && (
+        <>
+          <p className="mt-1 text-xs text-slate-500">
+            Not configured. Connect {providerLabel(provider)} to sync directory
+            groups into Tunnex groups.
+          </p>
+          <Button
+            type="button"
+            className="mt-3"
+            disabled={!canEdit}
+            onClick={() => setShowForm(true)}
+          >
+            Configure
+          </Button>
+        </>
+      )}
+
+      {state.kind === "configured" && copy && (
+        <>
+          <p
+            className={
+              "mt-1 text-xs " + (copy.loud ? "text-danger" : "text-slate-500")
+            }
+          >
+            {copy.text}
+          </p>
+          {/* Fail-static is the part a health badge cannot carry: a broken sync KEEPS access. */}
+          <p className="mt-1 text-xs text-slate-500">{FAIL_STATIC_NOTE}</p>
+          {state.health.last_sync_error && (
+            <p className="mt-1 break-all font-mono text-xs text-slate-500">
+              last error: {state.health.last_sync_error}
+            </p>
+          )}
+          <p className="mt-1 text-xs text-slate-600">
+            last successful sync:{" "}
+            {state.health.last_sync_at
+              ? relativeAge(state.health.last_sync_at)
+              : "never"}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              disabled={!canEdit || busy === "trigger"}
+              onClick={() => void trigger()}
+            >
+              {busy === "trigger" ? "Syncing…" : "Sync now"}
+            </Button>
+            <Button
+              type="button"
+              disabled={!canEdit}
+              onClick={() => setShowForm(true)}
+            >
+              Replace credential
+            </Button>
+          </div>
+        </>
+      )}
+
+      {showForm && (
+        <form onSubmit={saveConfig} className="mt-3 space-y-3">
+          {/* ⛔ WRITE-ONLY STATE, NAMED. There is no GET for this config — client_id, tenant and
+              the secret fingerprint come back only from the PUT that wrote them. So the form is
+              never pre-filled from the server and does not pretend to show what is stored. */}
+          <p className="text-xs text-slate-600">
+            Credentials are set, not readable back — this server serves no read
+            for the directory-sync credential, so the fields below always start
+            empty even when a credential is stored.
+          </p>
+          <Field label={`${providerLabel(provider)} directory client ID`}>
+            <Input
+              name={`${provider}-idp-client-id`}
+              autoComplete="off"
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              required
+              disabled={!canEdit}
+            />
+          </Field>
+          <Field label={`${providerLabel(provider)} directory client secret`}>
+            <Input
+              type="password"
+              name={`${provider}-idp-client-secret`}
+              autoComplete="new-password"
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              required
+              disabled={!canEdit}
+              placeholder="••••••••"
+            />
+          </Field>
+          {provider === "microsoft" && (
+            <Field label="Tenant ID (Entra)">
+              <Input
+                name="microsoft-idp-tenant-id"
+                autoComplete="off"
+                value={tenantId}
+                onChange={(e) => setTenantId(e.target.value)}
+                disabled={!canEdit}
+              />
+            </Field>
+          )}
+          <div className="flex gap-2">
+            <Button type="submit" disabled={busy === "config" || !canEdit}>
+              {busy === "config" ? "Saving…" : "Save credential"}
+            </Button>
+            <Button type="button" onClick={() => setShowForm(false)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {state.kind === "configured" && (
+        <div className="mt-4 border-t border-white/5 pt-3">
+          <h3 className="text-xs font-semibold text-slate-400">
+            Synced groups
+          </h3>
+          {mapped.length === 0 ? (
+            <p className="mt-1 text-xs text-slate-600">
+              No directory groups are mapped yet.
+            </p>
+          ) : (
+            <ul className="mt-2 space-y-1">
+              {mapped.map((g) => (
+                <li
+                  key={g.id}
+                  className="flex flex-wrap items-center justify-between gap-2 text-xs"
+                >
+                  <span className="text-slate-300">{g.name}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="font-mono text-slate-600">
+                      {g.idp_group_id}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={!canEdit}
+                      onClick={() => {
+                        setUnmapping(g);
+                        setConfirmText("");
+                      }}
+                      className="rounded border border-danger/40 px-2 py-0.5 text-danger disabled:opacity-50"
+                    >
+                      Un-map
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <form onSubmit={mapGroup} className="mt-3 space-y-2">
+            <Field label="Directory group ID">
+              <Input
+                value={idpGroupId}
+                onChange={(e) => setIdpGroupId(e.target.value)}
+                required
+                disabled={!canEdit}
+              />
+            </Field>
+            {/* No picker is possible: nothing in the spec lists the directory's groups, so a
+                select box would be a control the product cannot populate. Say where to find it. */}
+            <p className="text-xs text-slate-600">{idpGroupIdHelp(provider)}</p>
+            <Field label="New Tunnex group name (optional)">
+              <Input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                disabled={!canEdit}
+                placeholder="defaults to the directory group ID"
+              />
+            </Field>
+            <p className="text-xs text-slate-600">
+              Mapping onto an existing group is only allowed if that group is
+              empty — {emptyManual.length} manual group
+              {emptyManual.length === 1 ? "" : "s"} exist.
+            </p>
+            <Button type="submit" disabled={busy === "map" || !canEdit}>
+              {busy === "map" ? "Mapping…" : "Map group"}
+            </Button>
+          </form>
+        </div>
+      )}
+
+      {/* ⛔ THE UNMAP BLAST RADIUS. Check 7b, one screen over from S14.12's cascade: the verb
+          deletes every member, KEEPS the group, and pushes org-wide — so rules using it survive
+          and match nobody. No NUMBER is shown: the 204 has no body and the server serves no
+          preview, so a client-computed count would be a second source of truth. */}
+      {unmapping && (
+        <div className="mt-3 rounded-lg border border-danger/40 bg-danger/5 p-3">
+          <p className="text-sm text-slate-200">
+            Un-map <span className="font-mono">{unmapping.name}</span>?
+          </p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-400">
+            {UNMAP_CONSEQUENCES.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+          <div className="mt-3 space-y-2">
+            <Field label={`Type ${unmapping.name} to confirm`}>
+              <Input
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+              />
+            </Field>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                disabled={
+                  busy === "unmap" ||
+                  !unmapConfirmSatisfied(confirmText, unmapping.name)
+                }
+                onClick={() => void unmap(unmapping)}
+              >
+                {busy === "unmap" ? "Un-mapping…" : "Un-map group"}
+              </Button>
+              <Button type="button" onClick={() => setUnmapping(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ErrorText>{err}</ErrorText>
+    </Card>
+  );
+}
+
+function providerLabel(p: string): string {
+  return p === "microsoft" ? "Microsoft Entra" : "Google Workspace";
 }
 
 // DomainSection — claim an email domain and verify it by DNS TXT.

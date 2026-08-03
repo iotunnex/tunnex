@@ -137,8 +137,20 @@ describe("Settings — wiring: edition gating (destination: `license`)", () => {
     edition = "open";
     withAuth(<Settings />);
     await waitFor(() => expect(screen.getByText(/Organization/i)).toBeTruthy());
-    expect(screen.queryByText(/Microsoft Entra/i)).toBeNull();
-    expect(screen.queryByText(/Google Workspace/i)).toBeNull();
+    // ⛔ ASSERTS THE PROPERTY, NOT A PROXY STRING. This used to check that "Microsoft Entra"
+    // never appeared — which worked only while those words were unique to the CONFIGURATION
+    // surface. S14.14's directory-sync panel legitimately names the provider in its muted
+    // Enterprise sentence (the established unlock-then-opt-in degradation, the same shape SSO
+    // itself uses), so the old matcher started failing on correct copy.
+    //
+    // What the decide-item actually rules is that no enterprise CONFIGURATION SURFACE exists in
+    // the open edition. So assert that: no credential inputs, and no Configure control.
+    expect(screen.queryByLabelText(/client ID/i)).toBeNull();
+    expect(screen.queryByLabelText(/client secret/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Configure$/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Sync now/i })).toBeNull();
+    // And the degradation is still an Enterprise sentence, not a dead form.
+    expect(screen.queryAllByText(/Tunnex Enterprise|Enterprise feature/i).length).toBeGreaterThan(0);
   });
 
   it("SSO configuration is present in ENTERPRISE — the gate must not be a blanket hide", async () => {

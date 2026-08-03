@@ -578,3 +578,59 @@ ON CONFLICT (id) DO UPDATE
 -- through, and it is the one the destructive fix must render correctly.
 
 COMMIT;
+
+-- ══════════════════════════════════════════════════════════════════════════════════════════════
+-- S14.14 · DIRECTORY SYNC (IdP) — the second unmeasured fixture ZERO, same shape as sso_configs.
+--
+-- `idp_sync_configs` was empty on every stack, so GET …/idp-sync/{provider}/health answered
+-- 404 idp_sync_not_configured for BOTH providers and the CONFIGURED arm — the health tiers, the
+-- synced-group list, the un-map confirm — had never rendered anywhere. Five endpoints with no
+-- call sites AND no data behind them is a surface nobody could review even after building it.
+--
+-- MICROSOFT: configured and DEGRADED ON PURPOSE. `last_sync_ok = false` with a RECENT
+-- `last_sync_at` is what ClassifySyncHealth (enterprise/idpsync/health.go) projects as the
+-- immediate tier: a poll is failing, but the last good sync is inside the 30-minute
+-- EscalationCeiling. Set it further back than 30 minutes and this row renders ESCALATED instead
+-- — the fixture is choosing WHICH tier is reviewable, so the interval is the load-bearing value.
+-- GOOGLE: deliberately absent, so both arms show at once (the S14.13 SSO pattern that worked).
+--
+-- ⚠ secret_sealed is INERT FILLER. The real column holds a sealed blob and the API never returns
+-- it; nothing in the UI reads it, so a fixture must not imply a usable credential exists. The
+-- fields the panel actually renders (client_id, health, timestamps) are the ones made truthful.
+INSERT INTO idp_sync_configs (id, org_id, provider, client_id, secret_sealed, tenant_id, enabled,
+                              last_sync_at, last_sync_ok, last_sync_error, created_at, updated_at)
+VALUES ('01900000-0000-7000-8000-000000070001', '01900000-0000-7000-8000-000000000001',
+        'microsoft', 'acme-directory-sync', '\x00'::bytea,
+        '72f9c1e4-0a3d-4b77-9d21-8e5a6f0b4c13', true,
+        now() - interval '11 minutes', false,
+        'directory request failed: 401 Unauthorized (client secret may have expired)',
+        now() - interval '40 days', now() - interval '11 minutes')
+ON CONFLICT (org_id, provider) DO UPDATE
+  SET client_id       = EXCLUDED.client_id,
+      tenant_id       = EXCLUDED.tenant_id,
+      enabled         = EXCLUDED.enabled,
+      last_sync_at    = EXCLUDED.last_sync_at,
+      last_sync_ok    = EXCLUDED.last_sync_ok,
+      last_sync_error = EXCLUDED.last_sync_error;
+-- ⛔ DO NOT ADD A GOOGLE ROW. Its absence IS the not-configured arm.
+
+-- A mapped group, so the synced-group list and the un-map confirm have a subject. origin and the
+-- two idp_* columns move together — `user_groups_origin_shape` CHECKs exactly that, so a partial
+-- fixture row would be rejected by the database rather than render a half-state.
+INSERT INTO user_groups (id, org_id, name, description, origin, idp_provider, idp_group_id, created_at)
+VALUES ('01900000-0000-7000-8000-0000000a0007', '01900000-0000-7000-8000-000000000001',
+        'Directory · Engineering', 'Synced from Microsoft Entra', 'idp_sync',
+        'microsoft', 'a3f1c7e0-9b24-4d5a-8e13-6c07f2b95d48', now() - interval '40 days')
+ON CONFLICT (id) DO UPDATE
+  SET origin = EXCLUDED.origin, idp_provider = EXCLUDED.idp_provider,
+      idp_group_id = EXCLUDED.idp_group_id;
+
+-- Two members, so un-mapping has something to destroy and the consequence list is not abstract.
+INSERT INTO group_members (org_id, group_id, user_id, origin, created_at)
+-- These two are real fixture members of the demo org: group_members carries a composite FK to
+-- memberships(org_id, user_id), so a user who is not a member is REJECTED rather than orphaned.
+VALUES ('01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000a0007',
+        '01900000-0000-7000-8000-000000000003', 'idp_sync', now() - interval '40 days'),
+       ('01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-0000000a0007',
+        '01900000-0000-7000-8000-0000000b0005', 'idp_sync', now() - interval '40 days')
+ON CONFLICT (group_id, user_id) DO NOTHING;
