@@ -3160,3 +3160,69 @@ greps are correct and they answer different things:
 the gate runs* · *output is not effect* · *an unmatched anchor never ran* · *a mutation that failed to apply
 proves nothing* · **and now: a check is only as good as the subject it was pointed at.** Every one is a proof
 about a subject the proof never touched — but this is the first where the proof itself was flawless.
+
+---
+
+# ⛔ A DIFFERENCE IN SYMPTOM DOES NOT IMPLY A DIFFERENCE IN CAUSE
+
+**S14.13, from the founder's review stack.** Google's OAuth client-ID field was prefilled with the signed-in
+admin's **email** and the secret field with a **saved password**, both in autofill-blue, on a credential
+surface. Microsoft's fields, on the same screen, were clean.
+
+**The reasonable inference — and it was wrong:** *the two must be marked up differently; find the difference.*
+
+**MEASURED: the fields are BYTE-IDENTICAL.** `SsoProvider` renders once per provider from ONE component, so
+there is no markup difference to find. Chrome fills the **first** text+password pair on a page as a login form
+and fills **one pair per page**; `google` is first in `PROVIDERS`. **Microsoft looked immune because it was
+second.**
+
+> ## **TWO INSTANCES OF ONE COMPONENT BEHAVED DIFFERENTLY BECAUSE OF POSITION — AND POSITION IS INVISIBLE**
+> ## **FROM THE MARKUP.** The variable was not in either instance; it was in the ORDER OF THE LIST that
+> ## **renders them, one file away.**
+
+**AND THE COST OF THE WRONG INFERENCE IS NOT A WASTED HOUR — IT IS A FIX THAT MOVES THE BUG.** Annotating only
+the provider that visibly misbehaved would have left the defect intact and handed it to Microsoft the first
+time anyone reordered `PROVIDERS`. **The symptom would have relocated and the diff would have looked like a
+fix.**
+
+**THE MECHANICAL CHECK:**
+
+> ### **WHEN TWO INSTANCES OF THE SAME COMPONENT BEHAVE DIFFERENTLY, DIFF THE INSTANCES FIRST. IF THEY ARE**
+> ### **IDENTICAL, THE CAUSE IS THEIR CONTEXT — ORDER, POSITION, WHAT RENDERED BEFORE THEM — NOT THEIR CODE.**
+
+**And one instance is not a scope.** The founder reported one field on one provider; the CENSUS turned that
+into the real finding — **five password inputs across the app, ZERO `autocomplete` attributes.** The reported
+symptom was the least of it.
+
+## ⛔ AND THE VACUITY FLOOR EARNED ITSELF ON ITS FIRST RUN
+
+The census matcher used `<Input\b([^>]*?)\/>` and found **ZERO password inputs in a tree containing five** —
+because **JSX arrow functions contain `>`** (`onChange={(e) => …}`), so the exclusion class stopped at the
+first `=>`.
+
+> ### **A CENSUS WHOSE MATCHER IS DEFEATED BY THE LANGUAGE IT SCANS REPORTS A CLEAN TREE.**
+
+Without the floor (`expect(total).toBeGreaterThanOrEqual(5)`) every assertion below it would have passed
+against an empty set, and the credential guard would have shipped green and blind.
+
+---
+
+# ⛔ MUTATIONS DETECT VACUOUS TEST *RUNS*, NOT ONLY WEAK ASSERTIONS
+
+**S14.13.** A new Go test was written, run, and reported `ok`. **It had SKIPPED** —
+`set TUNNEX_TEST_DATABASE_URL to run this integration test` — and `go test` reports a skipped package as `ok`.
+
+Nothing in the output was false. Nothing was hidden. **It was caught only because ALL FIVE Go mutations
+survived**, which is impossible for a test that is actually asserting.
+
+> ## **THE MUTATION SWEEP WAS THE INSTRUMENT, NOT A CAREFUL READING OF THE OUTPUT.** *Ran and passed are
+> ## **different claims* was already law; this is the instance where the sweep — not vigilance — is what
+> ## separated them.
+
+**So the sweep has a second job, and it is the more valuable one:** a weak assertion lets *some* mutations
+survive; **a test that never executed lets ALL of them survive.** A 100% survival rate is not a verdict about
+the assertions — **it is a verdict about whether the test ran at all**, and it should be read that way before
+a single assertion is blamed.
+
+**Corollary for the harness:** report survivors as a RATE, not a list. `5 of 5 survived` is a different
+diagnosis from `2 of 5 survived`, and only the first one means *go check that the test executes*.
