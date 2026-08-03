@@ -35,7 +35,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
               "radial-gradient(130% 120% at 12% -5%,#1C1C1C 0%,#141414 48%,#0D0D0D 100%)",
           }}
         >
-          <Logo className="[&>img:first-child]:h-9 [&>img:first-child]:w-9 [&>img:last-child]:h-[18px]" />
+          <Logo size={36} />
 
           <h1 className="mt-7 max-w-xl text-[34px] font-semibold leading-[1.1] tracking-tight text-white">
             {HERO_HEADLINE}
@@ -70,7 +70,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
             a 2FA step with a recovery warning is taller than a bare sign-in. */}
         <div className="flex w-full min-h-0 flex-col justify-center overflow-y-auto border-white/5 px-6 py-8 lg:w-[420px] lg:shrink-0 lg:border-l">
           {/* The mark repeats here only where the hero is hidden — otherwise it is duplicated. */}
-          <Logo className="mb-6 lg:hidden" />
+          <Logo size={30} className="mb-6 lg:hidden" />
           <div className="mx-auto w-full max-w-sm">{children}</div>
         </div>
       </main>

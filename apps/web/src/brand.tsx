@@ -13,21 +13,52 @@ export const PRODUCT_TAGLINE = "self-hosted VPN & Zero Trust";
 /**
  * Logo renders the real mark + wordmark.
  *
- * ⛔ THE BRAND KIT HAS LANDED, so the placeholder this file invited replacing is gone. It was a
- * plain accent square plus the text "tunnex.io" — which is why the mark was MISSING and the type
- * was wrong everywhere the shell renders it, not only on the login page.
+ * ⛔ BOTH DIMENSIONS ARE DERIVED FROM THE ASSETS' TRUE RATIOS, and that is the whole point of this
+ * component. Two ratio bugs shipped before it existed:
  *
- * ⚠ AND `tunnex-wordmark.svg` IS ALREADY THE DARK-BACKGROUND VARIANT: white letters with the red
- * `nexgrad` on "EX". The first attempt applied `filter: invert(1)` to it, which turned the letters
- * black and — the visible symptom — **the red EX cyan**, because inverting #FF5A63 gives roughly
- * #00A59C. There is a separate `tunnex-wordmark-light.svg` (#17171A letters) for light surfaces;
- * neither needs a filter. **A filter that "fixes" a colour is a sign the wrong asset was chosen.**
+ *   · the mark is **577x551 — NOT SQUARE** — and was rendered `h-7 w-7`, squashing it horizontally
+ *   · the wordmark is **792x120 (6.6:1)** and was given a HEIGHT ONLY. Height alone does not hold a
+ *     ratio once the image is a flex child that may grow or shrink, so it stretched — visibly, on
+ *     the widest thing on the page.
+ *
+ * > **A SIZE EXPRESSED AS ONE DIMENSION IS A HOPE ABOUT THE OTHER.** Give both, computed from the
+ * > intrinsic size, and the layout cannot deform the artwork whatever the container does.
+ *
+ * `shrink-0` and `object-contain` are belt-and-braces for the same reason: a flex row is entitled
+ * to compress its children, and an image is not obliged to keep its aspect when it does.
  */
-export function Logo({ className = "" }: { className?: string }) {
+const MARK_RATIO = 577 / 551; // 1.047 — wider than tall, and not by enough to notice until it is wrong
+const WORDMARK_RATIO = 792 / 120; // 6.6
+
+export function Logo({
+  className = "",
+  size = 28,
+}: {
+  className?: string;
+  /** Height of the MARK in px; the wordmark is scaled to sit with it. */
+  size?: number;
+}) {
+  const wordHeight = Math.round(size * 0.54);
   return (
-    <span className={`flex items-center gap-2.5 ${className}`}>
-      <img src={logoUrl} alt="" aria-hidden className="h-7 w-7 rounded-lg" />
-      <img src={wordmarkUrl} alt={PRODUCT_NAME} className="h-[15px]" />
+    <span className={`flex select-none items-center gap-2.5 ${className}`}>
+      <img
+        src={logoUrl}
+        alt=""
+        aria-hidden
+        draggable={false}
+        width={Math.round(size * MARK_RATIO)}
+        height={size}
+        className="shrink-0 rounded-lg object-contain"
+      />
+      <img
+        src={wordmarkUrl}
+        alt={PRODUCT_NAME}
+        draggable={false}
+        width={Math.round(wordHeight * WORDMARK_RATIO)}
+        height={wordHeight}
+        className="shrink-0 object-contain"
+      />
     </span>
   );
 }
+
