@@ -109,6 +109,13 @@ type Device struct {
 	Transport         string             `json:"transport"`
 	ProvisioningMode  string             `json:"provisioning_mode"`
 	ProvisionedRanges []byte             `json:"provisioned_ranges"`
+	// Why this device was revoked: 'cascade' (its gateway was revoked — restorable) or 'deliberate' (an operator revoked this device — never restorable). NULL = revoked before 0059, honestly unknown, treated as NOT restorable (S13.1 D5).
+	RevokedCause *string `json:"revoked_cause"`
+	// The tunnel address baked into this device's ISSUED config, snapshotted at issuance for every provisioning mode. Compared against assigned_ip at read time to derive needs_reexport. NULL = predates 0060, honestly unknown, not reported stale (S13.1 Slice 6).
+	ProvisionedIp     *string `json:"provisioned_ip"`
+	RevokedPrevStatus *string `json:"revoked_prev_status"`
+	// The gateway whose endpoint + public key this device's ISSUED config baked. Compared against node_id at read time to derive needs_reexport for STATIC exports (S13.1 review fold F3).
+	ProvisionedNodeID pgtype.UUID `json:"provisioned_node_id"`
 }
 
 type DeviceHealth struct {
@@ -261,6 +268,14 @@ type Node struct {
 	HubPriority       *int32             `json:"hub_priority"`
 	// Expiry of the currently-issued agent cert. Stamped at enroll/renew from the certificate's own NotAfter. Rows predating migration 0054 carry a BOUND backfilled by 0055 as last_seen_at + CertTTL (an UPPER bound on the true expiry, so it can never false-positive; overwritten by the real value on the next enroll/renew). NULL = never reported, honestly unknown. Past = the agent CANNOT reconnect (S11 WF-S11-6).
 	CertNotAfter pgtype.Timestamptz `json:"cert_not_after"`
+	// base64(SPKI DER) of the public key bound by the current agent certificate, stamped at enroll and renew. Verification material for proof-of-possession re-key (S13.1 D7). NULL = enrolled before 0057 and not yet renewed: PoP cannot recover that node, only a join token can.
+	CertPublicKey *string `json:"cert_public_key"`
+	// SHA-256 of cert_public_key's SPKI DER, lowercase hex. GENERATED from the key so the two cannot drift. The second re-key identifier (S13.1 D10); NOT unique — the lookup refuses on multiple matches.
+	CertKeyFingerprint *string `json:"cert_key_fingerprint"`
+	// When the CURRENT cert_serial was first seen authenticating on the agent channel. NULL = issued but never used, which is the only state the D3 redelivery carve-out authorizes. Cleared by RekeyNode in the same statement that replaces cert_serial (S13.1).
+	CertDeliveredAt pgtype.Timestamptz `json:"cert_delivered_at"`
+	// FALSE only while the CURRENT cert_serial has never authenticated — the only state the D3 redelivery carve-out authorizes. DEFAULT TRUE so any writer that does not know this column (an older control-plane replica mid-roll, or CreateNode) lands in the CLOSED state (S13.1).
+	CertDelivered bool `json:"cert_delivered"`
 }
 
 type NodeJoinToken struct {
@@ -281,6 +296,16 @@ type NodePeerStatus struct {
 	RxBytes         int64              `json:"rx_bytes"`
 	TxBytes         int64              `json:"tx_bytes"`
 	UpdatedAt       time.Time          `json:"updated_at"`
+}
+
+type NodeRekeyChallenge struct {
+	Nonce          []byte             `json:"nonce"`
+	CertSerial     *string            `json:"cert_serial"`
+	CreatedAt      time.Time          `json:"created_at"`
+	ExpiresAt      time.Time          `json:"expires_at"`
+	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
+	Identifier     *string            `json:"identifier"`
+	IdentifierKind string             `json:"identifier_kind"`
 }
 
 type OrgHealthCheck struct {
@@ -322,14 +347,15 @@ type Organization struct {
 }
 
 type OvpnClientCert struct {
-	ID         uuid.UUID          `json:"id"`
-	OrgID      uuid.UUID          `json:"org_id"`
-	DeviceID   uuid.UUID          `json:"device_id"`
-	Serial     string             `json:"serial"`
-	CommonName string             `json:"common_name"`
-	NotAfter   time.Time          `json:"not_after"`
-	IssuedAt   time.Time          `json:"issued_at"`
-	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+	ID           uuid.UUID          `json:"id"`
+	OrgID        uuid.UUID          `json:"org_id"`
+	DeviceID     uuid.UUID          `json:"device_id"`
+	Serial       string             `json:"serial"`
+	CommonName   string             `json:"common_name"`
+	NotAfter     time.Time          `json:"not_after"`
+	IssuedAt     time.Time          `json:"issued_at"`
+	RevokedAt    pgtype.Timestamptz `json:"revoked_at"`
+	RevokedCause *string            `json:"revoked_cause"`
 }
 
 type OvpnCrl struct {

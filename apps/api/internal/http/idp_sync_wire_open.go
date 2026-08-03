@@ -20,4 +20,4 @@ func NewIdpSyncPort(_ *pgxpool.Pool, _ *crypto.Sealer, _ *tenancy.MembershipServ
 }
 
 // StartIdpSyncPoller is a no-op in the open build (nothing to poll).
-func StartIdpSyncPoller(_ context.Context, _ idpSyncPort, _ *slog.Logger) {}
+func StartIdpSyncPoller(_ context.Context, _ idpSyncPort, _ *slog.Logger, _ func() bool) {}

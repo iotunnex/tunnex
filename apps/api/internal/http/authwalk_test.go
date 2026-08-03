@@ -34,6 +34,8 @@ var walkBodies = map[string]string{
 	"createdevice":       `{"name":"walk-device","node_id":"00000000-0000-0000-0000-000000000000"}`,
 	"exportovpnprofile":  `{"name":"walk-ovpn","node_id":"00000000-0000-0000-0000-000000000000"}`,
 	"setovpnenabled":     `{"enabled":true}`,
+	// S13.1 Slice 7: the operator restore is device:restore-gated and still 401s sessionless.
+	"restorenodedevices": `{"target_node_id":"00000000-0000-0000-0000-000000000000"}`,
 	// S5.1 CLI-auth gated ops (cliToken/cliDeviceStart/cliDeviceToken are public).
 	"cliauthorize":     `{"redirect_uri":"http://127.0.0.1:1/callback","code_challenge":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","state":"walk"}`,
 	"clideviceapprove": `{"user_code":"WALK-CODE"}`,

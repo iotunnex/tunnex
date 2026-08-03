@@ -328,16 +328,30 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 		// S9.1 Part-2: record the STATIC provisioning fact + the ranges snapshot baked in, so the
 		// stale-profile surface can later flag "a subnet was added — re-export". Immutable record, in
 		// the same tx as the create (a static device is never silently indistinguishable from managed).
+		// Record what the ISSUED CONFIG baked, for EVERY mode. The ranges snapshot stays static-only (a managed
+		// device polls routes, so nothing baked can go stale), but the ADDRESS is baked by every config — so
+		// recording it only for static exports left managed devices silently excluded from the staleness signal
+		// (S13.1 Slice 6). Same tx as the create: a device is never briefly indistinguishable from one issued
+		// before this existed.
+		mode := "managed"
+		var rj []byte
 		if isStatic {
-			rj, _ := json.Marshal(staticRanges)
-			if e := q.SetDeviceProvisioning(ctx, sqlc.SetDeviceProvisioningParams{
-				ID: dev.ID, ProvisioningMode: "static", ProvisionedRanges: rj,
-			}); e != nil {
-				return e
-			}
-			dev.ProvisioningMode = "static"
-			dev.ProvisionedRanges = rj
+			mode = "static"
+			rj, _ = json.Marshal(staticRanges)
 		}
+		// provisioned_node_id joins the snapshot (F3): the issued config bakes THIS gateway's endpoint and public
+		// key, so a device later re-homed onto another gateway holds a config naming one that will never serve it.
+		nodeSnap := pgtype.UUID{Bytes: [16]byte(dev.NodeID), Valid: true}
+		if e := q.SetDeviceProvisioning(ctx, sqlc.SetDeviceProvisioningParams{
+			ID: dev.ID, ProvisioningMode: mode, ProvisionedRanges: rj, ProvisionedIp: dev.AssignedIp,
+			ProvisionedNodeID: nodeSnap,
+		}); e != nil {
+			return e
+		}
+		dev.ProvisioningMode = mode
+		dev.ProvisionedRanges = rj
+		dev.ProvisionedIp = dev.AssignedIp
+		dev.ProvisionedNodeID = nodeSnap
 		keySource := "client"
 		if oneTimePriv != "" {
 			keySource = "server"

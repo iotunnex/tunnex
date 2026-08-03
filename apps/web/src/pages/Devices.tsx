@@ -10,6 +10,7 @@ import {
   type Org,
 } from "../lib/api";
 import { relativeAge } from "../lib/format";
+import { defaultDeviceNode, selectableNodes } from "../lib/nodepick";
 import {
   Badge,
   Button,
@@ -150,7 +151,16 @@ export default function Devices() {
 
   async function create(e: FormEvent) {
     e.preventDefault();
-    if (!org || nodes.length === 0) return;
+    // ⛔ S13.1 — RE-APPLIED ACROSS THE EPIC 14 REWRITE. The target gateway is chosen by ONE rule
+    // (lib/nodepick), which excludes REVOKED gateways. This was `nodes[0]`, indexing a list that
+    // includes revoked rows ordered by created_at — so on any deployment whose oldest gateway had
+    // been revoked, every new device was homed on a dead one and handed a one-time config that
+    // could never connect. Refusing beats falling back: a one-time secret cannot be re-issued.
+    //
+    // ⚠ THE REWRITE ADDED A THIRD CALL SITE. The fix was written against two; `main` now has three,
+    // and a conflict resolution that took either side wholesale would have dropped it silently.
+    const target = defaultDeviceNode(nodes);
+    if (!org || !target) return;
     setBusy(true);
     setError(null);
     setSecret(null);
@@ -160,7 +170,7 @@ export default function Devices() {
         "/api/v1/organizations/{orgId}/ovpn-profiles",
         {
           params: { path: { orgId: org.id } },
-          body: { name, node_id: nodes[0].id, full_tunnel: fullTunnel },
+          body: { name, node_id: target.id, full_tunnel: fullTunnel },
         },
       );
       setBusy(false);
@@ -185,7 +195,7 @@ export default function Devices() {
         params: { path: { orgId: org.id } },
         body: {
           name,
-          node_id: nodes[0].id,
+          node_id: target.id,
           full_tunnel: fullTunnel,
           provisioning: "static",
         },
@@ -301,7 +311,7 @@ export default function Devices() {
               />
               Full tunnel
             </label>
-            <Button type="submit" disabled={busy || nodes.length === 0}>
+            <Button type="submit" disabled={busy || selectableNodes(nodes).length === 0}>
               {busy
                 ? "Creating…"
                 : kind === "openvpn"
@@ -309,7 +319,9 @@ export default function Devices() {
                   : "Create device"}
             </Button>
           </div>
-          {nodes.length === 0 && (
+          {/* Counts SELECTABLE gateways, not all rows: a fleet whose only gateway is revoked showed no
+              warning at all and offered an enabled button. */}
+          {selectableNodes(nodes).length === 0 && (
             <p className="mt-3 text-xs text-amber-400">
               No gateway node is enrolled yet - enroll one to create devices.
             </p>

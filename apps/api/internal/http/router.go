@@ -94,6 +94,19 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
+	// S13.1 (review #1 + #4): the RE-KEY throttle is registered BEFORE middleware.RealIP, and the order is the
+	// whole fix.
+	//
+	// RealIP OVERWRITES r.RemoteAddr from client-supplied True-Client-IP / X-Real-IP / leftmost X-Forwarded-For.
+	// Registered after it, the throttle keyed on a value the CALLER chooses — so varying one header gave every
+	// request a fresh bucket and the cap never engaged, on an unauthenticated route that performs RSA
+	// verification. chi's own RealIP is deprecated upstream as IP-spoofable for exactly this reason.
+	//
+	// Running before RealIP means the throttle sees the raw peer address, which the caller cannot forge. It also
+	// puts it ahead of the OpenAPI request validator, so a refused request no longer pays a full body decode
+	// first — the amplification the throttle exists to prevent was being spent before the throttle was consulted.
+	r.Use(rekeyOnly(newRekeyThrottle(rekeyAttemptsPerMinute)))
+
 	r.Use(middleware.RealIP)
 	// CORS runs early: it answers cross-origin preflights (OPTIONS) for the
 	// allowlisted desktop origin before auth/validation, and never sends

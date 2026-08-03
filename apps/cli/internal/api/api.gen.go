@@ -608,7 +608,7 @@ type Device struct {
 	LastHandshakeAt  *time.Time         `json:"last_handshake_at,omitempty"`
 	Name             string             `json:"name"`
 
-	// NeedsReexport S9.1 Part-2: true when this device was provisioned from a STATIC profile whose baked site routes no longer match the org's current routed ranges — its exported profile is stale and should be re-exported. Absent/false for managed (polling) devices.
+	// NeedsReexport True when the config this device was ISSUED no longer matches reality, so the user must re-import it. Three causes: (1) its baked site ROUTES no longer match the org's current routed ranges — STATIC exports only, since a managed device polls routes; (2) its baked tunnel ADDRESS is not the device's current address — EVERY mode, including managed, because every issued config embeds an interface address; (3) its baked GATEWAY is not the device's current gateway — STATIC exports only, because a static export is a file that never polls and cannot be re-pointed, whereas a managed device re-homes itself through the dial channel (residual: only when its node is a hub-set member). Reported for all provisioning modes; false when nothing was recorded at issuance (rows predating the address snapshot), because unknown must not be reported as stale. Advisory, never enforcement.
 	NeedsReexport *bool              `json:"needs_reexport,omitempty"`
 	NodeId        openapi_types.UUID `json:"node_id"`
 	Online        *bool              `json:"online,omitempty"`
@@ -1301,6 +1301,47 @@ type RegisterSiteRequest struct {
 	Name string `json:"name"`
 }
 
+// RekeyChallengeRequest defines model for RekeyChallengeRequest.
+type RekeyChallengeRequest struct {
+	// CertSerial Serial of the agent's CURRENT (expired) certificate. NO length or pattern constraint, deliberately and for the same reason key_fingerprint carries none: a schema violation answers 400 where an unknown identifier answers 403, and that difference tells a prober how far they got. The handler validates and returns the UNIFORM refusal. The 64 KiB body cap bounds the request. Keyed on the serial rather than the node name: names are guessable, serials are not, so a name-keyed challenge would be an enumeration oracle (D9).
+	CertSerial *string `json:"cert_serial,omitempty"`
+
+	// KeyFingerprint SHA-256 of the agent's recorded public key (SPKI DER), lowercase hex — the SECOND identifier (D10). Supply EXACTLY ONE of cert_serial or key_fingerprint; supplying both, neither, or a malformed value is refused identically to an unknown identifier, so the endpoint cannot be probed for well-formedness. It exists because a re-key whose RESPONSE is lost leaves the control plane holding a serial the agent never received: the agent's stored serial is stale, and its only durable handle on its own identity is the key material the control plane recorded. No length or pattern constraint here on purpose — a schema violation would answer with 400 where an unknown identifier answers 403, which is a distinction worth denying.
+	KeyFingerprint *string `json:"key_fingerprint,omitempty"`
+}
+
+// RekeyNonce defines model for RekeyNonce.
+type RekeyNonce struct {
+	// Nonce base64 single-use nonce, valid for minutes. Returned regardless of whether the serial is known.
+	Nonce string `json:"nonce"`
+}
+
+// RekeyRequest defines model for RekeyRequest.
+type RekeyRequest struct {
+	AgentVersion string `json:"agent_version"`
+
+	// CertSerial Serial of the certificate being replaced. EXACTLY ONE of cert_serial or key_fingerprint. No length constraint — see RekeyChallengeRequest.
+	CertSerial *string `json:"cert_serial,omitempty"`
+
+	// Csr PEM CSR for the agent's NEW keypair. The old key may be compromised or discarded, so re-key always issues over fresh material.
+	Csr string `json:"csr"`
+
+	// KeyFingerprint SHA-256 of the recorded public key (SPKI DER), lowercase hex. Must match the identifier the challenge was issued for — a nonce is bound to its identifier, so the two cannot be mixed. See RekeyChallengeRequest for why a second identifier exists.
+	KeyFingerprint *string `json:"key_fingerprint,omitempty"`
+
+	// Nonce base64 nonce from /agent/rekey/challenge.
+	Nonce string `json:"nonce"`
+
+	// Signature base64 RSA-PKCS1v15-SHA256 over (nonce || CSR DER), signed by whichever private key the control plane RECORDED for this node — the expired certificate's key when identifying by cert_serial, or the key named by key_fingerprint. Binding to the CSR is required: without it a captured proof pairs with an attacker's own CSR.
+	Signature string `json:"signature"`
+}
+
+// RekeyResponse defines model for RekeyResponse.
+type RekeyResponse struct {
+	CaPem   string `json:"ca_pem"`
+	CertPem string `json:"cert_pem"`
+}
+
 // ResizeConflict defines model for ResizeConflict.
 type ResizeConflict struct {
 	OrphanCount int      `json:"orphan_count"`
@@ -1335,6 +1376,29 @@ type ResourceRequest struct {
 
 // ResourceRequestProtocol defines model for ResourceRequest.Protocol.
 type ResourceRequestProtocol string
+
+// RestoreNodeDevicesRequest defines model for RestoreNodeDevicesRequest.
+type RestoreNodeDevicesRequest struct {
+	// TargetNodeId The LIVE gateway the restored devices are homed to. Required rather than defaulted: a revoked gateway is never active again, so there is no sane default, and silently restoring onto the dead node would produce active devices pointing at a gateway that will never serve them.
+	TargetNodeId openapi_types.UUID `json:"target_node_id"`
+}
+
+// RestoreDevicesResult defines model for RestoreNodeDevicesResponse.
+type RestoreDevicesResult struct {
+	Devices []struct {
+		AssignedIp         string             `json:"assigned_ip"`
+		Id                 openapi_types.UUID `json:"id"`
+		KeptAddress        bool               `json:"kept_address"`
+		Name               string             `json:"name"`
+		PreviousAssignedIp *string            `json:"previous_assigned_ip,omitempty"`
+	} `json:"devices"`
+
+	// Readdressed How many could NOT reclaim their original address. Each of those users must re-import their config; the device list surfaces it as needs_reexport.
+	Readdressed int `json:"readdressed"`
+
+	// Restored How many devices came back.
+	Restored int `json:"restored"`
+}
 
 // RouteLANRequest defines model for RouteLANRequest.
 type RouteLANRequest struct {
@@ -1539,6 +1603,12 @@ type ListRoutedRangesParams struct {
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
 type EnrollAgentJSONRequestBody = EnrollRequest
 
+// RekeyAgentJSONRequestBody defines body for RekeyAgent for application/json ContentType.
+type RekeyAgentJSONRequestBody = RekeyRequest
+
+// RekeyChallengeJSONRequestBody defines body for RekeyChallenge for application/json ContentType.
+type RekeyChallengeJSONRequestBody = RekeyChallengeRequest
+
 // CliAuthorizeJSONRequestBody defines body for CliAuthorize for application/json ContentType.
 type CliAuthorizeJSONRequestBody = CliAuthorizeRequest
 
@@ -1643,6 +1713,9 @@ type IssueJoinTokenJSONRequestBody = JoinTokenRequest
 
 // SetHubPriorityJSONRequestBody defines body for SetHubPriority for application/json ContentType.
 type SetHubPriorityJSONRequestBody = HubPriorityRequest
+
+// RestoreNodeDevicesJSONRequestBody defines body for RestoreNodeDevices for application/json ContentType.
+type RestoreNodeDevicesJSONRequestBody = RestoreNodeDevicesRequest
 
 // ExportOVPNProfileJSONRequestBody defines body for ExportOVPNProfile for application/json ContentType.
 type ExportOVPNProfileJSONRequestBody = ExportOVPNProfileRequest
@@ -1769,6 +1842,16 @@ type ClientInterface interface {
 	EnrollAgentWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	EnrollAgent(ctx context.Context, body EnrollAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RekeyAgentWithBody request with any body
+	RekeyAgentWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RekeyAgent(ctx context.Context, body RekeyAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RekeyChallengeWithBody request with any body
+	RekeyChallengeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RekeyChallenge(ctx context.Context, body RekeyChallengeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CliAuthorizeWithBody request with any body
 	CliAuthorizeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -2092,6 +2175,11 @@ type ClientInterface interface {
 
 	SetHubPriority(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body SetHubPriorityJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RestoreNodeDevicesWithBody request with any body
+	RestoreNodeDevicesWithBody(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RestoreNodeDevices(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body RestoreNodeDevicesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// RevokeNode request
 	RevokeNode(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -2244,6 +2332,54 @@ func (c *Client) EnrollAgentWithBody(ctx context.Context, contentType string, bo
 
 func (c *Client) EnrollAgent(ctx context.Context, body EnrollAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewEnrollAgentRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RekeyAgentWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRekeyAgentRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RekeyAgent(ctx context.Context, body RekeyAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRekeyAgentRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RekeyChallengeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRekeyChallengeRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RekeyChallenge(ctx context.Context, body RekeyChallengeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRekeyChallengeRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3682,6 +3818,30 @@ func (c *Client) SetHubPriority(ctx context.Context, orgId openapi_types.UUID, n
 	return c.Client.Do(req)
 }
 
+func (c *Client) RestoreNodeDevicesWithBody(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRestoreNodeDevicesRequestWithBody(c.Server, orgId, nodeId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RestoreNodeDevices(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body RestoreNodeDevicesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRestoreNodeDevicesRequest(c.Server, orgId, nodeId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) RevokeNode(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRevokeNodeRequest(c.Server, orgId, nodeId)
 	if err != nil {
@@ -4315,6 +4475,86 @@ func NewEnrollAgentRequestWithBody(server string, contentType string, body io.Re
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/agent/enroll")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewRekeyAgentRequest calls the generic RekeyAgent builder with application/json body
+func NewRekeyAgentRequest(server string, body RekeyAgentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRekeyAgentRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRekeyAgentRequestWithBody generates requests for RekeyAgent with any type of body
+func NewRekeyAgentRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/agent/rekey")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewRekeyChallengeRequest calls the generic RekeyChallenge builder with application/json body
+func NewRekeyChallengeRequest(server string, body RekeyChallengeJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRekeyChallengeRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRekeyChallengeRequestWithBody generates requests for RekeyChallenge with any type of body
+func NewRekeyChallengeRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/agent/rekey/challenge")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -7937,6 +8177,60 @@ func NewSetHubPriorityRequestWithBody(server string, orgId openapi_types.UUID, n
 	return req, nil
 }
 
+// NewRestoreNodeDevicesRequest calls the generic RestoreNodeDevices builder with application/json body
+func NewRestoreNodeDevicesRequest(server string, orgId openapi_types.UUID, nodeId openapi_types.UUID, body RestoreNodeDevicesJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRestoreNodeDevicesRequestWithBody(server, orgId, nodeId, "application/json", bodyReader)
+}
+
+// NewRestoreNodeDevicesRequestWithBody generates requests for RestoreNodeDevices with any type of body
+func NewRestoreNodeDevicesRequestWithBody(server string, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "nodeId", runtime.ParamLocationPath, nodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/nodes/%s/restore-devices", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewRevokeNodeRequest generates requests for RevokeNode
 func NewRevokeNodeRequest(server string, orgId openapi_types.UUID, nodeId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -9538,6 +9832,16 @@ type ClientWithResponsesInterface interface {
 
 	EnrollAgentWithResponse(ctx context.Context, body EnrollAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*EnrollAgentResponse, error)
 
+	// RekeyAgentWithBodyWithResponse request with any body
+	RekeyAgentWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RekeyAgentResponse, error)
+
+	RekeyAgentWithResponse(ctx context.Context, body RekeyAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*RekeyAgentResponse, error)
+
+	// RekeyChallengeWithBodyWithResponse request with any body
+	RekeyChallengeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RekeyChallengeResponse, error)
+
+	RekeyChallengeWithResponse(ctx context.Context, body RekeyChallengeJSONRequestBody, reqEditors ...RequestEditorFn) (*RekeyChallengeResponse, error)
+
 	// CliAuthorizeWithBodyWithResponse request with any body
 	CliAuthorizeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CliAuthorizeResponse, error)
 
@@ -9860,6 +10164,11 @@ type ClientWithResponsesInterface interface {
 
 	SetHubPriorityWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body SetHubPriorityJSONRequestBody, reqEditors ...RequestEditorFn) (*SetHubPriorityResponse, error)
 
+	// RestoreNodeDevicesWithBodyWithResponse request with any body
+	RestoreNodeDevicesWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RestoreNodeDevicesResponse, error)
+
+	RestoreNodeDevicesWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body RestoreNodeDevicesJSONRequestBody, reqEditors ...RequestEditorFn) (*RestoreNodeDevicesResponse, error)
+
 	// RevokeNodeWithResponse request
 	RevokeNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RevokeNodeResponse, error)
 
@@ -10015,6 +10324,52 @@ func (r EnrollAgentResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r EnrollAgentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RekeyAgentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *RekeyResponse
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r RekeyAgentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RekeyAgentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RekeyChallengeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *RekeyNonce
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r RekeyChallengeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RekeyChallengeResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -11931,6 +12286,29 @@ func (r SetHubPriorityResponse) StatusCode() int {
 	return 0
 }
 
+type RestoreNodeDevicesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *RestoreDevicesResult
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r RestoreNodeDevicesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RestoreNodeDevicesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type RevokeNodeResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -12741,6 +13119,40 @@ func (c *ClientWithResponses) EnrollAgentWithResponse(ctx context.Context, body 
 		return nil, err
 	}
 	return ParseEnrollAgentResponse(rsp)
+}
+
+// RekeyAgentWithBodyWithResponse request with arbitrary body returning *RekeyAgentResponse
+func (c *ClientWithResponses) RekeyAgentWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RekeyAgentResponse, error) {
+	rsp, err := c.RekeyAgentWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRekeyAgentResponse(rsp)
+}
+
+func (c *ClientWithResponses) RekeyAgentWithResponse(ctx context.Context, body RekeyAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*RekeyAgentResponse, error) {
+	rsp, err := c.RekeyAgent(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRekeyAgentResponse(rsp)
+}
+
+// RekeyChallengeWithBodyWithResponse request with arbitrary body returning *RekeyChallengeResponse
+func (c *ClientWithResponses) RekeyChallengeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RekeyChallengeResponse, error) {
+	rsp, err := c.RekeyChallengeWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRekeyChallengeResponse(rsp)
+}
+
+func (c *ClientWithResponses) RekeyChallengeWithResponse(ctx context.Context, body RekeyChallengeJSONRequestBody, reqEditors ...RequestEditorFn) (*RekeyChallengeResponse, error) {
+	rsp, err := c.RekeyChallenge(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRekeyChallengeResponse(rsp)
 }
 
 // CliAuthorizeWithBodyWithResponse request with arbitrary body returning *CliAuthorizeResponse
@@ -13779,6 +14191,23 @@ func (c *ClientWithResponses) SetHubPriorityWithResponse(ctx context.Context, or
 	return ParseSetHubPriorityResponse(rsp)
 }
 
+// RestoreNodeDevicesWithBodyWithResponse request with arbitrary body returning *RestoreNodeDevicesResponse
+func (c *ClientWithResponses) RestoreNodeDevicesWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RestoreNodeDevicesResponse, error) {
+	rsp, err := c.RestoreNodeDevicesWithBody(ctx, orgId, nodeId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRestoreNodeDevicesResponse(rsp)
+}
+
+func (c *ClientWithResponses) RestoreNodeDevicesWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body RestoreNodeDevicesJSONRequestBody, reqEditors ...RequestEditorFn) (*RestoreNodeDevicesResponse, error) {
+	rsp, err := c.RestoreNodeDevices(ctx, orgId, nodeId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRestoreNodeDevicesResponse(rsp)
+}
+
 // RevokeNodeWithResponse request returning *RevokeNodeResponse
 func (c *ClientWithResponses) RevokeNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RevokeNodeResponse, error) {
 	rsp, err := c.RevokeNode(ctx, orgId, nodeId, reqEditors...)
@@ -14238,6 +14667,72 @@ func ParseEnrollAgentResponse(rsp *http.Response) (*EnrollAgentResponse, error) 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest EnrollResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRekeyAgentResponse parses an HTTP response from a RekeyAgentWithResponse call
+func ParseRekeyAgentResponse(rsp *http.Response) (*RekeyAgentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RekeyAgentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RekeyResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRekeyChallengeResponse parses an HTTP response from a RekeyChallengeWithResponse call
+func ParseRekeyChallengeResponse(rsp *http.Response) (*RekeyChallengeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RekeyChallengeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RekeyNonce
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -16861,6 +17356,39 @@ func ParseSetHubPriorityResponse(rsp *http.Response) (*SetHubPriorityResponse, e
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRestoreNodeDevicesResponse parses an HTTP response from a RestoreNodeDevicesWithResponse call
+func ParseRestoreNodeDevicesResponse(rsp *http.Response) (*RestoreNodeDevicesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RestoreNodeDevicesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RestoreDevicesResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

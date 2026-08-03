@@ -27,6 +27,9 @@ type FleetHealthFunc func() map[nodes.PolicyDegradedKind]int
 type Collector struct {
 	health FleetHealthFunc
 	desc   *prometheus.Desc
+	// role reports whether THIS replica currently holds scheduler leadership. nil → the series is not emitted.
+	role     func() bool
+	roleDesc *prometheus.Desc
 }
 
 // NewCollector builds the fleet collector. health may be nil (then every kind reports 0 — an honest
@@ -34,6 +37,15 @@ type Collector struct {
 func NewCollector(health FleetHealthFunc) *Collector {
 	return &Collector{
 		health: health,
+		roleDesc: prometheus.NewDesc(
+			"tunnex_scheduler_leader",
+			"1 if this control-plane replica currently holds scheduler leadership, 0 if not. ALERT ON THE SUM "+
+				"BEING ZERO across replicas: leaderlessness is the design's chosen SAFE failure direction and was "+
+				"also its invisible one — nothing ticks, and every replica answers 200 \"ok follower\", which is a "+
+				"documented healthy state. A stranded advisory lock or a saturated pool stops hub failover "+
+				"promotion, CRL refresh, retention sweeps and re-key challenge pruning indefinitely with no signal.",
+			nil, nil,
+		),
 		desc: prometheus.NewDesc(
 			"tunnex_gateway_policy_health",
 			"Number of gateways in each policy-health kind. Kinds are the product's own health vocabulary "+
@@ -43,7 +55,14 @@ func NewCollector(health FleetHealthFunc) *Collector {
 	}
 }
 
-func (c *Collector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+// SetRole wires the leadership gauge (review #6). Separate from NewCollector so the elector, which is built later
+// in startup, can be attached without reordering construction.
+func (c *Collector) SetRole(fn func() bool) { c.role = fn }
+
+func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.desc
+	ch <- c.roleDesc
+}
 
 // Collect emits ONE SERIES PER KIND, ranging over nodes.AllKinds() — so a kind with zero gateways reports 0
 // rather than vanishing. That matters twice over: an absent series is indistinguishable from a scrape
@@ -53,6 +72,16 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	var counts map[nodes.PolicyDegradedKind]int
 	if c.health != nil {
 		counts = c.health()
+	}
+	// Emitted whether or not this replica leads, and emitted as 0 rather than omitted when it does not — an absent
+	// series is indistinguishable from a scrape failure, which is the same reasoning as the per-kind series below.
+	// Summing it across replicas is how an operator sees "nobody leads", which nothing surfaced before.
+	if c.role != nil {
+		lead := 0.0
+		if c.role() {
+			lead = 1
+		}
+		ch <- prometheus.MustNewConstMetric(c.roleDesc, prometheus.GaugeValue, lead)
 	}
 	for _, kind := range nodes.AllKinds() {
 		ch <- prometheus.MustNewConstMetric(
@@ -65,10 +94,14 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 // goroutines, fds, CPU) — the baseline an operator needs to answer "is the control plane itself healthy",
 // which is half of what this endpoint exists for. A dedicated registry (not the global default) keeps the
 // exposed set explicit and testable.
-func NewRegistry(health FleetHealthFunc) *prometheus.Registry {
+// role may be nil; when supplied it emits tunnex_scheduler_leader so an operator can alert on the sum being zero
+// across replicas (review #6 — leaderlessness was the safe failure direction and the invisible one).
+func NewRegistry(health FleetHealthFunc, role func() bool) *prometheus.Registry {
+	c := NewCollector(health)
+	c.SetRole(role)
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
-		NewCollector(health),
+		c,
 		prometheus.NewGoCollector(),
 		prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
 	)

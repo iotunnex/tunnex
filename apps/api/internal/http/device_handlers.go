@@ -35,9 +35,12 @@ func (s apiServer) ListDevices(ctx context.Context, req api.ListDevicesRequestOb
 	if err != nil {
 		return nil, err
 	}
-	// S9.1 Part-2 stale-profile surface: a static-provisioned device whose baked ranges no longer match
-	// the org's CURRENT routed ranges needs re-export. Fetch the current ranges ONCE (best-effort — a
-	// fault leaves the flag unset, never fails the list; the stale surface is advisory, not enforcement).
+	// Stale-profile surface: an issued config that no longer matches reality needs re-import. TWO causes
+	// (devices.ProfileStale) — baked site ranges for STATIC exports, and the tunnel ADDRESS for every mode.
+	// The address half is Slice 6: it was missing entirely, so a re-addressed device (cascade restore onto a
+	// fresh address, Slice 5) rendered exactly as clean as one that kept its address, and its user would have
+	// found out by failing to connect. Fetch the current ranges ONCE (best-effort — a fault leaves ranges
+	// uncompared, never fails the list; the surface is advisory, not enforcement).
 	var current []string
 	if s.sites != nil {
 		current, _ = s.sites.ListRoutedRanges(ctx, req.OrgId)
@@ -48,10 +51,12 @@ func (s apiServer) ListDevices(ctx context.Context, req api.ListDevicesRequestOb
 			d.Health = nil // open build: never surface leftover enterprise posture rows
 		}
 		ad := toAPIDeviceWithStatus(d)
-		if d.Device.ProvisioningMode == "static" {
-			stale := devices.RangesStale(d.Device.ProvisionedRanges, current)
-			ad.NeedsReexport = &stale
-		}
+		// Computed for EVERY mode now, not just static — the mode discrimination lives inside ProfileStale,
+		// where the ranges half stays static-only and the address half does not. Gating out here is what hid
+		// managed devices from the signal.
+		stale := devices.ProfileStale(d.Device.ProvisioningMode, d.Device.ProvisionedRanges, current,
+			d.Device.ProvisionedIp, d.Device.AssignedIp, d.Device.ProvisionedNodeID, d.Device.NodeID)
+		ad.NeedsReexport = &stale
 		out = append(out, ad)
 	}
 	return api.ListDevices200JSONResponse{

@@ -7,6 +7,13 @@
 > Both items are **decide-items awaiting a commit-one**. Neither has been ruled. A future session reading this
 > file has a scope inventory and a question list — **it does not have permission to write code against it.**
 >
+> **Item A REVERSES A LOCKED DECISION** (`PLAN.md`: *"React + Vite + Tailwind SPA; same bundle reused by the
+> Electron renderer"*). It is recorded as a decide-item, **not as a ruling** — the founder wants the split
+> considered, and reversing a lock is exactly the kind of thing that must be argued on paper first.
+
+**SOURCE ARTIFACT:** the Claude Design wireframe — 12 dashboard screens plus a desktop-client section — **held by
+the founder**, not in this repo. Anything below that cannot be traced to the wireframe or to shipped code is
+noted as such.
 > **ITEM A IS NOW RULED (2026-08-01) — see its section. ITEM B REMAINS A DECIDE-ITEM.**
 >
 > Item A reversed a locked decision (`PLAN.md`: *"React + Vite + Tailwind SPA; same bundle reused by the
@@ -111,6 +118,22 @@ Claimed backing: S6.3 (helper + kill-switch) · S6.4 (revocation-aware teardown,
 either cut or explicitly marked roadmap. A UI that can draw a state the product cannot produce is the
 render-floor violation this repo already has a law for.
 
+## OPEN QUESTIONS — the founder answers these at commit-one
+
+1. **Does the client show ANY admin surface, or is it connect-only?**
+2. **If an admin uses the desktop app, do they get the dashboard, or does it open the browser?**
+3. **Does the client keep the SPA's component library, or get its own?**
+
+## COST — price it before ruling
+
+`packages/shared` holds **generated types only** today. Any screen both products need either **lives twice** or
+**moves into a shared package** — a real refactor, not a file move. Neither branch is free and the estimate
+belongs in the commit-one paper, not after.
+
+## ORDERING — why this is ruled FIRST
+
+**Item A must be ruled BEFORE the redesign's screen list is fixed.** If the client splits, the dashboard
+redesign does not need to accommodate it — and **screens do not get designed twice.**
 ## ✅ RULED — 2026-08-01. THE THREE QUESTIONS ARE ANSWERED. THESE ARE DECISIONS, NOT OPTIONS.
 
 ### A1 — THE DESKTOP CLIENT IS **CONNECT-ONLY**
@@ -170,6 +193,8 @@ branch (hoisting a shared component library serving two different interaction mo
 
 ## Scope
 
+**12 screens:** overview · gateways · sites · access · devices · users · flows · audit · cli · settings · k8s ·
+ops. **Plus:** a command palette · edition/role toggles · density modes · toasts with undo.
 **17 screens, corrected by measurement** (the earlier figure of 12 came from the props script and omitted
 `subnets`):
 
@@ -204,6 +229,10 @@ This is the reason it is worth building from rather than restarting:
 
 ## COMMIT-ONE DECIDE-ITEMS — in the order they constrain each other
 
+### 1. RE-SKIN or RE-ARCHITECTURE
+
+New tokens over existing components, or a new component model? **Tenfold cost difference, and it decides
+everything below it.** Rule this first.
 ### ✅ 1. RULED 2026-08-01 — **IT IS A RE-ARCHITECTURE, NOT A RE-SKIN**
 
 **Measured from the committed artifact, not judged by eye — and RE-MEASURED in-repo rather than accepted.**

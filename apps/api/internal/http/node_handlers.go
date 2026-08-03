@@ -2,14 +2,18 @@ package http
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
+	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
@@ -122,6 +126,60 @@ func (s apiServer) RevokeNode(ctx context.Context, req api.RevokeNodeRequestObje
 	}, nil
 }
 
+// RestoreNodeDevices POST /api/v1/organizations/{orgId}/nodes/{nodeId}/restore-devices (S13.1 Slice 7).
+//
+// THE REACHABLE TRIGGER. Revoking a gateway cascade-revokes every device homed on it, and re-key REFUSES a revoked
+// node (D3) — so before this endpoint the restore code existed with nothing able to reach it. A human with
+// device:restore names the dead gateway and the live replacement, and the act is audited whether or not anything
+// came back.
+//
+// device:restore rather than org:update (which revokes a node): granting the power to take access away must not
+// silently grant the power to hand it back.
+func (s apiServer) RestoreNodeDevices(ctx context.Context, req api.RestoreNodeDevicesRequestObject) (api.RestoreNodeDevicesResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermDeviceRestore); err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	p, _ := authctx.PrincipalFrom(ctx)
+	res, err := s.devices.RestoreCascadedDevicesByOperator(ctx, p.UserID, req.OrgId, req.NodeId, req.Body.TargetNodeId)
+	switch {
+	case errors.Is(err, devices.ErrRestoreSourceUnknown):
+		return nil, apierr.NotFound("node_not_found", err.Error())
+	case errors.Is(err, devices.ErrRestoreTargetUnusable):
+		return nil, apierr.BadRequest("invalid_target_node", err.Error())
+	case err != nil:
+		return nil, err
+	}
+
+	// api.RestoreDevicesResult — the schema is RestoreNodeDevicesResponse but carries x-go-name, because the
+	// bare name collides with the wrapper oapi-codegen derives for operationId `restoreNodeDevices` and broke
+	// apps/cli's compilation (2026-08-01). Five sibling schemas carry the same escape.
+	body := api.RestoreDevicesResult{Restored: len(res)}
+	for _, r := range res {
+		if !r.KeptAddress {
+			body.Readdressed++
+		}
+		entry := struct {
+			AssignedIp         string             `json:"assigned_ip"`
+			Id                 openapi_types.UUID `json:"id"`
+			KeptAddress        bool               `json:"kept_address"`
+			Name               string             `json:"name"`
+			PreviousAssignedIp *string            `json:"previous_assigned_ip,omitempty"`
+		}{AssignedIp: r.NewIP, Id: r.DeviceID, KeptAddress: r.KeptAddress, Name: r.Name}
+		if !r.KeptAddress && r.OldIP != "" {
+			old := r.OldIP
+			entry.PreviousAssignedIp = &old
+		}
+		body.Devices = append(body.Devices, entry)
+	}
+	return api.RestoreNodeDevices200JSONResponse{
+		Body:    body,
+		Headers: api.RestoreNodeDevices200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
 func toAPINode(n sqlc.Node) api.Node {
 	out := api.Node{
 		Id:           n.ID,
@@ -139,4 +197,64 @@ func toAPINode(n sqlc.Node) api.Node {
 		out.SiteId = &sid
 	}
 	return out
+}
+
+// RekeyChallenge POST /api/v1/agent/rekey/challenge (public — see the paper's D8 statement).
+//
+// Mints a single-use nonce for an IDENTIFIER WITHOUT checking that it is known. That absence is the anti-enumeration
+// property (D9): a challenge that succeeded only for real identifiers would make them probeable one request at a
+// time. An unknown identifier fails at SUBMIT, with the same uniform refusal as every other failure.
+//
+// TWO IDENTIFIERS (D10), and a malformed or contradictory pair is refused with nodes.ErrRekeyRefused — the SAME
+// answer as an unknown identifier — rather than with a 400. A caller who could tell "your fingerprint is the wrong
+// shape" from "no node has that fingerprint" learns the shape, and an endpoint that answers questions gets asked.
+func (s apiServer) RekeyChallenge(ctx context.Context, req api.RekeyChallengeRequestObject) (api.RekeyChallengeResponseObject, error) {
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	ident, ok := nodes.ParseRekeyIdentifier(deref(req.Body.CertSerial), deref(req.Body.KeyFingerprint))
+	if !ok {
+		return nil, nodes.ErrRekeyRefused
+	}
+	nonce, err := s.nodes.IssueRekeyChallenge(ctx, ident)
+	if err != nil {
+		return nil, err
+	}
+	return api.RekeyChallenge200JSONResponse{
+		Body:    api.RekeyNonce{Nonce: base64.StdEncoding.EncodeToString(nonce)},
+		Headers: api.RekeyChallenge200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
+// RekeyAgent POST /api/v1/agent/rekey (public — the entire defence is the gone-gate plus the proof).
+//
+// UNAUTHENTICATED BY CONSTRUCTION: the caller's certificate is the thing that has failed, and Go's ClientAuth is a
+// listener property with no per-route relaxation, so this cannot live beside /agent/renew on the mTLS channel. The
+// gate authorizes ONLY on certificate expiry and refuses a revoked node — a proof of possession must never overturn
+// a human decision, because it cannot distinguish the legitimate holder from whoever took the key.
+//
+// Malformed base64 returns the SAME refusal as a wrong key: decoding is the first thing an attacker can vary, and a
+// distinct error for it would be a free signal about how far a probe got.
+func (s apiServer) RekeyAgent(ctx context.Context, req api.RekeyAgentRequestObject) (api.RekeyAgentResponseObject, error) {
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	nonce, nErr := base64.StdEncoding.DecodeString(req.Body.Nonce)
+	sig, sErr := base64.StdEncoding.DecodeString(req.Body.Signature)
+	if nErr != nil || sErr != nil {
+		return nil, nodes.ErrRekeyRefused
+	}
+	// Same refusal for a bad identifier as for a bad signature, by the same reasoning as the decode above.
+	ident, ok := nodes.ParseRekeyIdentifier(deref(req.Body.CertSerial), deref(req.Body.KeyFingerprint))
+	if !ok {
+		return nil, nodes.ErrRekeyRefused
+	}
+	certPEM, caPEM, err := s.nodes.Rekey(ctx, ident, nonce, []byte(req.Body.Csr), sig, req.Body.AgentVersion)
+	if err != nil {
+		return nil, err
+	}
+	return api.RekeyAgent200JSONResponse{
+		Body:    api.RekeyResponse{CertPem: certPEM, CaPem: caPEM},
+		Headers: api.RekeyAgent200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
 }

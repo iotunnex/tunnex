@@ -125,7 +125,7 @@ meet you.
 | **Windows full-tunnel re-home** | A Windows client in *full-tunnel* mode refuses to re-home to a new gateway (honestly, with a named error) rather than half-doing it. Split-tunnel re-homes normally. |
 | **Cross-site DNS to cluster zones** | Resolving another site's Kubernetes zone across a site link is not implemented; same-site resolution works. |
 | **Leader takeover window** | A leader that **stops or dies** — clean shutdown, crash, `kill -9`, container removal — releases the lock at once, and another replica takes over within ~10s (verified). A leader that is **network-partitioned** while still running is the slow case: its Postgres session stays open until TCP keepalive expires, so takeover can take minutes (**not verified — no partition test has been run**). Nothing ticks meanwhile; **running tunnels are unaffected** either way. |
-| **A gateway offline >48h must be re-enrolled** | Agent certificates last 48 hours and renew automatically **while the agent is running**. A gateway that is powered off or unreachable for longer than that cannot renew — the renewal endpoint requires the certificate that expired — so it will never reconnect on its own. The control plane reports it as `cert_expired_cannot_reconnect` and `preflight` refuses to call the fleet ready; the fix is to re-enroll it. **A durable re-enrollment path is planned before public beta.** |
+| **A gateway offline >48h must be re-enrolled** | Agent certificates last 48 hours and renew automatically **while the agent is running**. A gateway offline for longer cannot renew — the renewal endpoint requires the certificate that expired — so it never reconnects on its own. The control plane reports it as `cert_expired_cannot_reconnect` and `preflight` refuses to call the fleet ready. **Re-enrolling now works without wiping anything:** restart the agent with `TUNNEX_JOIN_TOKEN` set and it replaces the dead certificate, saying so in its log. **But it comes back as a NEW node** — a new id, so its site binding must be re-applied, and **its devices stay revoked and must be re-issued**. Same-identity recovery and device restore are the remaining work (EPIC 13). |
 | **Posture checks are self-reported** | OS version, disk encryption and EDR checks are reported by the device. A compromised device can lie. Treat posture as defense-in-depth, never attestation. |
 | **No third-party security audit yet** | Stated in [SECURITY.md](../SECURITY.md), and it will say so until one has happened. |
 
@@ -187,7 +187,8 @@ Redis holds sessions only: losing it breaks API sign-in, not tunnels, and not th
 | Lost | Recovery |
 |---|---|
 | **The control plane** | Restore from backup: verify the master key first, then restore the dump. Gateways reconnect on their own — no re-enrolment. See [backup-restore.md](backup-restore.md). |
-| **A gateway or a device** | Re-enrol it. Nothing to restore: it generates fresh keys and the control plane re-issues its certificate. |
+| **A gateway** | Re-enrol it: restart the agent with `TUNNEX_JOIN_TOKEN` set. It generates a fresh key, the control plane issues a new certificate, and a dead stored identity is replaced automatically (it will not silently keep one it cannot use). **Two caveats until EPIC 13 lands:** the gateway returns as a *new node*, so re-apply its site binding; and revoking a gateway revokes the devices homed on it, so those users need new configs. |
+| **A device** | Re-enrol it. Nothing to restore: a fresh key is generated and the config is re-issued (shown once). |
 
 A control-plane restore recovers the *control plane's* state, not the fleet's secrets — and doesn't need to,
 because the fleet's secrets never left the fleet.

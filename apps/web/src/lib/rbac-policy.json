@@ -1,6 +1,7 @@
 {
   "admin": [
     "device:approve",
+    "device:restore",
     "device_health:manage",
     "k8s:manage",
     "member:invite",
@@ -26,6 +27,7 @@
   ],
   "owner": [
     "device:approve",
+    "device:restore",
     "device_health:manage",
     "k8s:manage",
     "machine:manage",

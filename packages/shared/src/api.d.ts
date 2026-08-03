@@ -585,6 +585,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/nodes/{nodeId}/restore-devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore the devices a gateway revoke cascaded, onto a replacement gateway
+         * @description S13.1 Slice 7. Revoking a gateway revokes every device homed on it, so rebuilding that gateway hands back a working gateway with ZERO users. This brings those devices back — onto a REPLACEMENT gateway, because a revoked node is never active again (recovery from a revoke is a join-token enrolment, which creates a new node). ONLY devices revoked as a CASCADE return; a device an admin revoked deliberately is never revived by a gateway rebuild. A device that cannot reclaim its original address comes back on a fresh one and is audited distinctly — its config embeds the old address and must be re-imported. A DELIBERATE OPERATOR ACT by construction: RBAC device:restore, audited with the actor. Re-key performs the same restore for a gateway that recovered ITSELF, where no human is involved and nothing re-homes; this endpoint is the only path for a gateway that was REVOKED, which proof of possession must never undo (D3).
+         */
+        post: operations["restoreNodeDevices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/nodes/{nodeId}/hub-priority": {
         parameters: {
             query?: never;
@@ -1453,6 +1476,46 @@ export interface paths {
         put?: never;
         /** Verify a claimed domain via its DNS TXT record (enterprise) */
         post: operations["verifyDomainClaim"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent/rekey/challenge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request a single-use nonce for proof-of-possession re-key (unauthenticated)
+         * @description S13.1 D9. Returns a single-use, short-lived nonce the agent signs together with its new CSR. UNAUTHENTICATED by construction: the caller's certificate is the thing that has failed. It does NOT verify that the identifier is known — a challenge that succeeded only for real identifiers would make them probeable one request at a time, so an unknown one fails at SUBMIT with the same uniform refusal as every other failure. Accepts EXACTLY ONE of two identifiers (D10): the certificate serial, or the SHA-256 fingerprint of the public key the control plane recorded. Rate-limited per client address.
+         */
+        post: operations["rekeyChallenge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent/rekey": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-key an existing gateway by proof of possession (unauthenticated)
+         * @description S13.1. Issues a fresh certificate for an EXISTING node id — same node, same site binding, same history — to a caller proving possession of the keypair the control plane recorded for it. UNAUTHENTICATED by construction; its entire defence is (i) the gone-gate, which authorizes ONLY on certificate expiry and REFUSES a revoked node, and (ii) the signature over (nonce ‖ CSR). A revoked gateway recovers with an operator-minted join token instead — a proof of possession must never overturn a human decision, since it cannot distinguish the legitimate holder from whoever took the key. Every failure returns the SAME refusal: live node, unknown identifier, ambiguous identifier, spent nonce, malformed CSR and wrong key are indistinguishable, so the endpoint cannot be used as an oracle. Rate-limited per client address.
+         */
+        post: operations["rekeyAgent"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2439,6 +2502,54 @@ export interface components {
         SsoRedirect: {
             redirect_url: string;
         };
+        RestoreNodeDevicesRequest: {
+            /**
+             * Format: uuid
+             * @description The LIVE gateway the restored devices are homed to. Required rather than defaulted: a revoked gateway is never active again, so there is no sane default, and silently restoring onto the dead node would produce active devices pointing at a gateway that will never serve them.
+             */
+            target_node_id: string;
+        };
+        RestoreNodeDevicesResponse: {
+            /** @description How many devices came back. */
+            restored: number;
+            /** @description How many could NOT reclaim their original address. Each of those users must re-import their config; the device list surfaces it as needs_reexport. */
+            readdressed: number;
+            devices: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                kept_address: boolean;
+                assigned_ip: string;
+                previous_assigned_ip?: string;
+            }[];
+        };
+        RekeyChallengeRequest: {
+            /** @description Serial of the agent's CURRENT (expired) certificate. NO length or pattern constraint, deliberately and for the same reason key_fingerprint carries none: a schema violation answers 400 where an unknown identifier answers 403, and that difference tells a prober how far they got. The handler validates and returns the UNIFORM refusal. The 64 KiB body cap bounds the request. Keyed on the serial rather than the node name: names are guessable, serials are not, so a name-keyed challenge would be an enumeration oracle (D9). */
+            cert_serial?: string;
+            /** @description SHA-256 of the agent's recorded public key (SPKI DER), lowercase hex — the SECOND identifier (D10). Supply EXACTLY ONE of cert_serial or key_fingerprint; supplying both, neither, or a malformed value is refused identically to an unknown identifier, so the endpoint cannot be probed for well-formedness. It exists because a re-key whose RESPONSE is lost leaves the control plane holding a serial the agent never received: the agent's stored serial is stale, and its only durable handle on its own identity is the key material the control plane recorded. No length or pattern constraint here on purpose — a schema violation would answer with 400 where an unknown identifier answers 403, which is a distinction worth denying. */
+            key_fingerprint?: string;
+        };
+        RekeyNonce: {
+            /** @description base64 single-use nonce, valid for minutes. Returned regardless of whether the serial is known. */
+            nonce: string;
+        };
+        RekeyRequest: {
+            /** @description Serial of the certificate being replaced. EXACTLY ONE of cert_serial or key_fingerprint. No length constraint — see RekeyChallengeRequest. */
+            cert_serial?: string;
+            /** @description SHA-256 of the recorded public key (SPKI DER), lowercase hex. Must match the identifier the challenge was issued for — a nonce is bound to its identifier, so the two cannot be mixed. See RekeyChallengeRequest for why a second identifier exists. */
+            key_fingerprint?: string;
+            /** @description base64 nonce from /agent/rekey/challenge. */
+            nonce: string;
+            /** @description PEM CSR for the agent's NEW keypair. The old key may be compromised or discarded, so re-key always issues over fresh material. */
+            csr: string;
+            /** @description base64 RSA-PKCS1v15-SHA256 over (nonce || CSR DER), signed by whichever private key the control plane RECORDED for this node — the expired certificate's key when identifying by cert_serial, or the key named by key_fingerprint. Binding to the CSR is required: without it a captured proof pairs with an attacker's own CSR. */
+            signature: string;
+            agent_version: string;
+        };
+        RekeyResponse: {
+            cert_pem: string;
+            ca_pem: string;
+        };
         EnrollRequest: {
             join_token: string;
             /** @description PEM-encoded certificate signing request */
@@ -2509,7 +2620,7 @@ export interface components {
             platform?: string;
             public_key: string;
             assigned_ip?: string;
-            /** @description S9.1 Part-2: true when this device was provisioned from a STATIC profile whose baked site routes no longer match the org's current routed ranges — its exported profile is stale and should be re-exported. Absent/false for managed (polling) devices. */
+            /** @description True when the config this device was ISSUED no longer matches reality, so the user must re-import it. Three causes: (1) its baked site ROUTES no longer match the org's current routed ranges — STATIC exports only, since a managed device polls routes; (2) its baked tunnel ADDRESS is not the device's current address — EVERY mode, including managed, because every issued config embeds an interface address; (3) its baked GATEWAY is not the device's current gateway — STATIC exports only, because a static export is a file that never polls and cannot be re-pointed, whereas a managed device re-homes itself through the dial channel (residual: only when its node is a hub-set member). Reported for all provisioning modes; false when nothing was recorded at issuance (rows predating the address snapshot), because unknown must not be reported as stale. Advisory, never enforcement. */
             needs_reexport?: boolean;
             /** @enum {string} */
             status: "active" | "revoked" | "pending";
@@ -3669,6 +3780,35 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    restoreNodeDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestoreNodeDevicesRequest"];
+            };
+        };
+        responses: {
+            /** @description What was restored. Zero restored is a normal answer, not an error. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreNodeDevicesResponse"];
+                };
             };
             default: components["responses"]["Error"];
         };
@@ -5150,6 +5290,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GenericMessage"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    rekeyChallenge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RekeyChallengeRequest"];
+            };
+        };
+        responses: {
+            /** @description A nonce. Says nothing about whether the serial is known. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RekeyNonce"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    rekeyAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RekeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Re-keyed — returns the new certificate and the CA. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RekeyResponse"];
                 };
             };
             default: components["responses"]["Error"];

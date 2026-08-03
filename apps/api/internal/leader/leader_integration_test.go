@@ -175,3 +175,85 @@ func TestLeadershipDropsWhenConnectionDies(t *testing.T) {
 	cancel()
 	wg.Wait()
 }
+
+// TestLeadershipIsConfirmedAgainstPGLOCKS — the finding that generalised (review #4).
+//
+// EVERY OTHER TEST IN THIS FILE ASSERTS THE IN-PROCESS BOOLEAN, which is the thing under test. None consults
+// pg_locks, and none runs a gated tick. So a stale true, a lock stranded on a pooled connection, and an uncancelled
+// in-flight tick all pass — and TestLeadershipDropsWhenConnectionDies goes further: it PASSES if the flag clears
+// within 3*RetryInterval, which certifies the very stale-true window that permitted two replicas to write
+// contradictory hub-set generations.
+//
+// This asserts the boolean AGAINST THE DATABASE, which is the only external truth available:
+//
+//   - a leader's ConfirmLeader must be true AND pg_locks must show its lock;
+//   - a follower's ConfirmLeader must be false even though it is a healthy process;
+//   - after the leader stops, its lock must be GONE from pg_locks — not merely its flag cleared. That is the
+//     stranded-lock defect: conn.Release() does not free a session-scoped lock, so a cleared flag proved nothing.
+func TestLeadershipIsConfirmedAgainstPGLOCKS(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	locksHeld := func() int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(context.Background(), `
+			SELECT count(*) FROM pg_locks
+			WHERE locktype = 'advisory' AND granted AND objsubid = 1
+			  AND ((classid::bigint << 32) | (objid::bigint & 4294967295)) = $1`,
+			SchedulerLockKey).Scan(&n); err != nil {
+			t.Fatalf("pg_locks: %v", err)
+		}
+		return n
+	}
+
+	if n := locksHeld(); n != 0 {
+		t.Fatalf("precondition: the scheduler lock must be free before this test, found %d holders", n)
+	}
+
+	lead := &Elector{}
+	leadCtx, stopLead := context.WithCancel(ctx)
+	go lead.Run(leadCtx, pool, nil)
+
+	deadline := time.Now().Add(15 * time.Second)
+	for !lead.IsLeader() && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !lead.IsLeader() {
+		t.Fatal("never acquired leadership")
+	}
+
+	// THE DATABASE agrees, not just our flag.
+	if n := locksHeld(); n != 1 {
+		t.Errorf("exactly one advisory lock must be held for the scheduler key, pg_locks says %d", n)
+	}
+	if !lead.ConfirmLeader(context.Background(), pool) {
+		t.Error("the leader's ConfirmLeader must agree with pg_locks — a boolean that cannot be checked against " +
+			"the database is the defect this test exists for")
+	}
+
+	// A FOLLOWER is a healthy process that must not confirm.
+	follow := &Elector{}
+	followCtx, stopFollow := context.WithCancel(ctx)
+	go follow.Run(followCtx, pool, nil)
+	time.Sleep(2 * time.Second)
+	if follow.ConfirmLeader(context.Background(), pool) {
+		t.Error("a follower must never confirm leadership, however healthy it is")
+	}
+	stopFollow()
+
+	// THE STRANDED-LOCK CHECK. After the leader stops, its lock must be GONE from the database — not merely its
+	// flag cleared. conn.Release() does not free a session-scoped advisory lock, so before the explicit unlock on
+	// every exit path, this is exactly what leaked: flag false, lock still held, fleet leaderless.
+	stopLead()
+	gone := time.Now().Add(15 * time.Second)
+	for locksHeld() != 0 && time.Now().Before(gone) {
+		time.Sleep(100 * time.Millisecond)
+	}
+	if n := locksHeld(); n != 0 {
+		t.Errorf("after the leader stops, the advisory lock must be RELEASED IN POSTGRES, pg_locks still shows %d "+
+			"holder(s). A cleared in-process flag proves nothing: releasing the connection to the pool leaves the "+
+			"session — and its lock — intact, which strands leadership until the connection is recycled", n)
+	}
+}

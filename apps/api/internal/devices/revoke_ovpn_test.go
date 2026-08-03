@@ -22,7 +22,7 @@ import (
 // delivers the same three-part guarantee the WireGuard path proves live —
 //  1. the live SESSION dies: the cert serial lands on the org CRL (crl-verify kills it at the next reneg),
 //  2. it cannot RECONNECT: the device leaves the OVPN roster (no CCD → ccd-exclusive refuses),
-//  3. its ADDRESS returns to the pool: assigned_ip is cleared.
+//  3. its ADDRESS returns to the pool — RE-ALLOCATABLE, which is not the same as cleared (amended, S13.1 D5).
 //
 // Through the real devices.Revoke with the shared RebuildCRL seam wired — proving all three happen together.
 func TestRevokeOVPNDeviceIsThreePartSweep(t *testing.T) {
@@ -101,12 +101,29 @@ func TestRevokeOVPNDeviceIsThreePartSweep(t *testing.T) {
 		}
 	}
 
-	// (3) ADDRESS FREED — assigned_ip cleared, back to the pool.
+	// (3) ADDRESS RE-ALLOCATABLE — asserted against the allocation oracle, not against the row.
+	//
+	// AMENDED (S13.1 D5): this required assigned_ip to be NULL. The address was never freed BY nulling it — it is
+	// free the instant status leaves ('active','pending'), because that is the predicate on both
+	// devices_org_ip_key and ListActiveDeviceAllocations. Nulling destroyed the record of what the user held, which
+	// is what made a cascade-revoked device unrestorable to its own address (Wall 6). The parity claim this test
+	// exists for is unchanged — OVPN revocation frees the address exactly as WireGuard does — but it is now
+	// asserted as re-allocatability rather than as a NULL column.
 	row, err := q.GetDevice(ctx, sqlc.GetDeviceParams{ID: dev, OrgID: org})
 	if err != nil {
 		t.Fatalf("get device: %v", err)
 	}
-	if row.AssignedIp != nil {
-		t.Fatalf("(3) a revoked device's address must return to the pool (assigned_ip NULL); got %v", *row.AssignedIp)
+	if row.AssignedIp == nil {
+		t.Fatal("(3) a revoked device must KEEP its assigned_ip as the record of what the revocation took")
+	}
+	allocs, aerr := q.ListActiveDeviceAllocations(ctx, org)
+	if aerr != nil {
+		t.Fatalf("oracle: %v", aerr)
+	}
+	for _, al := range allocs {
+		if al.AssignedIp != nil && *al.AssignedIp == *row.AssignedIp {
+			t.Fatalf("(3) a revoked OVPN device's address must not read as a LIVE allocation — the pool must be "+
+				"free to hand %s out again", *row.AssignedIp)
+		}
 	}
 }

@@ -248,6 +248,27 @@ func main() {
 	// plus CRL delivery (crl-verify always-on, lazy-inits an empty CRL).
 	deviceSvc.SetRebuildCRL(ovpnSvc.RebuildCRL)
 	nodeSvc.SetRebuildCRL(ovpnSvc.RebuildCRL)
+	// S13.1: the full-sweep reconciliation signal a re-key fires AFTER its transaction commits. A re-key changes
+	// the gateway's WireGuard public key, so every peer's AllowedIPs and every site link must reconcile — the same
+	// org-wide fan-out devices.PushOrgNodes uses, reached through the same hub.
+	nodeSvc.SetPushOrg(deviceSvc.PushOrgNodes)
+	// S13.1 D5 (Wall 6): a recovered gateway brings its users back with it. Only cascade-revoked devices —
+	// a deliberately revoked laptop is never revived by a gateway rebuild.
+	nodeSvc.SetRestoreDevices(func(ctx context.Context, orgID, nodeID uuid.UUID) (int, int, error) {
+		// Same node in both positions, and no actor: a re-keyed gateway keeps its devices where they were, and
+		// no human was present — the gateway proved possession of its own key.
+		res, err := deviceSvc.RestoreCascadeRevokedDevices(ctx, orgID, nodeID, nodeID, nil)
+		if err != nil {
+			return 0, 0, err
+		}
+		readdressed := 0
+		for _, r := range res {
+			if !r.KeptAddress {
+				readdressed++
+			}
+		}
+		return len(res), readdressed, nil
+	})
 	nodeSvc.SetOVPNCRLProvider(ovpnSvc.GetCRL)
 	cliAuthSvc := cliauth.NewService(pool, sealer)
 	machineAuthSvc := machineauth.NewService(pool, sealer) // S10.2: machine credentials (GitOps operator)
@@ -332,10 +353,13 @@ func main() {
 			case <-retentionStop:
 				return
 			case <-t.C:
-				if !elector.IsLeader() {
-					continue // D4: followers serve requests but never tick
+				// S13.1 review #2/#3: gate cheaply, CONFIRM against Postgres, and derive the work context from
+				// electorCtx so losing leadership cancels work in flight. Previously every tick used
+				// context.Background(), so an ex-leader kept writing for minutes after the lock had moved.
+				if !elector.IsLeader() || !elector.ConfirmLeader(electorCtx, pool) {
+					continue
 				}
-				sctx, scancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				sctx, scancel := context.WithTimeout(electorCtx, 2*time.Minute)
 				orgs, err := fq.DistinctAccessEventOrgs(sctx)
 				if err == nil {
 					_, err = accesslog.Retain(sctx, fq, flowHealth, time.Now(), 0, 0, orgs)
@@ -347,6 +371,42 @@ func main() {
 			}
 		}
 	}()
+	// S13.1 (review #5): sweep spent and expired re-key challenges. node_rekey_challenges is written by an
+	// UNAUTHENTICATED endpoint — one row per challenge request, for any serial asked about, valid or not — and
+	// migration 0058's own comment plus its expires_at index describe pruning that no code performed. Without this
+	// loop the table grows until the Postgres volume fills, which is the same failure the flow-log retention sweep
+	// above exists to prevent, on a table an attacker can write to directly.
+	//
+	// Leader-gated like every other tick (D4): pruning twice is harmless, but there is no reason to spend two
+	// replicas on it, and gating keeps "exactly one ticks" true of the whole set rather than most of it.
+	//
+	// Consumed rows are retained for an hour past expiry by the query itself, deliberately: a replayed nonce must
+	// keep failing as SPENT rather than becoming unknown, or the log loses the distinction between an attack and a
+	// typo.
+	go func() {
+		t := time.NewTicker(15 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-retentionStop:
+				return
+			case <-t.C:
+				// Same as the sweep above — and this tick is one I added in S13.1 by copying the defective
+				// context.Background() pattern from its neighbour without checking what it inherited.
+				if !elector.IsLeader() || !elector.ConfirmLeader(electorCtx, pool) {
+					continue
+				}
+				sctx, scancel := context.WithTimeout(electorCtx, time.Minute)
+				if n, err := fq.DeleteExpiredRekeyChallenges(sctx); err != nil {
+					logger.Error("rekey_challenge_sweep_failed", slog.String("error", err.Error()))
+				} else if n > 0 {
+					logger.Info("rekey_challenge_sweep", slog.Int64("deleted", n))
+				}
+				scancel()
+			}
+		}
+	}()
+
 	// S8.6 hub-HA failover tick: read member freshness → derive the active hub order → on a change, persist
 	// (atomic generation bump) + audit + let the ordinary compile+push carry it. Rides the same
 	// ticker-goroutine pattern as the retention sweep; a no-op for orgs without a multi-member hub set.
@@ -358,10 +418,15 @@ func main() {
 			case <-retentionStop:
 				return
 			case <-t.C:
-				if !elector.IsLeader() {
-					continue // D4: followers serve requests but never tick
+				// The FAILOVER tick is where two writers hurt most: its hysteresis counters are PER-PROCESS, so
+				// two leaders compute DIFFERENT demoted sets and write contradictory promotion/failback audits
+				// for the same org. Confirm against Postgres (IsLeader alone can be up to RetryInterval stale),
+				// and run on electorCtx so losing the lock mid-walk cancels the walk instead of letting an
+				// ex-leader keep bumping generations for minutes.
+				if !elector.IsLeader() || !elector.ConfirmLeader(electorCtx, pool) {
+					continue
 				}
-				sctx, scancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				sctx, scancel := context.WithTimeout(electorCtx, 2*time.Minute)
 				if err := nodeSvc.RunFailoverTick(sctx); err != nil {
 					logger.Error("failover_tick_failed", slog.String("error", err.Error()))
 				}
@@ -380,10 +445,10 @@ func main() {
 			case <-retentionStop:
 				return
 			case <-t.C:
-				if !elector.IsLeader() {
-					continue // D4: followers serve requests but never tick
+				if !elector.IsLeader() || !elector.ConfirmLeader(electorCtx, pool) {
+					continue
 				}
-				sctx, scancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				sctx, scancel := context.WithTimeout(electorCtx, 5*time.Minute)
 				if orgs, err := sqlc.New(pool).ListOVPNEnabledOrgs(sctx); err != nil {
 					logger.Error("ovpn_crl_refresh_list_failed", slog.String("error", err.Error()))
 				} else {
@@ -400,16 +465,22 @@ func main() {
 	// S7.5.2 IdP-group sync poller (enterprise; no-op in the open build). Reconciles mapped
 	// directory groups every ~10min. Cancelled on shutdown.
 	pollCtx, pollCancel := context.WithCancel(context.Background())
-	apphttp.StartIdpSyncPoller(pollCtx, idpSyncPort, logger)
+	// ONE DEFINITION of "may I tick" (S13.1 review #10). The documented invariant is "N replicas serve, exactly one
+	// ticks" — and it was false of the whole set: three periodic WRITERS (IdP group sync, grant expiry, health
+	// staleness) ran un-gated on every replica, so a reader reasoning about the invariant reasoned about the wrong
+	// deployment. Cheap flag first, then confirm against Postgres, because IsLeader alone can be stale for up to
+	// RetryInterval.
+	mayTick := func() bool { return elector.IsLeader() && elector.ConfirmLeader(electorCtx, pool) }
+	apphttp.StartIdpSyncPoller(pollCtx, idpSyncPort, logger, mayTick)
 	// S7.5.4 temporary-grant expiry sweep (enterprise only; no-op in the open build):
 	// a lapsed temporary grant's /32 is pushed off every org gateway promptly. Shares
 	// pollCtx (cancelled on shutdown).
-	apphttp.StartPolicyGrantSweeper(pollCtx, pool, pushHub)
+	apphttp.StartPolicyGrantSweeper(pollCtx, pool, pushHub, mayTick)
 	// S7.5.3 device-health staleness sweep (enterprise only): a stale report is
 	// ABSENCE, and absence never blocks — clears health_blocked past the TTL and
 	// pushes the affected orgs. Shares pollCtx (cancelled on shutdown).
 	if apphttp.NewDeviceHealthEdition() {
-		go deviceSvc.StartHealthSweeper(pollCtx)
+		go deviceSvc.StartHealthSweeper(pollCtx, mayTick)
 	} else {
 		// DOWNGRADE-RELEASE ([1]): device-health is OFF in this build, so no report
 		// will arrive and the sweeper never runs — a device left health_blocked by a
@@ -454,7 +525,7 @@ func main() {
 			ctx, cancel := context.WithTimeout(metricsCtx, 10*time.Second)
 			defer cancel()
 			return nodeSvc.FleetHealthCounts(ctx)
-		})
+		}, elector.IsLeader)
 		// readiness = the DB answers. A CP that cannot reach postgres serves nothing useful, and naming the
 		// reason beats a bare 503 (diagnosis-from-logs at the readiness tier).
 		ready := func() error { return pool.Ping(metricsCtx) }

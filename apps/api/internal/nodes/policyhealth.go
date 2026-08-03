@@ -296,3 +296,86 @@ func degradedKind(in KindInput) PolicyDegradedKind {
 	}
 	return KindSilentDesync // fresh, mismatched, age >= T
 }
+
+// RekeyAuthorized is the S13.1 D3 GATE, built before any re-key mechanism because a property that must never
+// happen is easier to prove impossible than to retrofit.
+//
+// AUTHORIZED BY CERTIFICATE EXPIRY ONLY. Revocation REFUSES.
+//
+// THE ATTACK THAT AMENDED THIS GATE. D3 originally listed `revoked` as authorizing — it looked like the strongest
+// evidence a node is gone. It is, and that was the wrong question. Trace it:
+//
+//  1. an attacker steals a gateway's state volume, which is its private key;
+//  2. the operator notices and REVOKES that gateway — the product's answer to a stolen credential;
+//  3. the attacker calls re-key, proving possession of the stolen key;
+//  4. `revoked` authorizes it;
+//  5. the attacker holds a fresh certificate for that node id — active, same site binding, same policy.
+//
+// Revocation defeated by the exact credential it was invoked against. The paper already forbade this in a
+// condition on the same page ("re-key must not become an un-revoke; revocation is the product's security
+// primitive") — the evidence list contradicted a condition in its own document. The condition was right and the
+// list was wrong.
+//
+// THE DISTINCTION, which generalizes past this endpoint: EXPIRY IS AN ABSENCE OF ACTION; REVOCATION IS THE
+// PRESENCE OF A DECISION. A cryptographic proof may overturn the first and must never overturn the second, because
+// the proof cannot distinguish the legitimate holder from whoever took the key — and revocation is precisely the
+// response to that ambiguity. A revoked gateway recovers through an operator-minted join token: a human act, which
+// is the right gate for undoing a human decision.
+//
+// ALSO INADMISSIBLE:
+//
+//   - `last_seen_at` stale. Silence is not proof a credential cannot work — the inference the EPIC 11 walk taught
+//     us to refuse. This function takes no liveness argument at all, so it cannot be passed in by mistake.
+//   - Any operator- or client-supplied "force". A guard overridable by the party most motivated to override it is
+//     documentation. There is no parameter for it and there must not be.
+//
+// THE RETURNED REASON IS FOR THE LOG, NEVER THE RESPONSE. D8's uniform-refusal rule: an attacker probing with a
+// stolen key must not learn revoked-versus-not-found-versus-live. The remedy belongs in the operator-facing docs
+// and the health surface, not in what the endpoint says back.
+// certUndelivered is the REDELIVERY carve-out (S13.1 D3, RULED after review pass 1 #3 and the live-node takeover
+// its first version introduced).
+//
+// THE COLLISION IT SOLVES. D10 exists so a LOST RESPONSE cannot brick a gateway: the control plane committed a
+// certificate the agent never received. But committing it ALSO advanced cert_not_after, the column this gate
+// reads, so the node looked LIVE and the gate refused the recovery D10 was built for — for a full 48h lifetime.
+//
+// THE FAILED FIRST ATTEMPT, ON THE RECORD. The carve-out was first written as "the caller proves the key the CP
+// currently records". That authorized any holder of the private key INCLUDING while the gateway was running, and
+// because RekeyNode replaces cert_serial — the column the agent channel authenticates against — exercising it
+// DISPLACED the live gateway. It needed only the private key, never the certificate, so a key stolen without its
+// certificate went from inert to immediately usable. A live-node takeover through the gate built to refuse live
+// nodes.
+//
+// THE PREDICATE THAT IS ACTUALLY MEANT. Not "who is asking" but "was the thing we issued ever delivered". A
+// running gateway's certificate HAS AUTHENTICATED — that is what running means — so it is marked delivered
+// (MarkCertDelivered, on first use), and the live case cannot arise. Undelivered is a state only a lost response
+// produces.
+//
+// It still cannot rotate to a different key (the caller must ask for a certificate over the recorded one), and it
+// still cannot touch a REVOKED node — that check runs first, unconditionally, because revocation is a human
+// decision no proof may overturn.
+func RekeyAuthorized(status string, certNotAfter time.Time, certNotAfterKnown bool, now time.Time, certUndelivered bool) (bool, string) {
+	if status == "revoked" {
+		return false, "node is REVOKED — an operator deliberately retired it, and a proof of possession cannot " +
+			"distinguish the real gateway from whoever holds its stolen key. Re-key must never un-revoke. " +
+			"Recover it with an operator-minted join token"
+	}
+	if certUndelivered {
+		return true, "the certificate this control plane last issued for this node has NEVER been used to " +
+			"authenticate, and the caller asked for one over the same recorded key — a REDELIVERY of a grant that " +
+			"was made but never arrived (D10 lost-response recovery). A running gateway's certificate has " +
+			"authenticated by definition, so this state cannot describe a live node"
+	}
+	if !certNotAfterKnown {
+		// UNKNOWN is not gone. A row with no recorded expiry predates migration 0054 and 0055 declined to bound
+		// it (it had never reported), so the CP knows nothing about whether this node still works.
+		return false, "this control plane has no record of when the node's certificate expires, so it cannot " +
+			"establish that the node is gone. Recover it with an operator-minted join token"
+	}
+	if certNotAfter.Before(now) {
+		return true, "the certificate this control plane issued expired at " +
+			certNotAfter.UTC().Format(time.RFC3339) + " — the agent cannot authenticate and cannot renew"
+	}
+	return false, "the node's certificate is still valid until " + certNotAfter.UTC().Format(time.RFC3339) +
+		" — a live gateway must never be re-keyed. Revoke it first if you intend to replace it"
+}

@@ -45,7 +45,9 @@ func NewIdpSyncPort(pool *pgxpool.Pool, sealer *crypto.Sealer, members *tenancy.
 // StartIdpSyncPoller runs the background directory poll every 10 minutes (D2), jittered so many
 // orgs don't stampede Graph on the same tick. First run is one interval out (boot isn't a sync
 // trigger). Stops when ctx is cancelled.
-func StartIdpSyncPoller(ctx context.Context, port idpSyncPort, logger *slog.Logger) {
+// mayTick gates this poller on scheduler leadership (S13.1 review #10). It writes directory-group membership, so N
+// replicas polling means N concurrent reconciles of the same groups. nil = ungated (open build / tests).
+func StartIdpSyncPoller(ctx context.Context, port idpSyncPort, logger *slog.Logger, mayTick func() bool) {
 	if port == nil {
 		return
 	}
@@ -60,6 +62,10 @@ func StartIdpSyncPoller(ctx context.Context, port idpSyncPort, logger *slog.Logg
 			case <-ctx.Done():
 				return
 			case <-t.C:
+				if mayTick != nil && !mayTick() {
+					t.Reset(base + jitter)
+					continue // followers serve requests but never tick
+				}
 				port.PollAll(ctx)
 				t.Reset(base + jitter)
 			}

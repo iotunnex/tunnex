@@ -56,6 +56,11 @@ services:
       # the config default (ghcr :latest) applies when unset. Was never forwarded here — the .env
       # pin silently no-op'd (smooth-walk pre-flight finding).
       TUNNEX_NODE_AGENT_IMAGE: ${TUNNEX_NODE_AGENT_IMAGE:-}
+      # Agent certificate lifetime. SHORTENS ONLY — a value above the 48h ceiling is clamped down, because
+      # revocation here is refusal-to-renew and the lifetime IS the window a revoked agent keeps working.
+      # Set it (e.g. 10m) to rehearse the gateway-recovery walk without waiting out a real expiry; a walk run
+      # under a shortened TTL proves the MECHANICS, not the shipped 48h behaviour. Unset = 48h.
+      TUNNEX_AGENT_CERT_TTL: ${TUNNEX_AGENT_CERT_TTL:-}
       # Public base URL for email links (verify/reset/invite). MUST be reachable by
       # your users on a remote deploy — the localhost default only works locally, and
       # the API warns loudly at boot if left at it. Set APP_BASE_URL in .env.

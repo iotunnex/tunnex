@@ -415,8 +415,18 @@ func TestPendingDevicesCountAgainstCap(t *testing.T) {
 	}
 }
 
-// Finding #2: revoking a node sweeps its PENDING devices too (active+pending) and frees
-// their IPs — else a pending device leaks its /32 forever + lingers in the queue on a dead node.
+// Finding #2: revoking a node sweeps its PENDING devices too (active+pending), so the address returns to the pool
+// and the device stops lingering in the approval queue on a dead node.
+//
+// ASSERTION AMENDED (S13.1 D5). It used to require assigned_ip to become NULL. The address was never made free BY
+// nulling it — it is free the instant status leaves ('active','pending'), because both readers that define
+// taken-ness filter on exactly that predicate: the devices_org_ip_key partial unique index and
+// ListActiveDeviceAllocations, "the SINGLE definition of live allocation".
+//
+// Nulling it destroyed the only record of what each user held, which is what made Wall 6 unrecoverable rather than
+// merely painful: a cascade-revoked device could not be restored to its own address because nothing remembered it.
+// So this now asserts the property that actually matters — the address is RE-ALLOCATABLE — and that the record
+// survives. Revocation preserves what it invalidates.
 func TestNodeRevokeSweepsPendingAndFreesIP(t *testing.T) {
 	dsn := postureDSN(t)
 	ctx := context.Background()
@@ -444,8 +454,22 @@ func TestNodeRevokeSweepsPendingAndFreesIP(t *testing.T) {
 	if status != "revoked" {
 		t.Fatalf("pending device on a revoked node must be swept to revoked; got %q", status)
 	}
-	if ip != nil {
-		t.Fatalf("the swept device's IP must be freed (null); got %v", *ip)
+	// The RECORD survives — restore needs it to reclaim the user's own address.
+	if ip == nil {
+		t.Fatal("the swept device must KEEP its assigned_ip as a record of what the revocation took: without it a " +
+			"cascade-revoked device cannot be restored to its own address, which is Wall 6 (S13.1 D5)")
+	}
+	// And the address is genuinely re-allocatable, which is the property the old NULL assertion was reaching for.
+	// Asked of the canonical oracle rather than inferred from the row.
+	allocs, aerr := sqlc.New(pool).ListActiveDeviceAllocations(ctx, org)
+	if aerr != nil {
+		t.Fatalf("oracle: %v", aerr)
+	}
+	for _, al := range allocs {
+		if al.AssignedIp != nil && *al.AssignedIp == *ip {
+			t.Fatalf("a revoked device's address must not appear as a LIVE allocation — the pool must be free to "+
+				"hand %s out again", *ip)
+		}
 	}
 }
 
@@ -473,8 +497,14 @@ func TestOwnerCancelPendingAuditedDistinctly(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT status, assigned_ip FROM devices WHERE id=$1", a.Device.ID).Scan(&status, &ip); err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if status != "revoked" || ip != nil {
-		t.Fatalf("cancel must revoke + free IP; got status=%q ip=%v", status, ip)
+	// AMENDED with the sweep assertion above (S13.1 D5): cancelling revokes, and the address is re-allocatable the
+	// moment status leaves ('active','pending') — it is not made free by being nulled. The record is KEPT, because
+	// nulling it destroyed the only trace of what the revocation took.
+	if status != "revoked" {
+		t.Fatalf("cancel must revoke; got status=%q", status)
+	}
+	if ip == nil {
+		t.Fatal("a cancelled device must KEEP its assigned_ip as the record of what it held (S13.1 D5)")
 	}
 	if err := pool.QueryRow(ctx, "SELECT action FROM audit_logs WHERE org_id=$1 AND target_id=$2 ORDER BY created_at DESC LIMIT 1", org, a.Device.ID.String()).Scan(&action); err != nil {
 		t.Fatalf("audit: %v", err)

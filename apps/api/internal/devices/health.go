@@ -540,7 +540,9 @@ func (s *Service) SweepStaleHealthBlocks(ctx context.Context) (int, error) {
 // Started only when the device-health edition is enabled (main.go); the sweep is
 // cheap when nothing is blocked. First run is one interval out (boot is not a
 // posture event).
-func (s *Service) StartHealthSweeper(ctx context.Context) {
+// mayTick gates each sweep on scheduler leadership (S13.1 review #10): it clears health_blocked rows and pushes the
+// affected orgs, so N replicas means N concurrent clear-and-push cycles. nil = ungated (tests).
+func (s *Service) StartHealthSweeper(ctx context.Context, mayTick func() bool) {
 	t := time.NewTicker(HealthSweepInterval)
 	defer t.Stop()
 	for {
@@ -548,6 +550,9 @@ func (s *Service) StartHealthSweeper(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			if mayTick != nil && !mayTick() {
+				continue // followers serve requests but never tick
+			}
 			if n, err := s.SweepStaleHealthBlocks(ctx); err != nil {
 				s.logger.Warn("health_stale_sweep_failed", slog.String("error", err.Error()))
 			} else if n > 0 {

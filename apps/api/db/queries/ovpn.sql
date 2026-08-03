@@ -63,6 +63,20 @@ SELECT crl_pem, number FROM ovpn_crls WHERE org_id = $1;
 -- live OVPN client certs are revoked too (revoked_at), returning the affected orgs so the shared RebuildCRL
 -- runs once per org. lint:cross-org — keyed by node_id inside the node-revoke transaction (org-authorized
 -- upstream, mirrors RevokeDevicesForNode).
-UPDATE ovpn_client_certs SET revoked_at = now()
+UPDATE ovpn_client_certs SET revoked_at = now(), revoked_cause = 'cascade'
 WHERE device_id IN (SELECT id FROM devices WHERE node_id = $1 AND deleted_at IS NULL) AND revoked_at IS NULL
 RETURNING org_id;
+
+-- name: RestoreCascadeRevokedOVPNCertsForDevice :many
+-- The third part of the act, reversed (review pass 1 #9). Revoking a node revokes its devices AND their OpenVPN
+-- client certificates AND rebuilds the CRL. Restore reversed only the first, so an OVPN device came back `active`
+-- with its certificate still revoked and still on the org CRL — control plane green, data plane refusing, and the
+-- operator told it succeeded.
+--
+-- cause='cascade' ONLY, exactly like the device restore: a certificate an operator revoked deliberately is never
+-- revived by a gateway rebuild. The predicate is repeated here rather than left to the caller, same as
+-- RestoreCascadeRevokedDevice.
+-- lint:cross-org — keyed by device_id, which the caller read from the org-scoped candidate set.
+UPDATE ovpn_client_certs SET revoked_at = NULL, revoked_cause = NULL
+WHERE device_id = $1 AND revoked_at IS NOT NULL AND revoked_cause = 'cascade'
+RETURNING org_id, serial;

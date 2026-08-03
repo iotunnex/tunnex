@@ -174,7 +174,11 @@ func (s *Service) ResendVerification(ctx context.Context, userID uuid.UUID) erro
 	}
 	// Invalidate prior verification tokens first (mirror RequestPasswordReset), so
 	// repeated resends don't accumulate rows or leave many tokens valid at once.
-	// (Per-caller email throttling is a separate concern — S11.3 rate limiting.)
+	// (Per-caller email throttling is UNIMPLEMENTED — there is no rate limiting on this path today. A general
+	// mechanism was scoped as S11.3 and never built; see docs/S13.1-decisions.md for the honest ledger entry.
+	// Written in this tense deliberately: the previous wording cited the story as though it named a capability,
+	// and two epics later that comment was read as evidence the throttle existed — see docs/laws.md, A FORWARD
+	// REFERENCE NAMES AN INTENTION, NEVER A CAPABILITY.)
 	if err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		if e := q.InvalidateUserTokens(ctx, sqlc.InvalidateUserTokensParams{UserID: user.ID, Purpose: purposeVerify}); e != nil {
 			return e

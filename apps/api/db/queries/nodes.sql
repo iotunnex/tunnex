@@ -22,8 +22,8 @@ WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now()
 RETURNING *;
 
 -- name: CreateNode :one
-INSERT INTO nodes (org_id, name, cert_serial, agent_version, cert_not_after)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO nodes (org_id, name, cert_serial, agent_version, cert_not_after, cert_public_key)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetNodeByCertSerial :one
@@ -31,6 +31,30 @@ RETURNING *;
 -- node row. Used to authorize every agent request.
 SELECT * FROM nodes
 WHERE cert_serial = $1;
+
+-- name: GetNodeForOrg :one
+-- An ORG-SCOPED node by id, whatever its status. Revoked rows included deliberately: the operator restore
+-- (S13.1 Slice 7) names a REVOKED node as its source — that is the whole point — and a lookup that filtered them
+-- out would make the one legitimate case unreachable. The caller decides what each side must be.
+SELECT * FROM nodes WHERE id = $1 AND org_id = $2;
+
+-- name: MarkCertDelivered :exec
+-- Delivery is recorded THE FIRST TIME a certificate authenticates, and only then: the WHERE clause makes this a
+-- no-op on every subsequent request, so the agent channel pays one write per credential rather than one per call.
+--
+-- This is what makes the D3 redelivery carve-out safe. A RUNNING gateway's certificate has authenticated by
+-- definition, so it is delivered, so the carve-out cannot touch it — the live-node case is excluded structurally
+-- rather than by a check someone must remember to write.
+-- lint:cross-org — keyed by node id, resolved from the presented client certificate; the caller IS the node.
+UPDATE nodes SET cert_delivered = true, cert_delivered_at = now() WHERE id = $1 AND cert_delivered = false;
+
+-- name: GetNodeForOrgForUpdate :one
+-- The node row, ORG-SCOPED and LOCKED (review pass 1 #7). The restore reads it inside its own transaction and
+-- refuses if the node is not active — because revoke takes the same row lock, so a revoke that lands mid-restore
+-- either commits first (we see it revoked and refuse) or waits for us. Without the lock the restore authorized on
+-- state read BEFORE the identity commit and applied AFTER it, and a re-key racing an operator revoke re-activated
+-- the very devices that revoke had just cascaded.
+SELECT * FROM nodes WHERE id = $1 AND org_id = $2 FOR UPDATE;
 
 -- name: GetNodeByOrgName :one
 -- ACTIVE rows only (S11 WF-S11-8). Since 0056 a name may be held by several REVOKED rows plus at most one
@@ -49,7 +73,7 @@ ORDER BY created_at;
 -- lint:cross-org — keyed by node id after the caller authorized via the current
 -- cert; renewal rotates the serial and stamps activity/version.
 UPDATE nodes
-SET cert_serial = $2, agent_version = $3, cert_not_after = $4, last_seen_at = now()
+SET cert_serial = $2, agent_version = $3, cert_not_after = $4, cert_public_key = $5, last_seen_at = now()
 WHERE id = $1 AND status = 'active';
 
 -- name: TouchNodeSeen :exec
@@ -76,6 +100,25 @@ SET wg_public_key = @wg_public_key,
 WHERE id = @id AND status = 'active';
 
 -- name: RevokeNode :exec
+-- KEEPS THE SITE BINDING. The unbind added for WF-S11-14 was RULED REVERSED ON EVIDENCE after review, because the
+-- status filter on ListSiteNodesForOrg was sufficient for the compiler input on its own and the unbind bought
+-- nothing while costing three things:
+--
+--   1. BindNodeToSite has no status guard and authorizes purely on site_id being NULL, so an unbound-by-revocation
+--      gateway could be bound to any site via API/CLI/GitOps — previously refused as already-bound. The site then
+--      held a dead gateway that the status-filtered compiler input excludes, so cross-site traffic was silently
+--      denied while the UI showed a gateway present: the exact policy-reads-correct-traffic-denied class the
+--      filter was added to close.
+--   2. assembleTopology joins a site's gateways with `n.site_id === s.id`, so a revoked gateway vanished from the
+--      Sites card entirely — indistinguishable from a site that never had one, and it made the badge-suppression
+--      fix landed in the same commit unreachable.
+--   3. Nothing recorded which site the gateway served. The node.revoked audit row's metadata was an empty map, so
+--      after the unbind neither UI, API nor audit log could answer it — while the docs told the operator to
+--      re-apply that very binding.
+--
+-- THE PRINCIPLE THIS ESTABLISHES CONCRETELY: revocation preserves what it invalidates. Marking a row revoked is
+-- enough; destroying the facts that explain it is not part of the job. Readers that must ignore a revoked gateway
+-- filter on status — which is one predicate in one place, versus three consequences spread across three surfaces.
 UPDATE nodes
 SET status = 'revoked', revoked_at = now()
 WHERE org_id = $1 AND id = $2;
@@ -184,3 +227,102 @@ SELECT org_id FROM org_hub_set WHERE array_length(configured, 1) > 1;
 -- lint:cross-org — org-scoped. The node's current hub_priority (nullable) so SetHubPriority can audit the
 -- old→new transition (S8.6 Slice 6 — the pin is a topology-consequential act).
 SELECT hub_priority FROM nodes WHERE id = $1 AND org_id = $2;
+
+-- name: CreateRekeyChallenge :exec
+-- lint:cross-org — a challenge is not org-scoped: it is issued BEFORE the caller is known to be anyone, and the
+-- identifier it names is only resolved to a node at submit time. That is the anti-enumeration property (D9), not an
+-- oversight.
+-- The KIND is stored alongside the value (D10) so a nonce issued for one identifier kind cannot be spent under the
+-- other. Two kinds sharing a string is not realistic today; a format change is how "not realistic" stops holding.
+-- THE ROLLING-UPGRADE SHIM IS GONE (review pass 1 #20). It wrote cert_serial alongside identifier so a
+-- previous-version replica could consume a challenge this version issued — protecting a control-plane version
+-- THAT CANNOT EXIST: node_rekey_challenges is created by migration 0058, in the SAME RELEASE as 0061. No shipped
+-- version has ever read this table, let alone that column.
+--
+-- It was built because TestMigrationsAreBackwardCompatibleForOneVersion refused a RENAME — and that guard is a
+-- line-level regex over migration text with no notion of which tables the previous version knew, so it fired on a
+-- rename inside a table one version ago did not have. Its verdict was taken as authority and a shim was built to
+-- satisfy it. The column stays until the registered contract migration drops it; nothing writes it now.
+INSERT INTO node_rekey_challenges (nonce, identifier, identifier_kind, expires_at)
+VALUES ($1, $2, $3, $4);
+
+-- name: ConsumeRekeyChallenge :one
+-- lint:cross-org — a challenge carries no org and cannot: it is issued before the caller is known to be anyone,
+-- and binding it to an org would require resolving the serial at issue time, which is the enumeration oracle D9
+-- exists to avoid. The org is established later, from the node the serial resolves to.
+-- SINGLE-USE, enforced by the UPDATE's own WHERE clause rather than by a read-then-write: two concurrent submits
+-- with the same nonce cannot both win, because only one row can transition consumed_at from NULL. A read-check-write
+-- would have a race exactly wide enough to matter here.
+--
+-- Returns the row only when it was unconsumed AND unexpired AND bound to this exact identifier AND KIND. No rows =
+-- refuse, and the caller must not distinguish which of those it was.
+-- The read half of the same removed shim (review pass 1 #20): coalesce(identifier, cert_serial) existed to consume
+-- a challenge written by a previous version that did not know the column. No such version exists — 0058 created
+-- this table in the same release — so the fallback could only ever match rows this version wrote itself.
+UPDATE node_rekey_challenges
+SET consumed_at = now()
+WHERE nonce = $1 AND identifier = $2 AND identifier_kind = $3
+  AND consumed_at IS NULL AND expires_at > now()
+RETURNING *;
+
+-- name: DeleteExpiredRekeyChallenges :execrows
+-- lint:cross-org — a retention sweep over a table with no org column, by design (see ConsumeRekeyChallenge).
+-- Pruning for a table an unauthenticated endpoint writes to. Consumed rows are kept briefly too — a consumed nonce
+-- must keep failing rather than becoming unknown, so deleting it the instant it is spent would turn replay into
+-- "no such challenge" and lose the distinction in the log.
+DELETE FROM node_rekey_challenges
+WHERE expires_at < now() - interval '1 hour';
+
+-- name: GetNodesByCertKeyFingerprint :many
+-- The SECOND re-key identifier (S13.1 D10). :many, and the plurality is the POINT.
+--
+-- cert_key_fingerprint is deliberately NOT unique (see migration 0061: a UNIQUE index would turn a lookup ambiguity
+-- into a migration failure on any fleet that already enrolled two nodes with the same key). So this query returns up
+-- to TWO rows and its caller REFUSES when it gets more than one. A `:one` query would have raised a runtime
+-- "multiple rows" error — a refusal by accident, at a moment when identity is being trusted, distinguishable in
+-- timing and in the log from a clean refusal. Ambiguity here fails CLOSED, deliberately and visibly.
+--
+-- EXACT MATCH ONLY — `=` on the full 64-hex digest. Never a prefix, never a LIKE: a prefix match would let a caller
+-- narrow the fleet's key space one request at a time, which is precisely the enumeration property D9 chose the
+-- serial over the node name to avoid.
+--
+-- REVOKED ROWS ARE NOT FILTERED, matching GetNodeByCertSerial. A revoked node must be refused by the GONE-GATE, at
+-- the same stage and with the same logged reason as it is on the serial path — filtering it out here would make the
+-- two identifiers produce different diagnostics for the same condition, and an operator reading "no node holds this
+-- key" for a node they revoked yesterday is being misled by their own tooling.
+-- lint:cross-org — same reasoning as GetNodeByCertSerial and RekeyNode: the caller is an unauthenticated agent with
+-- no session and no org context, and the recorded key material IS the identity claim being tested.
+SELECT * FROM nodes
+WHERE cert_key_fingerprint = $1
+LIMIT 2;
+
+-- name: RekeyNode :one
+-- THE IDENTITY CHANGE, atomic (S13.1 D2). SAME node id — that is the whole point: the gateway that comes back IS
+-- the gateway that left, keeping its site binding, its history and its metrics series.
+--
+-- Rotates the serial, the recorded public key and the expiry together. A row half-re-keyed — new certificate,
+-- old recorded key — is a node whose proof-of-possession material no longer matches what it holds, so the columns
+-- move in one statement.
+--
+-- Guarded on the CALLER having already authorized: status must still be what it was when RekeyAuthorized ran, so a
+-- node revoked or renewed in the meantime cannot be re-keyed on a stale decision.
+-- lint:cross-org — authorization here is the CERT SERIAL plus proof of possession, not an org membership: the
+-- caller is an unauthenticated agent that holds no session and no org context, which is the whole premise of
+-- recovery (its certificate is the thing that failed). The serial is globally unique (nodes_cert_serial_key), so it
+-- identifies exactly one node and therefore exactly one org — the same reasoning that annotates
+-- GetNodeByCertSerial, which is how every authenticated agent request already resolves its node.
+-- IT CANNOT RESURRECT. This statement does not mention `status` or `revoked_at` at ALL — not "sets them
+-- carefully", does not reference them. Re-key is therefore incapable of un-revoking a node rather than merely
+-- forbidden from it, the same instinct as the gone-gate having no liveness parameter to pass. And it is guarded on
+-- `status = 'active'` so a revoked row cannot be re-keyed even if a future caller reached here without the gate.
+-- TestRekeyQueryCannotResurrect enforces both halves against this text.
+-- cert_delivered_at IS CLEARED IN THIS SAME STATEMENT (S13.1 D3 condition 1), not in a follow-up write.
+-- A new serial that inherited the old serial's delivered marker leaves the redelivery gate either permanently
+-- shut (the new certificate looks delivered before it has ever been used, so a lost response is unrecoverable) or
+-- permanently open (if the inherited value were NULL) — and neither state announces itself. One statement, so the
+-- marker cannot disagree with the serial it describes.
+UPDATE nodes
+SET cert_serial = $2, cert_public_key = $3, cert_not_after = $4, agent_version = $5, last_seen_at = now(),
+    cert_delivered = false, cert_delivered_at = NULL
+WHERE id = $1 AND cert_serial = $6 AND status = 'active'
+RETURNING *;

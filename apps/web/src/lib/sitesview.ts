@@ -249,7 +249,13 @@ export function assembleTopology(
         name: n.name,
         status: n.status,
         isHub: n.is_site_hub === true,
-        health: policyHealthBadge(n),
+        // WF-S11-10c: no health badge on a REVOKED gateway. `revoked` IS its state, and a degradation badge
+        // beside it describes a gateway that is no longer meant to work — on the walk this rendered
+        // "aws-gw-1 revoked ... certificate expired — re-enroll this gateway", two labels contradicting each
+        // other with the instructional one urging an operator to undo a deliberate revocation. Suppressed here,
+        // in the view-model, rather than in the component: the same fix in Gateways.tsx was component-local and
+        // that is precisely why this second surface still had the defect.
+        health: n.status === "revoked" ? null : policyHealthBadge(n),
         siteLinkNote: siteLinkNote(n), // WF-B: independent of `health` — the demoted-dead-peer subordinate line
         maxPolicyVersion: n.max_policy_version ?? null,
         agentVersion: n.agent_version,

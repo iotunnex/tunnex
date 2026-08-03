@@ -27,6 +27,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/node/internal/dnsforward"
 	"github.com/tunnexio/tunnex/apps/node/internal/egress"
 	"github.com/tunnexio/tunnex/apps/node/internal/flowlog"
+	"github.com/tunnexio/tunnex/apps/node/internal/identity"
 	"github.com/tunnexio/tunnex/apps/node/internal/nodepolicy"
 	"github.com/tunnexio/tunnex/apps/node/internal/ovpnserver"
 	"github.com/tunnexio/tunnex/apps/node/internal/reconcile"
@@ -52,40 +53,113 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	certPEM, keyPEM, caPEM, err := loadCreds(certDir)
-	if err != nil {
-		// Not enrolled yet. Enroll if we have a join token; otherwise idle
-		// (liveness up, readiness false) until one is provided.
-		if joinToken == "" {
-			logger.Warn("agent_not_enrolled", slog.String("reason", "no cert and no TUNNEX_JOIN_TOKEN"))
+	stored := loadStored(certDir)
+	certPEM, keyPEM, caPEM := stored.CertPEM, stored.KeyPEM, stored.CAPEM
+
+	// S13.1: the stored-identity-vs-join-token decision is a PURE FUNCTION (internal/identity), not an inline
+	// branch. It used to be one, and it was wrong in the case that matters most: an EXPIRED stored certificate
+	// was preferred over a valid join token the operator had just supplied, so the agent looped forever on
+	// `tls: expired certificate` — /agent/renew requires the certificate that expired (EPIC 11 WF-S11-11). The
+	// safe direction is always the stored identity; the function narrows that preference to the cases where the
+	// stored identity can still work, and cites the evidence for every determination.
+	verdict := identity.Decide(stored, nodeName, joinToken != "", time.Now())
+
+	// WF-S11-11b: report the identity actually IN USE, not the one requested. `nodeName` came from
+	// TUNNEX_NODE_NAME and was never reconciled with the certificate, so a wrong-host run printed the requested
+	// name while reusing a different gateway's identity — the diagnostic hid the very fact it exists to show.
+	nodeName = identity.EffectiveName(verdict, nodeName)
+
+	switch verdict.Action {
+	case identity.Recover:
+		// S13.1 (review #2): RE-KEY FIRST, token second. Proof of possession recovers this node IN PLACE — same id,
+		// same site binding, same devices — where a token enrolment creates a new node and discards all three. The
+		// trigger is local: identity.Decide reached this verdict from this agent's own clock against its own stored
+		// certificate, with no network call, so a transient outage cannot land here.
+		c, k, ca, outcome := attemptRekey(ctx, logger, apiURL, certDir, certPEM, keyPEM, caPEM, nodeName,
+			verdict.HaveToken)
+		switch outcome {
+		case rekeyRecovered:
+			certPEM, keyPEM, caPEM = c, k, ca
+			nodeName = identity.EffectiveName(identity.Decide(identity.Stored{CertPEM: certPEM, KeyPEM: keyPEM, CAPEM: caPEM}, nodeName, false, time.Now()), nodeName)
+
+		case rekeyNotNeeded:
+			// The CLOCK was wrong, not the credential. Keep the stored identity and carry on as if this had never
+			// been entered — which is what a corrected clock means.
+
+		case rekeyCancelled:
+			// SHUTDOWN IS NOT A REFUSAL. This path used to report "re-key was refused and no join token is
+			// available" on a SIGTERM, and with a token it started an enrolment on an already-cancelled context. An
+			// operator reading the logs of a normal restart was told their gateway was unrecoverable.
+			logger.Info("agent_rekey_interrupted", slog.String("reason", "shutting down"))
+			return
+
+		default: // rekeyExhausted or rekeyImpossible — the join token is the documented remedy
+			if !verdict.HaveToken {
+				logger.Error("agent_unrecoverable",
+					slog.String("reason", "re-key was refused and no join token is available"),
+					slog.String("remedy", "mint a join token in the control plane and restart this agent with "+
+						"TUNNEX_JOIN_TOKEN set"))
+				<-ctx.Done()
+				return
+			}
+			logger.Warn("agent_falling_back_to_join_token",
+				slog.String("note", "re-key did not succeed; enrolling with the join token. This creates a NEW "+
+					"node: its site binding must be re-applied and devices homed on the old node need re-issuing"))
+			tc, tk, tca, ok := enrollWithToken(ctx, logger, apiURL, certDir, joinToken, nodeName)
+			if !ok {
+				// DO NOT EXIT. An enrolment refusal (a name still held by this node's own expired row, a consumed
+				// token, a CP mid-restart) is a condition a control-plane change can resolve, and exiting forfeits
+				// the reconciliation that would have fixed it — turning a recoverable state into CrashLoopBackOff.
+				<-ctx.Done()
+				return
+			}
+			certPEM, keyPEM, caPEM = tc, tk, tca
+		}
+
+	case identity.Idle:
+		// Liveness stays up, readiness stays false. LOUD, and naming the remedy rather than the condition.
+		logger.Error("agent_no_usable_identity",
+			slog.String("reason", verdict.Reason),
+			slog.String("remedy", verdict.Evidence),
+			slog.String("state_dir", certDir))
+		<-ctx.Done()
+		return
+
+	case identity.UseToken:
+		logger.Info("agent_enrolling",
+			slog.String("node_name", nodeName),
+			slog.String("reason", verdict.Reason),
+			slog.String("evidence", verdict.Evidence))
+		if verdict.StoredCN != "" {
+			logger.Warn("agent_replacing_unusable_identity",
+				slog.String("stored_cn", verdict.StoredCN),
+				slog.String("enrolling_as", nodeName),
+				slog.Bool("name_mismatch", verdict.NameMismatch))
+		}
+		c, k, ca, ok := enrollWithToken(ctx, logger, apiURL, certDir, joinToken, nodeName)
+		if !ok {
+			// Same reasoning as the Recover fallback: never exit on a condition the control plane can resolve.
 			<-ctx.Done()
 			return
 		}
-		logger.Info("agent_enrolling", slog.String("node_name", nodeName))
-		key, csr, gerr := control.GenerateKeyAndCSR(nodeName)
-		if gerr != nil {
-			logger.Error("agent_csr_failed", slog.String("error", gerr.Error()))
-			os.Exit(1)
+		certPEM, keyPEM, caPEM = c, k, ca
+
+	case identity.UseStored:
+		// WF-2 (S8.2c) protection, intact: a re-used VM keeps its OLD identity and org rather than silently
+		// adopting a new one. Still named LOUD at boot, and now it names the identity it KEPT.
+		lg := logger.Warn
+		if verdict.NameMismatch {
+			// A valid certificate for a DIFFERENT node than requested is almost always operator error — a
+			// mis-set env var, a cloned image, or a command run on the wrong host. ERROR, because the operator
+			// asked for something that is not happening, and the agent will not resolve it for them.
+			lg = logger.Error
 		}
-		res, eerr := control.Enroll(ctx, apiURL, joinToken, csr, nodeName, version(), protocolVersion)
-		if eerr != nil {
-			logger.Error("agent_enroll_failed", slog.String("error", eerr.Error()))
-			os.Exit(1)
-		}
-		certPEM, keyPEM, caPEM = []byte(res.CertPEM), key, []byte(res.CAPEM)
-		if serr := saveCreds(certDir, certPEM, keyPEM, caPEM); serr != nil {
-			logger.Error("agent_save_creds_failed", slog.String("error", serr.Error()))
-			os.Exit(1)
-		}
-		logger.Info("agent_enrolled", slog.String("node_id", res.NodeID))
-	} else {
-		// WF-2: an existing identity was found in the state volume — this host already ran a gateway.
-		// Name it LOUD at boot: a re-used VM silently keeps its OLD identity (and org), which mis-convicted
-		// D2 during the cross-cloud walk. To RE-ENROLL a re-used host, wipe the state volume first.
-		logger.Warn("agent_reusing_stored_identity",
+		lg("agent_reusing_stored_identity",
 			slog.String("state_dir", certDir),
-			slog.String("node_name", nodeName),
-			slog.String("note", "this host already holds a gateway identity; wipe the state volume to re-enroll fresh"))
+			slog.String("stored_cn", verdict.StoredCN),
+			slog.String("reason", verdict.Reason),
+			slog.Bool("name_mismatch", verdict.NameMismatch),
+			slog.String("note", verdict.Evidence))
 	}
 
 	client, err := control.NewClient(agentURL, serverName, nodeName, certPEM, keyPEM, caPEM)
@@ -285,6 +359,7 @@ func main() {
 	// token (no silent re-admission).
 	renewEvery := getdur("TUNNEX_AGENT_RENEW_INTERVAL", 24*time.Hour)
 	go renewLoop(ctx, client, certDir, renewEvery, logger)
+	go identityWatchLoop(ctx, client, apiURL, certDir, nodeName, joinToken != "", identityWatchInterval, logger)
 
 	// Report per-peer live telemetry (handshake/bytes/endpoint) on an interval.
 	go statusLoop(ctx, client, backend, getdur("TUNNEX_AGENT_STATUS_INTERVAL", 30*time.Second), logger)
@@ -339,35 +414,198 @@ func serveHealth(addr string, ready *atomic.Bool, logger *slog.Logger) {
 	}
 }
 
-func loadCreds(dir string) (cert, key, ca []byte, err error) {
-	cert, err = os.ReadFile(filepath.Join(dir, "cert.pem"))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	key, err = os.ReadFile(filepath.Join(dir, "key.pem"))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	ca, err = os.ReadFile(filepath.Join(dir, "ca.pem"))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return cert, key, ca, nil
+// loadStored reads the credential set WITHOUT collapsing it.
+//
+// It used to return on the first error, so three files became one error and the caller learned only "something
+// failed". An unreadable ca.pem was then reported as "no credentials in the state directory" — false — and the
+// agent spent its join token, enrolling as a NEW node and discarding the site binding and devices of a gateway
+// whose identity was perfectly provable (pass-3 claims 16, 17, 18, 19, 50). WHICH FILE FAILED CHANGES THE
+// VERDICT, so the verdict must be able to see which file failed.
+func loadStored(dir string) identity.Stored {
+	var st identity.Stored
+	st.CertPEM, st.CertErr = os.ReadFile(filepath.Join(dir, "cert.pem"))
+	st.KeyPEM, st.KeyErr = os.ReadFile(filepath.Join(dir, "key.pem"))
+	st.CAPEM, st.CAErr = os.ReadFile(filepath.Join(dir, "ca.pem"))
+	return st
 }
 
+// saveCreds writes the credential set so that a crash leaves EITHER the old set or the new set, never a mixture
+// (review #3).
+//
+// The previous version wrote cert.pem, key.pem and ca.pem with three separate os.WriteFile calls, iterating a Go
+// map — so the order was randomised per run and a crash between two writes could persist a NEW certificate beside
+// an OLD key. That combination authenticates as nothing: the cert does not match the key, so the agent cannot use
+// the mTLS channel, and it cannot prove possession of the key the control plane recorded either. A gateway lands
+// in a state no recovery path covers, from an interruption that lasted milliseconds.
+//
+// Every file is written to a temp name and renamed. rename(2) within a directory is atomic, so each file is either
+// wholly old or wholly new; and the KEY is renamed LAST, because the key is what proves identity — if the sequence
+// is interrupted, the old key still matches the old certificate and the agent remains recoverable.
 func saveCreds(dir string, cert, key, ca []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	for name, data := range map[string][]byte{"cert.pem": cert, "key.pem": key, "ca.pem": ca} {
-		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+	// Deterministic order, key last. A map range would randomise it, which is how the interrupted-write hazard
+	// became unpredictable rather than merely possible.
+	type f struct {
+		name string
+		data []byte
+	}
+	for _, w := range []f{{"ca.pem", ca}, {"cert.pem", cert}, {"key.pem", key}} {
+		tmp := filepath.Join(dir, w.name+".tmp")
+		if err := os.WriteFile(tmp, w.data, 0o600); err != nil {
+			return err
+		}
+		if err := os.Rename(tmp, filepath.Join(dir, w.name)); err != nil {
 			return err
 		}
 	}
+	// A pending re-key key is SUPERSEDED the moment a real identity lands — whether it landed by re-key promotion,
+	// by renewal, or by join-token enrolment. Leaving it would make the next recovery attempt spend a challenge
+	// proving possession of a key the control plane does not hold. Best-effort: a stale pending key costs one wasted
+	// attempt, and failing the save over it would cost the identity that just succeeded.
+	_ = os.Remove(filepath.Join(dir, pendingKeyFile))
 	return nil
 }
 
+// pendingKeyFile holds a keypair minted for a re-key that has been SUBMITTED but not confirmed.
+//
+// It is a separate filename rather than an early write to key.pem on purpose: key.pem must always be the key that
+// matches cert.pem, and a re-key in flight has no certificate yet. loadCreds and identity.Decide never look at this
+// file, so a pending key cannot become an identity by accident — only saveCreds can promote it.
+const pendingKeyFile = "rekey-pending-key.pem"
+
+// renewRetryInterval is how soon a FAILED renewal is retried. Short relative to the 48h certificate lifetime and
+// long enough not to hammer a control plane that is down.
+const renewRetryInterval = 15 * time.Minute
+
+// saveCredsFn is the promotion seam. A test needs to make the write fail DETERMINISTICALLY to prove that a local
+// write failure after the control plane has already committed is retried rather than fatal — and permission
+// tricks do not work (the agent runs as root, which bypasses them) while timing tricks produce a SKIP, which
+// reads exactly like a pass.
+var saveCredsFn = saveCreds
+
+// loadOrCreatePendingKey returns the pending re-key key, minting and PERSISTING one if none exists.
+//
+// The second return says whether it was already on disk — which is the only evidence available that an earlier
+// attempt got far enough for the control plane to have recorded it. See attemptRekey for why that ordering matters.
+func loadOrCreatePendingKey(dir string) (keyPEM []byte, wasOnDisk bool, err error) {
+	path := filepath.Join(dir, pendingKeyFile)
+	if b, rerr := os.ReadFile(path); rerr == nil && len(b) > 0 {
+		if _, perr := control.KeyFingerprintFromPEM(b); perr == nil {
+			return b, true, nil
+		}
+		// Unreadable pending material is worse than none: it would be submitted, refused, and looked like a
+		// server-side refusal. Replace it loudly-by-consequence (the caller logs the mint) rather than carrying it.
+	}
+	k, err := control.GenerateKey()
+	if err != nil {
+		return nil, false, err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, false, err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, k, 0o600); err != nil {
+		return nil, false, err
+	}
+	// Rename so a crash mid-write cannot leave a truncated key that would then be submitted as an identity.
+	if err := os.Rename(tmp, path); err != nil {
+		return nil, false, err
+	}
+	return k, false, nil
+}
+
+// renewLoop keeps the certificate ahead of its own expiry.
+//
+// ANCHORED TO THE CERTIFICATE, NOT TO PROCESS START (review pass 3 claims 5/12). A fixed ticker from boot means a
+// process that restarts when its certificate is already 30 hours old waits another 24 before its first attempt —
+// six hours after it expired. The gateway then needs the recovery path for a certificate that was renewable the
+// whole time. The first tick is therefore computed from what is LEFT, and a failed renew retries on a short
+// interval instead of waiting a full cycle for a second chance.
 func renewLoop(ctx context.Context, client *control.Client, certDir string, every time.Duration, logger *slog.Logger) {
+	// Half of whatever remains, floored so a nearly-expired certificate is attempted promptly and never hot-loops.
+	next := every
+	if certPEM, err := os.ReadFile(filepath.Join(certDir, "cert.pem")); err == nil {
+		if left := time.Until(identity.NotAfter(certPEM)); left > 0 && left/2 < next {
+			next = left / 2
+			if next < time.Minute {
+				next = time.Minute
+			}
+			logger.Info("agent_renew_scheduled_from_cert",
+				slog.String("cert_expires_in", left.Truncate(time.Minute).String()),
+				slog.String("first_attempt_in", next.Truncate(time.Minute).String()),
+				slog.String("note", "anchored to the certificate's remaining life, not to process start"))
+		}
+	}
+	t := time.NewTimer(next)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			t.Reset(every)
+			certPEM, keyPEM, err := client.Renew(ctx, version())
+			if err != nil {
+				// A FAILED RENEW RETRIES SOON, NOT IN A FULL CYCLE. One transient failure used to cost 24 hours,
+				// which for a 48h certificate is half its remaining life spent waiting.
+				logger.Warn("agent_renew_failed", slog.String("error", err.Error()),
+					slog.String("retry_in", renewRetryInterval.String()))
+				t.Reset(renewRetryInterval)
+				continue
+			}
+			// THE READ ERROR IS NOT DISCARDED (pass-3 claims 30, 32, 37, 46, 52). It used to be `ca, _ :=`, and
+			// the empty result went straight to saveCreds — which atomically REPLACED the trust anchor with a
+			// zero-length file. The next boot failed AppendCertsFromPEM and os.Exit(1)'d, forever, from one
+			// transient read. A renewal must never be able to destroy the anchor it did not fetch.
+			ca, caErr := os.ReadFile(filepath.Join(certDir, "ca.pem"))
+			if caErr != nil {
+				logger.Warn("agent_renew_anchor_unreadable",
+					slog.String("error", caErr.Error()),
+					slog.String("consequence", "the renewed certificate was NOT written; the existing credential "+
+						"set is untouched and this agent keeps using it"),
+					slog.String("remedy", "check "+certDir+" is readable; renewal retries on the next tick"))
+				t.Reset(renewRetryInterval)
+				continue
+			}
+			if err := saveCreds(certDir, certPEM, keyPEM, ca); err != nil {
+				logger.Warn("agent_renew_persist_failed", slog.String("error", err.Error()))
+				continue
+			}
+			logger.Info("agent_cert_renewed")
+		}
+	}
+}
+
+// identityWatchInterval — how often the identity gate is re-evaluated while the agent runs. A var so a red can
+// drive it fast; five minutes in production is far below any certificate lifetime and costs three file reads.
+var identityWatchInterval = 5 * time.Minute
+
+// identityWatchLoop — WF-S13-6. THE GATE RUNS MORE THAN ONCE.
+//
+// THE DEFECT THIS CLOSES. identity.Decide was evaluated exactly once, at boot, against the credentials on disk at
+// that instant; attemptRekey had exactly one caller, inside that boot switch. So recovery was reachable only from
+// a COLD START. A certificate that expired while the agent was running — the ordinary case, and the actual
+// incident that opened EPIC 13 — was detected, logged, and never acted on. Measured on the wire 2026-07-31:
+// STUCK 59 MINUTES, RECOVERED IN 1.77 SECONDS once a human typed `docker restart`.
+//
+// Nothing automatic could bridge that gap, because two individually-correct decisions composed badly: the loop
+// never exits on refusal (right — a gateway must not stop carrying traffic over a control-plane opinion), so
+// Docker's restart policy never fires, kubelet sees a process that is up (and the shipped chart declares no
+// probes at all), and systemd sees no failure code.
+//
+// WHY A TIMER AND NOT AN ERROR HANDLER. The obvious fix is to escalate when requests start failing with
+// `tls: expired certificate`. That would make a NETWORK SIGNAL the trigger, and identity.Decide's guarantee is
+// that no network signal can reach it — there is no argument to pass one through. An agent that re-keys because
+// it cannot reach the control plane hammers an unauthenticated endpoint during every partition and CP restart,
+// hardest when the CP can least cope.
+//
+// So this is not escalation-from-failure. It is THE EXISTING DECISION, INVOKED MORE THAN ONCE, over exactly the
+// inputs it already reads: the files in the state directory and this host's clock. The verdict a boot would have
+// reached is the verdict this reaches, which is why nothing about the decision needed to change.
+func identityWatchLoop(ctx context.Context, client *control.Client, apiURL, certDir, nodeName string,
+	haveToken bool, every time.Duration, logger *slog.Logger) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -375,17 +613,38 @@ func renewLoop(ctx context.Context, client *control.Client, certDir string, ever
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			certPEM, keyPEM, err := client.Renew(ctx, version())
-			if err != nil {
-				logger.Warn("agent_renew_failed", slog.String("error", err.Error()))
+			// Re-read from DISK, not from a variable captured at boot: a renewal or an earlier recovery may have
+			// replaced the set since, and a stale copy would re-decide a question that no longer exists.
+			st := loadStored(certDir)
+			verdict := identity.Decide(st, nodeName, haveToken, time.Now())
+			if verdict.Action != identity.Recover {
 				continue
 			}
-			ca, _ := os.ReadFile(filepath.Join(certDir, "ca.pem"))
-			if err := saveCreds(certDir, certPEM, keyPEM, ca); err != nil {
-				logger.Warn("agent_renew_persist_failed", slog.String("error", err.Error()))
+			logger.Warn("agent_identity_recovery_at_runtime",
+				slog.String("reason", verdict.Reason),
+				slog.String("evidence", verdict.Evidence),
+				slog.String("note", "the identity gate reached a RECOVER verdict while this agent was already "+
+					"running. The trigger is local — this host's files against this host's clock — and no "+
+					"network outcome contributed to it"))
+
+			c, k, _, outcome := attemptRekey(ctx, logger, apiURL, certDir, st.CertPEM, st.KeyPEM, st.CAPEM,
+				nodeName, haveToken)
+			if outcome != rekeyRecovered {
+				// Every other outcome already logged its own diagnosis, and none of them is fixable from here.
+				// The next tick re-decides from disk, so a control plane repaired in the meantime is picked up
+				// without an operator touching this host.
 				continue
 			}
-			logger.Info("agent_cert_renewed")
+			if err := client.AdoptCredentials(c, k); err != nil {
+				logger.Error("agent_identity_recovered_but_not_adopted",
+					slog.String("error", err.Error()),
+					slog.String("consequence", "the recovery SUCCEEDED and is on disk; this running process could "+
+						"not install it, so it takes effect on the next restart"))
+				continue
+			}
+			logger.Info("agent_identity_recovered_in_place",
+				slog.String("note", "recovered by proof of possession WITHOUT a restart — same node, same id, "+
+					"same site binding, same devices. The control channel re-handshakes with the new certificate"))
 		}
 	}
 }
@@ -490,17 +749,6 @@ func egressLoop(ctx context.Context, mgr *egress.Manager, egressNAT *atomic.Bool
 }
 
 // sleepCtx sleeps for d, returning false if ctx is cancelled first.
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-t.C:
-		return true
-	}
-}
-
 // maxStatusPeers caps a status report so a gateway with thousands of peers can't
 // turn a heartbeat into a huge post. Excess is dropped (and logged) — the status
 // view is best-effort telemetry, not the source of truth.
@@ -647,3 +895,365 @@ func startFlowLog(ctx context.Context, group int, client *control.Client, egress
 
 func hostname() string { h, _ := os.Hostname(); return h }
 func version() string  { return getenv("TUNNEX_AGENT_VERSION", "0.1.0") }
+
+// Re-key retry pacing (S13.1). THE CEILING IS THE LOAD-BEARING NUMBER, not the floor.
+//
+// A gateway whose key the control plane never recorded — every node enrolled before migration 0057 and not since
+// renewed — will be refused FOREVER, and it cannot learn that from the response, because the refusal is uniform by
+// design (a live node, an unknown serial and a wrong key are indistinguishable, so the endpoint cannot be used as an
+// oracle). So the retry loop must assume it may be permanent.
+//
+// One attempt per hour, sustained, is two requests per hour per bricked gateway against an endpoint whose expensive
+// path already requires knowing a real serial for a genuinely expired node. That is negligible load and still
+// recovers within an hour of an operator fixing the underlying cause — which is the trade the ceiling exists to make.
+// The floor is short because the common case is a gateway rebooting after a weekend, where recovery in seconds is the
+// whole point.
+// VAR, not const, for ONE reason: a test that proves the loop EXITS on persistent refusal has to sit through the
+// backoff to get there, and a test that takes two minutes is a test people stop running. Nothing in the product
+// writes these.
+var (
+	rekeyBackoffFloor   = 30 * time.Second
+	rekeyBackoffCeiling = time.Hour
+)
+
+// rekeyOutcome is what the retry loop concluded. Before this restructure the function returned "some bytes or
+// nil", and nil meant four different things — recovered-but-unsaveable, refused forever, context cancelled, and
+// impossible — which is why the join-token fallback was unreachable and a SIGTERM printed a refusal message.
+type rekeyOutcome int
+
+const (
+	rekeyRecovered  rekeyOutcome = iota // credentials returned and on disk
+	rekeyExhausted                      // persistently refused, and a join token exists to fall back to
+	rekeyCancelled                      // the context ended; say nothing about the control plane
+	rekeyImpossible                     // no local material to attempt with
+	rekeyNotNeeded                      // the premise dissolved: the stored certificate is valid after all
+)
+
+// rekeyRefusalsBeforeToken bounds how long the loop insists before handing over to the operator's remedy.
+//
+// It exists because the loop had NO exit: a persistently refused gateway retried toward the hour ceiling forever
+// while the join token the operator had already supplied sat unused, and the log told them to do the thing the
+// agent was refusing to do. Three consecutive refusals, each behind its own backoff, is minutes of insisting —
+// long enough that a transient 403 from a restarting control plane does not spend the identity, short enough that
+// an operator who acted on the message sees it work.
+//
+// With NO token there is no exit, deliberately: retrying forever is strictly better than idling forever, and the
+// control plane may still be fixed underneath us.
+const rekeyRefusalsBeforeToken = 3
+
+// rekeyThrottlesBeforeEscalation — how many CONSECUTIVE 429s before the agent says loudly that it is being denied
+// recovery. Not an exit: a throttle is not a refusal, and no number of them may spend the identity.
+const rekeyThrottlesBeforeEscalation = 5
+
+// attemptRekey recovers an expired identity by proof of possession.
+//
+// WHAT IT LOGS, AND WHY THAT MATTERS. The control plane's refusal carries no reason. So the agent reports what it
+// knows LOCALLY — my certificate expired at T, I attempted re-key, it was refused, and the remedy is a join token.
+// Without that an operator finds an agent idling silently in exactly the situation they are trying to diagnose.
+//
+// EVERY INPUT IS RE-EVALUATED INSIDE THE LOOP (review pass 1 ROOT 2). The previous version sampled its premise,
+// its identities and its pending-key state ONCE before an infinite loop that revisited none of them, so: a clock
+// correction could not end a re-key of a healthy gateway; the fingerprint identity that D10 exists to serve was
+// never tried by the process that suffered the lost response; and a join token appearing in the environment was
+// never noticed. Three findings, one shape.
+func attemptRekey(ctx context.Context, logger *slog.Logger, apiURL, certDir string, certPEM, keyPEM, caPEM []byte,
+	nodeName string, haveToken bool) ([]byte, []byte, []byte, rekeyOutcome) {
+	serial := identity.StoredSerial(certPEM)
+
+	backoff := rekeyBackoffFloor
+	refusals := 0
+	throttles := 0
+	// identityStart ROTATES on a throttled break, and the reason is an asymmetry that is easy to miss.
+	//
+	// The identity list is ordered [fingerprint, cert_serial] — fingerprint first because it is the LOST-RESPONSE
+	// case: if a previous attempt committed on the control plane without this agent seeing the answer, the CP holds
+	// that key and trying it first avoids asking for a second issuance. Correct, and it is the RARE case.
+	//
+	// cert_serial is the identity the control plane USUALLY holds. So under a partially-exhausted bucket — where
+	// some requests in each window succeed and the rest are refused with 429 — the fingerprint consumes each
+	// window's surviving request, the throttle breaks the identity loop before cert_serial is ever reached, and the
+	// next attempt starts at the fingerprint again. THE ONE IDENTITY THAT CAN SUCCEED IS STARVED BY THE ONE THAT
+	// PROVABLY CANNOT (pass-3 #34). Rotating the start index means no identity can be starved by another, so under
+	// a throttled fleet the ordering stops deciding whether recovery happens at all.
+	identityStart := 0
+	for attempt := 1; ; attempt++ {
+		// (1) THE PREMISE, RE-READ. A re-key is authorized by this agent's own observation that its certificate has
+		// expired, and that observation depends on the CLOCK. A gateway that booted with a fast clock — before NTP
+		// settled — decided it was expired and then never asked again, so a corrected clock could not release it.
+		//
+		// DIRECTION, STATED: this check can only CANCEL a re-key, never start one. Re-reading the clock can only
+		// discover that the stored certificate is valid after all. A clock that jumps the OTHER way cannot trigger
+		// recovery from in here.
+		//
+		// CORRECTED with the runtime gate (WF-S13-6): this comment used to say "the loop is entered from
+		// identity.Decide at boot and nothing here can enter it." The first clause is no longer true —
+		// identityWatchLoop also enters it, on a timer, while the agent runs. THE SAFETY PROPERTY IS UNCHANGED and
+		// is worth restating rather than assuming: BOTH entrances are identity.Decide over purely local inputs, so
+		// neither can be induced by anything on the network. That old sentence is also the one that described the
+		// WF-S13-6 defect as a virtue, which is exactly why it is being rewritten and not merely deleted.
+		if len(certPEM) > 0 {
+			if v := identity.Decide(identity.Stored{CertPEM: certPEM, KeyPEM: keyPEM, CAPEM: caPEM}, nodeName, haveToken, time.Now()); v.Action == identity.UseStored {
+				logger.Warn("agent_rekey_no_longer_needed",
+					slog.Int("attempt", attempt),
+					slog.String("reason", "the stored certificate is valid as of the current clock — the expiry "+
+						"this recovery was based on was a clock artifact, not a fact"),
+					slog.String("action", "abandoning re-key and using the stored identity"))
+				return nil, nil, nil, rekeyNotNeeded
+			}
+		}
+
+		// (2) THE PENDING KEY AND THE IDENTITIES, REBUILT EACH PASS.
+		//
+		// pendingWasOnDisk decides whether the fingerprint identity is worth trying, and it was sampled ONCE before
+		// the loop — so the very process that suffered a lost response persisted a pending key, then never used the
+		// identity that key exists to provide, for the lifetime of the process. Re-reading makes the second
+		// iteration know what the first one wrote.
+		pending, pendingWasOnDisk, perr := loadOrCreatePendingKey(certDir)
+		if perr != nil {
+			logger.Error("agent_rekey_impossible",
+				slog.String("reason", "could not persist a new keypair before attempting re-key: "+perr.Error()),
+				slog.String("remedy", "check the state directory is writable, then restart this agent"))
+			return nil, nil, nil, rekeyImpossible
+		}
+		pendingFP, fperr := control.KeyFingerprintFromPEM(pending)
+		if fperr != nil {
+			logger.Error("agent_rekey_impossible", slog.String("reason", "pending key unreadable: "+fperr.Error()))
+			return nil, nil, nil, rekeyImpossible
+		}
+
+		type attemptIdentity struct {
+			ident  control.Identifier
+			popKey []byte
+			note   string
+		}
+		var identities []attemptIdentity
+		if pendingWasOnDisk {
+			// The lost-response identity: the control plane may already hold this key. Only meaningful once a
+			// pending key has survived an attempt, which is why it is rebuilt rather than fixed at entry.
+			identities = append(identities, attemptIdentity{
+				ident:  control.Identifier{KeyFingerprint: pendingFP},
+				popKey: pending,
+				note:   "a previous attempt may have committed on the control plane without this agent seeing the answer",
+			})
+		}
+		if serial != "" && len(keyPEM) > 0 {
+			identities = append(identities, attemptIdentity{
+				ident:  control.Identifier{CertSerial: serial},
+				popKey: keyPEM,
+				note:   "the identity this agent's stored certificate names",
+			})
+		}
+		if len(identities) == 0 {
+			logger.Error("agent_rekey_impossible",
+				slog.String("reason", "no usable local identity material: the stored certificate has no readable "+
+					"serial and no pending key survived"),
+				slog.String("remedy", "re-enroll this gateway with a join token (TUNNEX_JOIN_TOKEN)"))
+			return nil, nil, nil, rekeyImpossible
+		}
+
+		var err error
+		for n := range identities {
+			id := identities[(identityStart+n)%len(identities)]
+			var newCert []byte
+			// caPEM is the anchor ALREADY ON DISK and is never replaced (review pass 1 #1): this path is
+			// unauthenticated plain HTTP, so a CA in the response is attacker-controlled input.
+			newCert, err = control.Rekey(ctx, apiURL, id.ident, pending, id.popKey, caPEM, version(), nodeName)
+			if err == nil {
+				if serr := saveCredsFn(certDir, newCert, pending, caPEM); serr != nil {
+					// THE CONTROL PLANE ALREADY COMMITTED, AND THIS IS NO LONGER TERMINAL.
+					//
+					// It used to be: the CP had spent its one issuance, the agent could not write it, and the loop
+					// gave up — falling through to a join token and destroying the identity it had just recovered.
+					// Under the UNDELIVERED predicate that certificate was never used, so the node still reads
+					// undelivered and a retry is LEGAL. Keep the pending key (saveCreds is what clears it, and it
+					// did not get that far) and go round again.
+					logger.Error("agent_save_creds_failed",
+						slog.String("error", serr.Error()),
+						slog.String("consequence", "the control plane issued a certificate this agent could not "+
+							"write; because it was never used, the same recovery can be retried"),
+						slog.String("remedy", "free space or fix permissions on "+certDir+"; the agent keeps retrying"))
+					break
+				}
+				logger.Info("agent_rekeyed",
+					slog.String("old_cert_serial", serial),
+					slog.String("identified_by", id.ident.Describe()),
+					slog.String("note", "recovered by proof of possession — same node, same identity, new key"))
+				return newCert, pending, caPEM, rekeyRecovered
+			}
+			if errors.Is(err, control.ErrRekeyThrottled) {
+				// Do not burn the second identity's request on a rate limit — but ROTATE, so the identity that did
+				// not get its turn this time gets it first next time (#34).
+				identityStart = (identityStart + 1) % len(identities)
+				break
+			}
+			if len(identities) > 1 && errors.Is(err, control.ErrRekeyRefused) {
+				logger.Warn("agent_rekey_identity_refused",
+					slog.Int("attempt", attempt),
+					slog.String("identified_by", id.ident.Describe()),
+					slog.String("why_tried", id.note),
+					slog.String("note", "refusals are uniform, so this says nothing about the reason; trying the "+
+						"next identity this agent can prove"))
+			}
+		}
+
+		// CONSECUTIVE throttles only: anything else answering — a refusal, a transient fault, a success — means the
+		// path is not saturated, and the escalation below must describe the present, not a historical total.
+		if !errors.Is(err, control.ErrRekeyThrottled) {
+			throttles = 0
+		}
+
+		switch {
+		case err == nil:
+			// A save failure broke out of the identity loop. Not a refusal — do not count it as one.
+			logger.Warn("agent_rekey_retrying_after_local_failure", slog.Int("attempt", attempt))
+
+		case errors.Is(err, control.ErrRekeyThrottled):
+			// THROTTLED IS NOT REFUSED, and the server's own number is now honoured rather than printed and
+			// discarded. Retry-After was parsed into an error string while the agent retried on its own floor, so
+			// the log stated one interval and the code used another.
+			wait := control.RetryAfterOf(err)
+			if wait <= 0 || wait > rekeyBackoffCeiling {
+				wait = rekeyBackoffFloor
+			}
+			throttles++
+			// ESCALATION, because the throttled branch had NO EXIT AND NO ESCALATION (pass-3 claims 9 and 14): it
+			// slept and continued forever, at one WARN per attempt, indistinguishable from ordinary backoff. A
+			// fleet denied recovery by a rate limit looked exactly like a fleet waiting politely.
+			//
+			// IT STILL DOES NOT EXIT, AND THAT IS DELIBERATE. A 429 says nothing about whether this gateway can
+			// recover — falling back to the join token on a rate limit would destroy the node's id, site binding
+			// and devices because an intermediary was busy. The never-exit ruling stands; what was missing was
+			// SAYING SO LOUDLY. The remedy is an operator's to apply, and they cannot apply it unseen.
+			if throttles >= rekeyThrottlesBeforeEscalation {
+				logger.Error("agent_rekey_throttled_persistently",
+					slog.Int("consecutive_throttles", throttles),
+					slog.String("local_finding", "every re-key attempt has been rate-limited for "+
+						(time.Duration(throttles)*wait).String()+"; this gateway cannot recover while that lasts"),
+					slog.String("not_a_refusal", "the control plane has NOT refused this node. Its identity is "+
+						"intact and no join token has been or will be spent on a rate limit"),
+					slog.String("remedy", "the re-key throttle is keyed on the peer address the control plane SEES, "+
+						"which behind a reverse proxy is the proxy itself — so one caller can exhaust the budget "+
+						"for every gateway behind it. Check the control plane for rekey_throttled log lines and "+
+						"which peer is spending them"))
+			}
+			logger.Warn("agent_rekey_throttled",
+				slog.Int("attempt", attempt),
+				slog.Int("consecutive_throttles", throttles),
+				slog.String("note", "something is rate-limiting re-key attempts; this is NOT a refusal and says "+
+					"nothing about whether this gateway can recover. It may be the control plane or an intermediary "+
+					"— the agent cannot tell, and does not claim to"),
+				slog.String("retry_in", wait.String()),
+				slog.String("error", err.Error()))
+			if !sleepCtx(ctx, wait) {
+				return nil, nil, nil, rekeyCancelled
+			}
+			continue
+
+		case errors.Is(err, control.ErrIssuedCertUntrusted):
+			logger.Error("agent_rekey_response_untrusted",
+				slog.Int("attempt", attempt),
+				slog.String("local_finding", "a re-key response arrived whose certificate does NOT chain to this "+
+					"agent's trusted CA, so it did not come from this control plane"),
+				slog.String("consequence", "nothing was written; this agent kept its existing CA, certificate and key"),
+				slog.String("remedy", "check what is answering "+apiURL+" — a proxy, a captive portal, or an "+
+					"attacker on the path. Do NOT re-enroll on the strength of this message"),
+				slog.String("retry_in", backoff.String()),
+				slog.String("error", err.Error()))
+
+		case errors.Is(err, control.ErrRekeyTransient):
+			// NOTHING ANSWERED, SO NOTHING WAS DECIDED. This must never print the join-token remedy: acting on it
+			// during a control-plane restart discards a working identity.
+			logger.Warn("agent_rekey_attempt_failed",
+				slog.Int("attempt", attempt),
+				slog.String("local_finding", "the re-key attempt did not complete — no refusal was received"),
+				slog.String("note", "this says NOTHING about whether this gateway can recover; do not re-enroll "+
+					"on the strength of it"),
+				slog.String("retry_in", backoff.String()),
+				slog.String("error", err.Error()))
+
+		default: // a genuine, uniform refusal from the control plane
+			refusals++
+			logger.Error("agent_rekey_refused",
+				slog.Int("attempt", attempt),
+				slog.Int("consecutive_refusals", refusals),
+				slog.String("cert_serial", serial),
+				slog.String("pending_key_fingerprint", pendingFP[:12]),
+				slog.Int("identities_tried", len(identities)),
+				slog.String("local_finding", "this agent's certificate has expired; it cannot authenticate and cannot renew"),
+				slog.String("server_said", "refused, without a reason (the control plane's refusals are uniform by "+
+					"design so the endpoint cannot be probed)"),
+				slog.String("most_likely_cause", "this gateway was enrolled before the control plane recorded agent "+
+					"public keys, so proof-of-possession recovery is unavailable for it — or it was REVOKED, which "+
+					"re-key deliberately cannot undo"),
+				slog.String("remedy", "mint a join token in the control plane and restart this agent with "+
+					"TUNNEX_JOIN_TOKEN set"),
+				slog.String("retry_in", backoff.String()),
+				slog.String("error", err.Error()))
+
+			if haveToken && refusals >= rekeyRefusalsBeforeToken {
+				// THE DOCUMENTED REMEDY, REACHED. The operator already did what the log asked; insisting further
+				// would be the agent refusing its own advice.
+				logger.Warn("agent_rekey_exhausted",
+					slog.Int("consecutive_refusals", refusals),
+					slog.String("action", "falling back to the join token this agent was given"))
+				return nil, nil, nil, rekeyExhausted
+			}
+		}
+
+		if !sleepCtx(ctx, backoff) {
+			return nil, nil, nil, rekeyCancelled
+		}
+		if backoff < rekeyBackoffCeiling {
+			backoff *= 2
+			if backoff > rekeyBackoffCeiling {
+				backoff = rekeyBackoffCeiling
+			}
+		}
+	}
+}
+
+// sleepCtx waits d, or returns false if the context ends first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+// enrollWithToken enrolls with a join token, returning ok=false rather than exiting on failure.
+//
+// NEVER os.Exit HERE (review finding #2). An enrolment refusal is frequently something a control-plane change
+// resolves: the node's name is still held by its own expired-but-not-revoked row (409), the token was already
+// consumed, the CP is mid-restart. Exiting forfeits the reconciliation that would have fixed it and converts a
+// recoverable condition into CrashLoopBackOff — which is strictly worse than idling with liveness up and readiness
+// false, the behaviour this agent had before S13.1 touched the path.
+//
+// THE GENERAL RULE, recorded in docs/S13.1-decisions.md: an agent must never exit on a condition that a
+// control-plane change could resolve.
+func enrollWithToken(ctx context.Context, logger *slog.Logger, apiURL, certDir, joinToken, nodeName string) (certPEM, keyPEM, caPEM []byte, ok bool) {
+	key, csr, gerr := control.GenerateKeyAndCSR(nodeName)
+	if gerr != nil {
+		logger.Error("agent_csr_failed", slog.String("error", gerr.Error()))
+		return nil, nil, nil, false
+	}
+	res, eerr := control.Enroll(ctx, apiURL, joinToken, csr, nodeName, version(), protocolVersion)
+	if eerr != nil {
+		logger.Error("agent_enroll_failed",
+			slog.String("error", eerr.Error()),
+			slog.String("note", "NOT exiting — this may be resolvable from the control plane (a name still held "+
+				"by this node's own expired row, a consumed token, a restarting CP). Liveness stays up, readiness "+
+				"stays false."))
+		return nil, nil, nil, false
+	}
+	certPEM, keyPEM, caPEM = []byte(res.CertPEM), key, []byte(res.CAPEM)
+	if serr := saveCreds(certDir, certPEM, keyPEM, caPEM); serr != nil {
+		logger.Error("agent_save_creds_failed", slog.String("error", serr.Error()))
+		return nil, nil, nil, false
+	}
+	logger.Info("agent_enrolled", slog.String("node_id", res.NodeID))
+	return certPEM, keyPEM, caPEM, true
+}

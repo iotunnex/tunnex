@@ -170,3 +170,20 @@ func toU32(a netip.Addr) uint32 {
 func fromU32(u uint32) netip.Addr {
 	return netip.AddrFrom4([4]byte{byte(u >> 24), byte(u >> 16), byte(u >> 8), byte(u)})
 }
+
+// InPool reports whether ip is inside cidr. Used by the cascade restore before reclaiming a remembered address
+// (S13.1 review fold #14): 0059 stopped clearing assigned_ip so a revoked row remembers what it held, but the
+// pool can be SHRUNK while those rows are invisible to the shrink guard — which only inspects live allocations.
+// Reclaiming then hands a device an address outside its own org's pool: no gateway routes it, and every surface
+// reads clean. Taken-ness and validity are different questions, and only one of them was being asked.
+func InPool(cidr, ip string) bool {
+	p, err := prefix(cidr)
+	if err != nil {
+		return false
+	}
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return false
+	}
+	return p.Contains(a)
+}

@@ -623,7 +623,8 @@ func (s *Service) SweepExpiredGrants(ctx context.Context) (int, error) {
 // No in-memory window: a sweep error just retries next tick (the rows are still expired),
 // and a grant that lapses during downtime is deleted+audited on the next tick after
 // restart — the audit trail has no hole. Enterprise-only (started in main).
-func (s *Service) StartGrantExpirySweeper(ctx context.Context) {
+// mayTick gates each sweep on scheduler leadership (S13.1 review #10). nil = ungated (tests).
+func (s *Service) StartGrantExpirySweeper(ctx context.Context, mayTick func() bool) {
 	t := time.NewTicker(grantSweepInterval)
 	defer t.Stop()
 	for {
@@ -631,6 +632,9 @@ func (s *Service) StartGrantExpirySweeper(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			if mayTick != nil && !mayTick() {
+				continue // followers serve requests but never tick
+			}
 			if n, err := s.SweepExpiredGrants(ctx); err != nil {
 				slog.Warn("grant_expiry_sweep_failed", slog.String("error", err.Error()))
 			} else if n > 0 {

@@ -158,7 +158,7 @@ func TestFollowerIsReady(t *testing.T) {
 			_ = ln.Close()
 
 			go func() {
-				_ = Serve(ctx, addr, NewRegistry(nil), nil, nil, func() bool { return tc.leader })
+				_ = Serve(ctx, addr, NewRegistry(nil, nil), nil, nil, func() bool { return tc.leader })
 			}()
 
 			var resp *http.Response
@@ -184,4 +184,68 @@ func TestFollowerIsReady(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSchedulerLeaderGaugeIsEmitted — review #6: leaderlessness was the design's chosen SAFE failure direction and
+// also its INVISIBLE one. Nothing ticks, and every replica answers 200 "ok follower", which is a documented healthy
+// state — so a stranded advisory lock or a saturated pool stopped hub failover promotion, CRL refresh, retention
+// sweeps and challenge pruning indefinitely with no metric, no log and no health kind.
+//
+// A per-gateway health kind was the wrong home for it: PolicyDegradedKind describes GATEWAYS, and scheduler
+// leadership is a property of the control plane. The metrics floor EPIC 11 built is the right surface, and summing
+// the gauge across replicas is how an operator sees "nobody leads".
+//
+// Emitted as 0 rather than omitted when this replica is a follower, for the same reason the per-kind series are:
+// an absent series is indistinguishable from a scrape failure.
+func TestSchedulerLeaderGaugeIsEmitted(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		leader bool
+		want   string
+	}{
+		{"leader", true, "tunnex_scheduler_leader 1"},
+		{"follower", false, "tunnex_scheduler_leader 0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := NewRegistry(nil, func() bool { return tc.leader })
+			want := 0.0
+			if tc.leader {
+				want = 1
+			}
+			got, found := leaderGauge(t, reg)
+			if !found {
+				t.Fatal("the leadership gauge must be emitted in BOTH roles so a zero sum across replicas is " +
+					"detectable — an absent series is indistinguishable from a scrape failure")
+			}
+			if got != want {
+				t.Errorf("tunnex_scheduler_leader = %v, want %v", got, want)
+			}
+		})
+	}
+
+	// With no role wired the series is absent rather than reporting a fabricated 0 — an unwired collector must not
+	// claim this replica is a follower, because that is a positive statement it cannot make.
+	if _, found := leaderGauge(t, NewRegistry(nil, nil)); found {
+		t.Error("with no role wired the gauge must be absent, not 0 — reporting follower would assert something " +
+			"the collector does not know")
+	}
+}
+
+// leaderGauge reads tunnex_scheduler_leader out of a registry, reporting whether the series exists at all —
+// present-with-0 and absent are different claims and the tests above depend on the difference.
+func leaderGauge(t *testing.T, reg *prometheus.Registry) (float64, bool) {
+	t.Helper()
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	for _, f := range families {
+		if f.GetName() != "tunnex_scheduler_leader" {
+			continue
+		}
+		for _, m := range f.GetMetric() {
+			return m.GetGauge().GetValue(), true
+		}
+	}
+	return 0, false
 }

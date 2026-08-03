@@ -2,7 +2,12 @@ package agentca
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"os"
 	"testing"
 	"time"
@@ -87,5 +92,61 @@ func TestCASignedCertVerifiesAndExpires(t *testing.T) {
 	}
 	if len(ca.CertPEM()) == 0 || ca.Pool() == nil {
 		t.Fatal("CA cert/pool missing")
+	}
+}
+
+// TestSignCSRRefusesKeyTypesRecoveryCannotVerify — review pass 1 #17.
+//
+// rekey.Verify narrowed to RSA deliberately and wrote down why. The ISSUER that populates the very field that
+// verifier reads was never narrowed to match, so a node enrolling with an ECDSA key received a perfectly good
+// certificate and a recorded public key its own recovery path can never verify — proof-of-possession recovery
+// silently and permanently unavailable for that node, with nothing saying so until the day it is needed.
+func TestSignCSRRefusesKeyTypesRecoveryCannotVerify(t *testing.T) {
+	ek, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.CreateCertificateRequest(rand.Reader,
+		&x509.CertificateRequest{Subject: pkix.Name{CommonName: "gw"}}, ek)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})
+
+	q, ctx, key := setup(t)
+	ca, _, cerr := LoadOrCreate(ctx, q, newSealer(t, key))
+	if cerr != nil {
+		t.Fatal(cerr)
+	}
+	if _, err := ca.SignCSR(csrPEM, "gw"); err == nil {
+		t.Fatal("issuing over a key type the recovery verifier cannot accept must be REFUSED at the door: the " +
+			"certificate would work and the recovery would not, and nothing would say so until it was needed")
+	}
+}
+
+// TestCertTTLOnlyEverSHORTENS — the knob's security property, asserted in the direction that matters.
+//
+// Revocation in this product IS refusal-to-renew, so the certificate lifetime is exactly the window a revoked
+// agent keeps working. The knob exists because an expired certificate cannot be manufactured — the clock is the
+// only way — and rehearsing recovery at 48h per subject is impractical. It must therefore be impossible to use it
+// to LENGTHEN that window, from any environment, by any typo.
+func TestCertTTLOnlyEverSHORTENS(t *testing.T) {
+	for _, c := range []struct {
+		set  string
+		want time.Duration
+		why  string
+	}{
+		{"", MaxCertTTL, "unset must be the shipped default"},
+		{"10m", 10 * time.Minute, "a shorter TTL is honoured — that is the point"},
+		{"720h", MaxCertTTL, "a MONTH must be clamped to the ceiling: lengthening weakens revocation for the " +
+			"entire fleet, and no environment may do that at runtime"},
+		{"49h", MaxCertTTL, "one hour over the ceiling is still over the ceiling"},
+		{"1s", MinCertTTL, "below the floor an agent races its own renewal"},
+		{"not-a-duration", MaxCertTTL, "an unparseable value must fall back to the SAFE default, never to zero"},
+	} {
+		t.Setenv("TUNNEX_AGENT_CERT_TTL", c.set)
+		if got := resolveCertTTL(); got != c.want {
+			t.Errorf("TUNNEX_AGENT_CERT_TTL=%q -> %v, want %v: %s", c.set, got, c.want, c.why)
+		}
 	}
 }

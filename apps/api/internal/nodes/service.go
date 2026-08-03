@@ -168,6 +168,17 @@ type Service struct {
 	// ovpnCRL (S9.1 Slice 5, optional) — the org's signed CRL PEM for delivery (crl-verify always-on).
 	// Wired to ovpn.Service.GetCRL (lazy-inits an empty CRL once). nil → no CRL delivered (pre-Slice-5).
 	ovpnCRL func(ctx context.Context, orgID uuid.UUID) (string, error)
+	// pushOrg (S13.1) fans a change out to every ACTIVE gateway in an org — the full-sweep reconciliation
+	// signal, wired to the nodepush hub exactly as devices.PushOrgNodes is. Called AFTER a re-key transaction
+	// commits, never inside it: a database transaction must not depend on a network call to a fleet, or a slow
+	// gateway holds a write lock on the node row and a failed push rolls back a re-key that already succeeded
+	// cryptographically. nil → no push (open build / tests); the recovering agent's own next reconcile still
+	// converges it.
+	pushOrg func(ctx context.Context, orgID uuid.UUID)
+	// restoreDevices (S13.1 D5, Wall 6) brings back the devices that were cascade-revoked when this gateway was
+	// revoked. Wired to devices.Service.RestoreCascadeRevokedDevices. nil → not wired (open build / tests), and a
+	// recovered gateway then simply comes back with no users, which is the behaviour this closes.
+	restoreDevices func(ctx context.Context, orgID, nodeID uuid.UUID) (int, int, error)
 }
 
 // NewService builds the node service.
@@ -189,6 +200,14 @@ func (s *Service) SetOVPNServerCertProvider(fn func(ctx context.Context, orgID, 
 func (s *Service) SetRebuildCRL(fn func(ctx context.Context, orgID uuid.UUID) error) {
 	s.rebuildCRL = fn
 }
+
+// SetRestoreDevices wires cascade-restore (S13.1 D5). Returns (restored, readdressed).
+func (s *Service) SetRestoreDevices(fn func(ctx context.Context, orgID, nodeID uuid.UUID) (int, int, error)) {
+	s.restoreDevices = fn
+}
+
+// SetPushOrg wires the full-sweep reconciliation signal (S13.1). Called after a re-key commits.
+func (s *Service) SetPushOrg(fn func(ctx context.Context, orgID uuid.UUID)) { s.pushOrg = fn }
 
 // SetOVPNCRLProvider wires the org CRL delivery (Slice 5) — ovpn.Service.GetCRL.
 func (s *Service) SetOVPNCRLProvider(fn func(ctx context.Context, orgID uuid.UUID) (string, error)) {
@@ -266,19 +285,20 @@ func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentV
 		if nodeName == "" {
 			return apierr.BadRequest("node_name_required", "a node name is required")
 		}
-		certPEM, serial, notAfter, e := s.ca.SignCSR([]byte(csrPEM), nodeName)
+		iss, e := s.ca.SignCSR([]byte(csrPEM), nodeName)
 		if e != nil {
 			return apierr.BadRequest("invalid_csr", "could not sign the certificate request")
 		}
-		node, e := q.CreateNode(ctx, sqlc.CreateNodeParams{OrgID: tok.OrgID, Name: nodeName, CertSerial: serial,
-			AgentVersion: agentVersion, CertNotAfter: pgtype.Timestamptz{Time: notAfter, Valid: true}})
+		node, e := q.CreateNode(ctx, sqlc.CreateNodeParams{OrgID: tok.OrgID, Name: nodeName, CertSerial: iss.Serial,
+			AgentVersion: agentVersion, CertNotAfter: pgtype.Timestamptz{Time: iss.NotAfter, Valid: true},
+			CertPublicKey: spkiText(iss.PublicKeySPKI)})
 		if e != nil {
 			if pgerr.IsUnique(e) {
 				return apierr.Conflict("node_exists", "a node with this name already exists")
 			}
 			return e
 		}
-		res = EnrollResult{NodeID: node.ID.String(), CertPEM: certPEM, CAPEM: string(s.ca.CertPEM())}
+		res = EnrollResult{NodeID: node.ID.String(), CertPEM: iss.CertPEM, CAPEM: string(s.ca.CertPEM())}
 		// Same keyed fingerprint as the node.token_issued row — issue and redeem
 		// correlate in the audit stream without the raw token appearing anywhere.
 		return audit(ctx, q, tok.OrgID, nil, "node.enrolled", "node", node.ID.String(),
@@ -303,6 +323,17 @@ func (s *Service) AuthenticateCert(ctx context.Context, certSerial string) (sqlc
 	if node.Status != "active" {
 		return sqlc.Node{}, apierr.New(401, "agent_revoked", "this agent has been revoked")
 	}
+	// FIRST USE MARKS DELIVERY (S13.1 D3). This is the observation that makes the redelivery carve-out safe: a
+	// certificate that has authenticated cannot be the subject of a lost-response recovery, so a LIVE gateway is
+	// excluded structurally rather than by a liveness check the gate deliberately does not have. A no-op after the
+	// first call (the UPDATE's own WHERE), and best-effort: failing an agent request because a marker could not be
+	// written would trade a real outage for a bookkeeping one. The cost of a missed write is one node that stays
+	// eligible for redelivery until its next request.
+	if !node.CertDelivered {
+		if merr := s.q.MarkCertDelivered(ctx, node.ID); merr != nil {
+			slog.Warn("cert_delivery_mark_failed", "node_id", node.ID.String(), "error", merr.Error())
+		}
+	}
 	return node, nil
 }
 
@@ -312,15 +343,18 @@ func (s *Service) Renew(ctx context.Context, node sqlc.Node, csrPEM, agentVersio
 	if node.Status != "active" {
 		return "", apierr.New(401, "agent_revoked", "this agent has been revoked")
 	}
-	certPEM, serial, notAfter, err := s.ca.SignCSR([]byte(csrPEM), node.Name)
+	iss, err := s.ca.SignCSR([]byte(csrPEM), node.Name)
 	if err != nil {
 		return "", apierr.BadRequest("invalid_csr", "could not sign the certificate request")
 	}
-	if err := s.q.RenewNodeCert(ctx, sqlc.RenewNodeCertParams{ID: node.ID, CertSerial: serial,
-		AgentVersion: agentVersion, CertNotAfter: pgtype.Timestamptz{Time: notAfter, Valid: true}}); err != nil {
+	// Stamped on RENEWAL as well as enrolment (S13.1 D7): that is what makes PoP coverage arrive within one
+	// renewal cycle for a running fleet, instead of only for gateways enrolled after 0057 shipped.
+	if err := s.q.RenewNodeCert(ctx, sqlc.RenewNodeCertParams{ID: node.ID, CertSerial: iss.Serial,
+		AgentVersion: agentVersion, CertNotAfter: pgtype.Timestamptz{Time: iss.NotAfter, Valid: true},
+		CertPublicKey: spkiText(iss.PublicKeySPKI)}); err != nil {
 		return "", err
 	}
-	return certPEM, nil
+	return iss.CertPEM, nil
 }
 
 // DesiredState returns the interface config + peers the agent should converge
@@ -2137,4 +2171,15 @@ func audit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, actor *uuid.UU
 		Action: action, TargetType: &targetType, TargetID: &targetID, Metadata: b,
 	})
 	return err
+}
+
+// spkiText encodes an SPKI DER blob for storage. base64 rather than hex: it is the form every TLS tool prints and
+// roughly a third shorter, and the column is read only by verification code that decodes it symmetrically.
+// An empty blob stores NULL — honestly unknown, never an empty string masquerading as a key.
+func spkiText(spki []byte) *string {
+	if len(spki) == 0 {
+		return nil
+	}
+	enc := base64.StdEncoding.EncodeToString(spki)
+	return &enc
 }

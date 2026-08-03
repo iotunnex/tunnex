@@ -105,12 +105,19 @@ WHERE org_id = $1 AND user_id = $2 AND status IN ('active', 'pending') AND delet
 
 -- name: RevokeDevice :one
 -- Terminal revocation of an active OR pending device (S7.3 finding #3: an owner may CANCEL
--- their own pending enrollment via this path). Full-sweep: clears assigned_ip (frees the
--- pool address). Returns the gateway node_id for the push. The caller reads the PRIOR status
--- (via GetDevice, in-tx) to audit distinctly (pending -> device.cancelled, active ->
+-- their own pending enrollment via this path). Returns the gateway node_id for the push. The caller reads the PRIOR
+-- status (via GetDevice, in-tx) to audit distinctly (pending -> device.cancelled, active ->
 -- device.revoked). pgx.ErrNoRows means the device was neither active nor pending.
+--
+-- cause='deliberate' (S13.1 D5): a human decided about THIS device. A gateway coming back must NEVER revive it —
+-- the whole point of recording the cause is that "its gateway went away" and "the user lost the laptop" stop
+-- rendering identically.
+--
+-- KEEPS assigned_ip. It used to be cleared "to free the pool address", but the address was already free the moment
+-- status left ('active','pending') — both the unique index and ListActiveDeviceAllocations filter on exactly that.
+-- Clearing it destroyed the only record of what the revocation took, for no gain.
 UPDATE devices
-SET status = 'revoked', revoked_at = now(), assigned_ip = NULL
+SET status = 'revoked', revoked_at = now(), revoked_cause = 'deliberate' 
 WHERE id = $1 AND org_id = $2 AND status IN ('active', 'pending') AND deleted_at IS NULL
 RETURNING node_id;
 
@@ -118,9 +125,21 @@ RETURNING node_id;
 -- lint:cross-org — keyed by node_id; when a node is revoked its peers can no longer reach a
 -- gateway, so they are revoked too (no dangling devices). Sweeps ACTIVE + PENDING (S7.3
 -- finding #2: a pending device on a revoked node would otherwise leak its /32 forever and
--- linger in the approval queue pointing at a dead gateway) and frees the address (full sweep).
+-- linger in the approval queue pointing at a dead gateway).
+--
+-- cause='cascade' (S13.1 D5): nobody decided about THESE devices — their gateway went away. That is what makes
+-- them restorable when the gateway comes back, and what distinguishes them from a deliberately revoked laptop.
+--
+-- KEEPS assigned_ip, and the old comment claiming it "frees the address" was describing a side effect it did not
+-- need: the address is free the instant status leaves ('active','pending'), because both readers that define
+-- taken-ness filter on exactly that (devices_org_ip_key and ListActiveDeviceAllocations). Clearing it destroyed
+-- the only record of what each user held, which is what made Wall 6 unrecoverable rather than merely painful.
+-- revoked_prev_status records WHAT THE CASCADE FOUND (review pass 1 #8). Without it the restore has to guess,
+-- and it guessed 'active' — promoting a device that was PENDING, never approved by anyone, straight past the
+-- org's approval gate. The schema recorded WHY a device was revoked and not WHAT IT WAS.
 UPDATE devices
-SET status = 'revoked', revoked_at = now(), assigned_ip = NULL
+SET status = 'revoked', revoked_at = now(), revoked_cause = 'cascade',
+    revoked_prev_status = status
 WHERE node_id = $1 AND status IN ('active', 'pending') AND deleted_at IS NULL;
 
 -- name: DeleteDeviceStatus :exec
@@ -247,10 +266,15 @@ WHERE d.node_id = $1 AND d.transport = 'openvpn' AND d.status = 'active'
 ORDER BY d.id;
 
 -- name: SetDeviceProvisioning :exec
--- S9.1 Part-2: record a STATIC export's provisioning mode + the ranges snapshot baked in. Called after
--- CreateDevice on the export path (managed devices keep the 'managed' default + NULL snapshot).
+-- Records what the ISSUED CONFIG baked, at issuance. Called after CreateDevice on every path.
+--
+-- provisioned_ranges is STATIC-ONLY (managed devices poll routes, so there is nothing baked to go stale).
+-- provisioned_ip is recorded for EVERY MODE (S13.1 Slice 6): every issued config embeds an interface address,
+-- managed included, so a managed device whose address later changes is just as stale — and was silently excluded
+-- from the staleness signal, leaving its user to discover the problem by failing to connect.
 -- lint:cross-org — keyed by id inside the org-authorized create transaction (same as CreateDevice's row).
-UPDATE devices SET provisioning_mode = $2, provisioned_ranges = $3, updated_at = now()
+UPDATE devices SET provisioning_mode = $2, provisioned_ranges = $3, provisioned_ip = $4,
+                   provisioned_node_id = $5, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: ListStaticDevicesForOrg :many
@@ -259,3 +283,44 @@ WHERE id = $1 AND deleted_at IS NULL;
 SELECT id, name, user_id, provisioned_ranges FROM devices
 WHERE org_id = $1 AND provisioning_mode = 'static' AND status = 'active' AND deleted_at IS NULL
 ORDER BY id;
+
+-- name: ListCascadeRevokedDevicesForNode :many
+-- lint:cross-org — keyed by node_id, which the caller resolved from an org-scoped node row.
+-- The restore candidate set (S13.1 D5): devices revoked BECAUSE this gateway was, and only those.
+--
+-- 'deliberate' rows are excluded by the predicate rather than by the caller remembering — a human decided about
+-- those devices, and a gateway coming back must never overturn that. NULL cause is also excluded: revoked before
+-- 0059, honestly unknown, and reviving a device whose reason nobody recorded is exactly the risk the column exists
+-- to avoid.
+--
+-- Returns the address each device HELD, so the caller can ask the allocation oracle whether it is still free.
+SELECT id, name, user_id, assigned_ip, public_key, transport, revoked_prev_status
+FROM devices
+WHERE node_id = $1 AND status = 'revoked' AND revoked_cause = 'cascade' AND deleted_at IS NULL
+ORDER BY id;
+
+-- name: RestoreCascadeRevokedDevice :one
+-- lint:cross-org — keyed by device id; the caller authorized via the org-scoped node and read the candidate set
+-- from ListCascadeRevokedDevicesForNode.
+-- Restores ONE cascade-revoked device (S13.1 D5), to the address the caller resolved.
+--
+-- The `revoked_cause = 'cascade'` predicate is repeated here deliberately: the candidate query already filtered,
+-- and this makes a caller that skipped it unable to revive a deliberately-revoked device anyway. Construction over
+-- convention, the same shape as RekeyNode refusing to touch status.
+--
+-- Clears revoked_cause on success: the row is active again, so a stale cause would make the next reader think it
+-- was revoked. needs_reexport is NOT a column — staleness is derived at read time — so nothing to set here.
+--
+-- node_id is SET, not left alone (S13.1 Slice 7). The re-key path passes the device's existing gateway and nothing
+-- moves. The OPERATOR path passes the REPLACEMENT gateway, because a gateway that was revoked is never active again
+-- — recovery from a revoke is a join-token enrolment, which creates a NEW node — so restoring these devices onto
+-- the node they were homed to would hand back rows that are `active` and point at a dead gateway. The caller
+-- authorizes both nodes and proves the target is live; this statement only records the binding it is given.
+-- status comes from the CALLER, resolved from revoked_prev_status (review pass 1 #8). Asserting 'active' here
+-- promoted a device that was PENDING — never approved by anyone — straight past the org's approval gate, because
+-- the statement declared a terminal value for a set whose members were not all in the same state.
+UPDATE devices
+SET status = $4, revoked_at = NULL, revoked_cause = NULL, revoked_prev_status = NULL,
+    assigned_ip = $2, node_id = $3
+WHERE id = $1 AND status = 'revoked' AND revoked_cause = 'cascade' AND deleted_at IS NULL
+RETURNING *;

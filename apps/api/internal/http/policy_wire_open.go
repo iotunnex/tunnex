@@ -17,4 +17,4 @@ func NewPolicyPort(_ *pgxpool.Pool, _ *nodepush.Hub) policyPort {
 }
 
 // StartPolicyGrantSweeper is a no-op in the open build (no policy, no grants).
-func StartPolicyGrantSweeper(_ context.Context, _ *pgxpool.Pool, _ *nodepush.Hub) {}
+func StartPolicyGrantSweeper(_ context.Context, _ *pgxpool.Pool, _ *nodepush.Hub, _ func() bool) {}

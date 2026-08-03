@@ -94,6 +94,19 @@ type Querier interface {
 	// Atomic single-use: only an UNUSED code for THIS user is burned; returns its id on success,
 	// 0 rows if already used / not found (no which-code oracle to the caller).
 	ConsumeRecoveryCode(ctx context.Context, arg ConsumeRecoveryCodeParams) (uuid.UUID, error)
+	// lint:cross-org — a challenge carries no org and cannot: it is issued before the caller is known to be anyone,
+	// and binding it to an org would require resolving the serial at issue time, which is the enumeration oracle D9
+	// exists to avoid. The org is established later, from the node the serial resolves to.
+	// SINGLE-USE, enforced by the UPDATE's own WHERE clause rather than by a read-then-write: two concurrent submits
+	// with the same nonce cannot both win, because only one row can transition consumed_at from NULL. A read-check-write
+	// would have a race exactly wide enough to matter here.
+	//
+	// Returns the row only when it was unconsumed AND unexpired AND bound to this exact identifier AND KIND. No rows =
+	// refuse, and the caller must not distinguish which of those it was.
+	// The read half of the same removed shim (review pass 1 #20): coalesce(identifier, cert_serial) existed to consume
+	// a challenge written by a previous version that did not know the column. No such version exists — 0058 created
+	// this table in the same release — so the fallback could only ever match rows this version wrote itself.
+	ConsumeRekeyChallenge(ctx context.Context, arg ConsumeRekeyChallengeParams) (NodeRekeyChallenge, error)
 	CountActiveDevicesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
 	// Grandfathered count when flipping device_approval off->on (best-effort blast radius,
 	// S7.3 D4 — existing active devices stay active, not retro-pended).
@@ -167,6 +180,21 @@ type Querier interface {
 	// ∈ {resource,group,site}; S10.3: +k8s_service (exactly one of dst_resource_id/dst_group_id/dst_site_id/
 	// dst_k8s_service_id, CHECK-enforced).
 	CreatePolicyRule(ctx context.Context, arg CreatePolicyRuleParams) (PolicyRule, error)
+	// lint:cross-org — a challenge is not org-scoped: it is issued BEFORE the caller is known to be anyone, and the
+	// identifier it names is only resolved to a node at submit time. That is the anti-enumeration property (D9), not an
+	// oversight.
+	// The KIND is stored alongside the value (D10) so a nonce issued for one identifier kind cannot be spent under the
+	// other. Two kinds sharing a string is not realistic today; a format change is how "not realistic" stops holding.
+	// THE ROLLING-UPGRADE SHIM IS GONE (review pass 1 #20). It wrote cert_serial alongside identifier so a
+	// previous-version replica could consume a challenge this version issued — protecting a control-plane version
+	// THAT CANNOT EXIST: node_rekey_challenges is created by migration 0058, in the SAME RELEASE as 0061. No shipped
+	// version has ever read this table, let alone that column.
+	//
+	// It was built because TestMigrationsAreBackwardCompatibleForOneVersion refused a RENAME — and that guard is a
+	// line-level regex over migration text with no notion of which tables the previous version knew, so it fired on a
+	// rename inside a table one version ago did not have. Its verdict was taken as authority and a shim was built to
+	// satisfy it. The column stays until the registered contract migration drops it; nothing writes it now.
+	CreateRekeyChallenge(ctx context.Context, arg CreateRekeyChallengeParams) error
 	// ── resources (static destinations) ─────────────────────────────────────────────
 	CreateResource(ctx context.Context, arg CreateResourceParams) (Resource, error)
 	CreateSite(ctx context.Context, arg CreateSiteParams) (Site, error)
@@ -190,6 +218,11 @@ type Querier interface {
 	DeleteExpiredGrants(ctx context.Context) ([]DeleteExpiredGrantsRow, error)
 	// lint:cross-org — user-scoped login challenge (GC, ledgered to S11).
 	DeleteExpiredMfaChallenges(ctx context.Context) error
+	// lint:cross-org — a retention sweep over a table with no org column, by design (see ConsumeRekeyChallenge).
+	// Pruning for a table an unauthenticated endpoint writes to. Consumed rows are kept briefly too — a consumed nonce
+	// must keep failing rather than becoming unknown, so deleting it the instant it is spent would turn replay into
+	// "no such challenge" and lose the distinction in the log.
+	DeleteExpiredRekeyChallenges(ctx context.Context) (int64, error)
 	// Clear a group's membership (used on un-map, after the origin flip back to manual).
 	DeleteGroupMembersByGroup(ctx context.Context, arg DeleteGroupMembersByGroupParams) (int64, error)
 	DeleteK8sCluster(ctx context.Context, arg DeleteK8sClusterParams) error
@@ -294,6 +327,16 @@ type Querier interface {
 	// confusing runtime failure rather than a compile-time one. Filtering here makes the query correct by
 	// construction instead of correct by the caller remembering.
 	GetNodeByOrgName(ctx context.Context, arg GetNodeByOrgNameParams) (Node, error)
+	// An ORG-SCOPED node by id, whatever its status. Revoked rows included deliberately: the operator restore
+	// (S13.1 Slice 7) names a REVOKED node as its source — that is the whole point — and a lookup that filtered them
+	// out would make the one legitimate case unreachable. The caller decides what each side must be.
+	GetNodeForOrg(ctx context.Context, arg GetNodeForOrgParams) (Node, error)
+	// The node row, ORG-SCOPED and LOCKED (review pass 1 #7). The restore reads it inside its own transaction and
+	// refuses if the node is not active — because revoke takes the same row lock, so a revoke that lands mid-restore
+	// either commits first (we see it revoked and refuse) or waits for us. Without the lock the restore authorized on
+	// state read BEFORE the identity commit and applied AFTER it, and a re-key racing an operator revoke re-activated
+	// the very devices that revoke had just cascaded.
+	GetNodeForOrgForUpdate(ctx context.Context, arg GetNodeForOrgForUpdateParams) (Node, error)
 	// lint:cross-org — org-scoped. The node's current hub_priority (nullable) so SetHubPriority can audit the
 	// old→new transition (S8.6 Slice 6 — the pin is a topology-consequential act).
 	GetNodeHubPriority(ctx context.Context, arg GetNodeHubPriorityParams) (*int32, error)
@@ -301,6 +344,25 @@ type Querier interface {
 	// BindNode can refuse a silent re-home and RouteLAN can RESUME its own half-built site (S8.5 #2). No rows
 	// when the node is not in this org.
 	GetNodeSiteBinding(ctx context.Context, arg GetNodeSiteBindingParams) (pgtype.UUID, error)
+	// The SECOND re-key identifier (S13.1 D10). :many, and the plurality is the POINT.
+	//
+	// cert_key_fingerprint is deliberately NOT unique (see migration 0061: a UNIQUE index would turn a lookup ambiguity
+	// into a migration failure on any fleet that already enrolled two nodes with the same key). So this query returns up
+	// to TWO rows and its caller REFUSES when it gets more than one. A `:one` query would have raised a runtime
+	// "multiple rows" error — a refusal by accident, at a moment when identity is being trusted, distinguishable in
+	// timing and in the log from a clean refusal. Ambiguity here fails CLOSED, deliberately and visibly.
+	//
+	// EXACT MATCH ONLY — `=` on the full 64-hex digest. Never a prefix, never a LIKE: a prefix match would let a caller
+	// narrow the fleet's key space one request at a time, which is precisely the enumeration property D9 chose the
+	// serial over the node name to avoid.
+	//
+	// REVOKED ROWS ARE NOT FILTERED, matching GetNodeByCertSerial. A revoked node must be refused by the GONE-GATE, at
+	// the same stage and with the same logged reason as it is on the serial path — filtering it out here would make the
+	// two identifiers produce different diagnostics for the same condition, and an operator reading "no node holds this
+	// key" for a node they revoked yesterday is being misled by their own tooling.
+	// lint:cross-org — same reasoning as GetNodeByCertSerial and RekeyNode: the caller is an unauthenticated agent with
+	// no session and no org context, and the recorded key material IS the identity claim being tested.
+	GetNodesByCertKeyFingerprint(ctx context.Context, certKeyFingerprint *string) ([]Node, error)
 	// The org's current signed CRL (delivery reads this; empty crl_pem = not-yet-ready, skip this tick).
 	GetOVPNCRLForOrg(ctx context.Context, orgID uuid.UUID) (GetOVPNCRLForOrgRow, error)
 	// lint:cross-org — keyed by node_id; the caller (DesiredState) already authorized the node via mTLS.
@@ -460,6 +522,16 @@ type Querier interface {
 	// as a ROW-VALUE comparison so it plans against (org_id, created_at DESC, id DESC)
 	// rather than an OR-expansion the planner can't use.
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
+	// lint:cross-org — keyed by node_id, which the caller resolved from an org-scoped node row.
+	// The restore candidate set (S13.1 D5): devices revoked BECAUSE this gateway was, and only those.
+	//
+	// 'deliberate' rows are excluded by the predicate rather than by the caller remembering — a human decided about
+	// those devices, and a gateway coming back must never overturn that. NULL cause is also excluded: revoked before
+	// 0059, honestly unknown, and reviving a device whose reason nobody recorded is exactly the risk the column exists
+	// to avoid.
+	//
+	// Returns the address each device HELD, so the caller can ask the allocation oracle whether it is still free.
+	ListCascadeRevokedDevicesForNode(ctx context.Context, nodeID uuid.UUID) ([]ListCascadeRevokedDevicesForNodeRow, error)
 	ListCliCredentialsForUser(ctx context.Context, userID uuid.UUID) ([]CliCredential, error)
 	// The org's reporting devices with their latest facts — the blast-radius input
 	// (D4): on enabling a check, count how many devices' LAST report would fail it
@@ -576,6 +648,18 @@ type Querier interface {
 	// The compiler places a src_kind='site' grant on the src + dst gateways AND the transit HUB (B1) — the
 	// hub is the site gateway with a public endpoint, so endpoint is needed to designate it. site_id is
 	// org-scoped via the node row (nodes.org_id).
+	//
+	// ACTIVE ONLY (S13.1 WF-S11-14, the SHARED-SEAM fix). This is the input its sibling at :77 already filters,
+	// with a comment saying revocation must drop a gateway here "no blackhole" — and this one did not. The
+	// consequence is not merely a wasted artifact: the compiler reduces these rows into `siteNode[site_id] =
+	// node_id`, a SINGLE-VALUE map, so for a site holding both a revoked and an active gateway the placement slot
+	// went to whichever row arrived last. With no ORDER BY that was NON-DETERMINISTIC and could flip between
+	// compiles — a site grant landing on a dead gateway while the live one never received it, traffic denied while
+	// the policy read correct.
+	//
+	// Filtering at the INPUT is deliberate: every consumer of this query is fixed at once, rather than each
+	// consumer remembering. ORDER BY makes the reduction deterministic even if a future change admits more than one
+	// active gateway per site.
 	ListSiteNodesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteNodesForOrgRow, error)
 	// lint:cross-org — scoped by site_id, which the caller org-checks via GetSite.
 	ListSiteSubnets(ctx context.Context, siteID uuid.UUID) ([]SiteSubnet, error)
@@ -610,6 +694,14 @@ type Querier interface {
 	// guard). Resize takes only the org key; allocation takes {owner,org} sorted;
 	// resize never waits on the owner key, so no inversion/deadlock.
 	LockDeviceKey(ctx context.Context, dollar_1 string) error
+	// Delivery is recorded THE FIRST TIME a certificate authenticates, and only then: the WHERE clause makes this a
+	// no-op on every subsequent request, so the agent channel pays one write per credential rather than one per call.
+	//
+	// This is what makes the D3 redelivery carve-out safe. A RUNNING gateway's certificate has authenticated by
+	// definition, so it is delivered, so the carve-out cannot touch it — the live-node case is excluded structurally
+	// rather than by a check someone must remember to write.
+	// lint:cross-org — keyed by node id, resolved from the presented client certificate; the caller IS the node.
+	MarkCertDelivered(ctx context.Context, id uuid.UUID) error
 	MarkDomainVerified(ctx context.Context, arg MarkDomainVerifiedParams) (DomainClaim, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
 	// One stamp for all three poll outcomes (the two-tier health, D2):
@@ -624,6 +716,31 @@ type Querier interface {
 	// the pool for reuse (D1b — the same release RevokeDevice does). Only a PENDING device
 	// can be rejected. Returns node_id for the (own-node) push.
 	RejectDevice(ctx context.Context, arg RejectDeviceParams) (uuid.UUID, error)
+	// THE IDENTITY CHANGE, atomic (S13.1 D2). SAME node id — that is the whole point: the gateway that comes back IS
+	// the gateway that left, keeping its site binding, its history and its metrics series.
+	//
+	// Rotates the serial, the recorded public key and the expiry together. A row half-re-keyed — new certificate,
+	// old recorded key — is a node whose proof-of-possession material no longer matches what it holds, so the columns
+	// move in one statement.
+	//
+	// Guarded on the CALLER having already authorized: status must still be what it was when RekeyAuthorized ran, so a
+	// node revoked or renewed in the meantime cannot be re-keyed on a stale decision.
+	// lint:cross-org — authorization here is the CERT SERIAL plus proof of possession, not an org membership: the
+	// caller is an unauthenticated agent that holds no session and no org context, which is the whole premise of
+	// recovery (its certificate is the thing that failed). The serial is globally unique (nodes_cert_serial_key), so it
+	// identifies exactly one node and therefore exactly one org — the same reasoning that annotates
+	// GetNodeByCertSerial, which is how every authenticated agent request already resolves its node.
+	// IT CANNOT RESURRECT. This statement does not mention `status` or `revoked_at` at ALL — not "sets them
+	// carefully", does not reference them. Re-key is therefore incapable of un-revoking a node rather than merely
+	// forbidden from it, the same instinct as the gone-gate having no liveness parameter to pass. And it is guarded on
+	// `status = 'active'` so a revoked row cannot be re-keyed even if a future caller reached here without the gate.
+	// TestRekeyQueryCannotResurrect enforces both halves against this text.
+	// cert_delivered_at IS CLEARED IN THIS SAME STATEMENT (S13.1 D3 condition 1), not in a follow-up write.
+	// A new serial that inherited the old serial's delivered marker leaves the redelivery gate either permanently
+	// shut (the new certificate looks delivered before it has ever been used, so a lost response is unrecoverable) or
+	// permanently open (if the inherited value were NULL) — and neither state announces itself. One statement, so the
+	// marker cannot disagree with the serial it describes.
+	RekeyNode(ctx context.Context, arg RekeyNodeParams) (Node, error)
 	RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) (int64, error)
 	// Remove a synced member — scoped to origin='idp_sync' so the reconcile can NEVER delete a
 	// manual membership even if one somehow shared the (group,user) key.
@@ -632,6 +749,36 @@ type Querier interface {
 	// lint:cross-org — keyed by node id after the caller authorized via the current
 	// cert; renewal rotates the serial and stamps activity/version.
 	RenewNodeCert(ctx context.Context, arg RenewNodeCertParams) error
+	// lint:cross-org — keyed by device id; the caller authorized via the org-scoped node and read the candidate set
+	// from ListCascadeRevokedDevicesForNode.
+	// Restores ONE cascade-revoked device (S13.1 D5), to the address the caller resolved.
+	//
+	// The `revoked_cause = 'cascade'` predicate is repeated here deliberately: the candidate query already filtered,
+	// and this makes a caller that skipped it unable to revive a deliberately-revoked device anyway. Construction over
+	// convention, the same shape as RekeyNode refusing to touch status.
+	//
+	// Clears revoked_cause on success: the row is active again, so a stale cause would make the next reader think it
+	// was revoked. needs_reexport is NOT a column — staleness is derived at read time — so nothing to set here.
+	//
+	// node_id is SET, not left alone (S13.1 Slice 7). The re-key path passes the device's existing gateway and nothing
+	// moves. The OPERATOR path passes the REPLACEMENT gateway, because a gateway that was revoked is never active again
+	// — recovery from a revoke is a join-token enrolment, which creates a NEW node — so restoring these devices onto
+	// the node they were homed to would hand back rows that are `active` and point at a dead gateway. The caller
+	// authorizes both nodes and proves the target is live; this statement only records the binding it is given.
+	// status comes from the CALLER, resolved from revoked_prev_status (review pass 1 #8). Asserting 'active' here
+	// promoted a device that was PENDING — never approved by anyone — straight past the org's approval gate, because
+	// the statement declared a terminal value for a set whose members were not all in the same state.
+	RestoreCascadeRevokedDevice(ctx context.Context, arg RestoreCascadeRevokedDeviceParams) (Device, error)
+	// The third part of the act, reversed (review pass 1 #9). Revoking a node revokes its devices AND their OpenVPN
+	// client certificates AND rebuilds the CRL. Restore reversed only the first, so an OVPN device came back `active`
+	// with its certificate still revoked and still on the org CRL — control plane green, data plane refusing, and the
+	// operator told it succeeded.
+	//
+	// cause='cascade' ONLY, exactly like the device restore: a certificate an operator revoked deliberately is never
+	// revived by a gateway rebuild. The predicate is repeated here rather than left to the caller, same as
+	// RestoreCascadeRevokedDevice.
+	// lint:cross-org — keyed by device_id, which the caller read from the org-scoped candidate set.
+	RestoreCascadeRevokedOVPNCertsForDevice(ctx context.Context, deviceID uuid.UUID) ([]RestoreCascadeRevokedOVPNCertsForDeviceRow, error)
 	// The SWEEP: password reset and account deactivation kill every live CLI
 	// credential exactly like they kill sessions (a surviving credential would be a
 	// back door around the sweep).
@@ -640,20 +787,57 @@ type Querier interface {
 	// (idempotent 204 semantics; no existence leak).
 	RevokeCliCredential(ctx context.Context, arg RevokeCliCredentialParams) (int64, error)
 	// Terminal revocation of an active OR pending device (S7.3 finding #3: an owner may CANCEL
-	// their own pending enrollment via this path). Full-sweep: clears assigned_ip (frees the
-	// pool address). Returns the gateway node_id for the push. The caller reads the PRIOR status
-	// (via GetDevice, in-tx) to audit distinctly (pending -> device.cancelled, active ->
+	// their own pending enrollment via this path). Returns the gateway node_id for the push. The caller reads the PRIOR
+	// status (via GetDevice, in-tx) to audit distinctly (pending -> device.cancelled, active ->
 	// device.revoked). pgx.ErrNoRows means the device was neither active nor pending.
+	//
+	// cause='deliberate' (S13.1 D5): a human decided about THIS device. A gateway coming back must NEVER revive it —
+	// the whole point of recording the cause is that "its gateway went away" and "the user lost the laptop" stop
+	// rendering identically.
+	//
+	// KEEPS assigned_ip. It used to be cleared "to free the pool address", but the address was already free the moment
+	// status left ('active','pending') — both the unique index and ListActiveDeviceAllocations filter on exactly that.
+	// Clearing it destroyed the only record of what the revocation took, for no gain.
 	RevokeDevice(ctx context.Context, arg RevokeDeviceParams) (uuid.UUID, error)
 	// lint:cross-org — keyed by node_id; when a node is revoked its peers can no longer reach a
 	// gateway, so they are revoked too (no dangling devices). Sweeps ACTIVE + PENDING (S7.3
 	// finding #2: a pending device on a revoked node would otherwise leak its /32 forever and
-	// linger in the approval queue pointing at a dead gateway) and frees the address (full sweep).
+	// linger in the approval queue pointing at a dead gateway).
+	//
+	// cause='cascade' (S13.1 D5): nobody decided about THESE devices — their gateway went away. That is what makes
+	// them restorable when the gateway comes back, and what distinguishes them from a deliberately revoked laptop.
+	//
+	// KEEPS assigned_ip, and the old comment claiming it "frees the address" was describing a side effect it did not
+	// need: the address is free the instant status leaves ('active','pending'), because both readers that define
+	// taken-ness filter on exactly that (devices_org_ip_key and ListActiveDeviceAllocations). Clearing it destroyed
+	// the only record of what each user held, which is what made Wall 6 unrecoverable rather than merely painful.
+	// revoked_prev_status records WHAT THE CASCADE FOUND (review pass 1 #8). Without it the restore has to guess,
+	// and it guessed 'active' — promoting a device that was PENDING, never approved by anyone, straight past the
+	// org's approval gate. The schema recorded WHY a device was revoked and not WHAT IT WAS.
 	RevokeDevicesForNode(ctx context.Context, nodeID uuid.UUID) (int64, error)
 	RevokeInvitationByOrgEmail(ctx context.Context, arg RevokeInvitationByOrgEmailParams) (int64, error)
 	// Org-scoped + idempotent (already-revoked returns 0 rows). Revocation severs on the very next request
 	// (the auth path re-reads the row every time — no session cache).
 	RevokeMachineCredential(ctx context.Context, arg RevokeMachineCredentialParams) (int64, error)
+	// KEEPS THE SITE BINDING. The unbind added for WF-S11-14 was RULED REVERSED ON EVIDENCE after review, because the
+	// status filter on ListSiteNodesForOrg was sufficient for the compiler input on its own and the unbind bought
+	// nothing while costing three things:
+	//
+	//   1. BindNodeToSite has no status guard and authorizes purely on site_id being NULL, so an unbound-by-revocation
+	//      gateway could be bound to any site via API/CLI/GitOps — previously refused as already-bound. The site then
+	//      held a dead gateway that the status-filtered compiler input excludes, so cross-site traffic was silently
+	//      denied while the UI showed a gateway present: the exact policy-reads-correct-traffic-denied class the
+	//      filter was added to close.
+	//   2. assembleTopology joins a site's gateways with `n.site_id === s.id`, so a revoked gateway vanished from the
+	//      Sites card entirely — indistinguishable from a site that never had one, and it made the badge-suppression
+	//      fix landed in the same commit unreachable.
+	//   3. Nothing recorded which site the gateway served. The node.revoked audit row's metadata was an empty map, so
+	//      after the unbind neither UI, API nor audit log could answer it — while the docs told the operator to
+	//      re-apply that very binding.
+	//
+	// THE PRINCIPLE THIS ESTABLISHES CONCRETELY: revocation preserves what it invalidates. Marking a row revoked is
+	// enough; destroying the facts that explain it is not part of the job. Readers that must ignore a revoked gateway
+	// filter on status — which is one predicate in one place, versus three consequences spread across three surfaces.
 	RevokeNode(ctx context.Context, arg RevokeNodeParams) error
 	// The B2 sweep member: revoking a device revokes ALL its live OVPN certs, returning their serials
 	// so the caller pushes the updated CRL to the gateway (one sweep with address-release + status-clear).
@@ -669,8 +853,12 @@ type Querier interface {
 	// already authorized). Flips the ORTHOGONAL enforcement flag (D7); returns the
 	// row so the caller sees org/node for the push.
 	SetDeviceHealthBlocked(ctx context.Context, arg SetDeviceHealthBlockedParams) (Device, error)
-	// S9.1 Part-2: record a STATIC export's provisioning mode + the ranges snapshot baked in. Called after
-	// CreateDevice on the export path (managed devices keep the 'managed' default + NULL snapshot).
+	// Records what the ISSUED CONFIG baked, at issuance. Called after CreateDevice on every path.
+	//
+	// provisioned_ranges is STATIC-ONLY (managed devices poll routes, so there is nothing baked to go stale).
+	// provisioned_ip is recorded for EVERY MODE (S13.1 Slice 6): every issued config embeds an interface address,
+	// managed included, so a managed device whose address later changes is just as stale — and was silently excluded
+	// from the staleness signal, leaving its user to discover the problem by failing to connect.
 	// lint:cross-org — keyed by id inside the org-authorized create transaction (same as CreateDevice's row).
 	SetDeviceProvisioning(ctx context.Context, arg SetDeviceProvisioningParams) error
 	// lint:cross-org — org-scoped. The admin pin (S8.6 D1): a nullable rank; NULL clears the pin. Org-checked
