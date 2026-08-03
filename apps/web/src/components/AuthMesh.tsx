@@ -66,14 +66,20 @@ export function AuthMesh() {
       <linearGradient id="spoke" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#C9C9C4" stopOpacity=".15" /><stop offset="100%" stopColor="#CFCFCA" stopOpacity=".85" /></linearGradient>
       </defs>
       <circle cx="240" cy="150" r="118" fill="url(#hubGlow)" className="tnx-aglow" />
+      {/* ⛔ SPOKES ARE TRIMMED TO BOTH CIRCLE EDGES. The design's paths ran from a point BEYOND the
+          node to the hub's exact CENTRE, so each line showed a stub sticking out past its node and
+          another buried under the hub tile — visible as a ragged tail beside every mark. Each path
+          now starts at the node's rim and stops at the hub's, so the line reads as a connection
+          BETWEEN two things rather than a stroke drawn across them. The packets ride these paths,
+          so they inherit the same bounds and no longer disappear under the artwork. */}
       {/* spokes */}
       <g fill="none" stroke="url(#spoke)" strokeWidth="1.3">
-      <path id="tnxSp0" d="M72 44 Q 150 108 240 150" className="tnx-edge" />
-      <path id="tnxSp1" d="M408 44 Q 330 108 240 150" className="tnx-edge" style={{ animationDelay: "-.5s" }} />
-      <path id="tnxSp2" d="M56 150 Q 150 138 240 150" className="tnx-edge" style={{ animationDelay: "-1s" }} />
-      <path id="tnxSp3" d="M424 150 Q 330 162 240 150" className="tnx-edge" style={{ animationDelay: "-1.5s" }} />
-      <path id="tnxSp4" d="M92 256 Q 160 202 240 150" className="tnx-edge" style={{ animationDelay: "-.8s" }} />
-      <path id="tnxSp5" d="M388 256 Q 320 202 240 150" className="tnx-edge" style={{ animationDelay: "-.2s" }} />
+      <path id="tnxSp0" d="M55.4 48.0 Q 121.0 110.2 208.5 132.6" className="tnx-edge" />
+      <path id="tnxSp1" d="M365.0 53.1 Q 306.0 76.7 268.4 127.9" className="tnx-edge" style={{ animationDelay: "-.5s" }} />
+      <path id="tnxSp2" d="M44.5 148.2 Q 124.1 170.1 204.0 149.7" className="tnx-edge" style={{ animationDelay: "-1s" }} />
+      <path id="tnxSp3" d="M375.5 149.1 Q 325.6 134.2 276.0 149.8" className="tnx-edge" style={{ animationDelay: "-1.5s" }} />
+      <path id="tnxSp4" d="M76.2 247.6 Q 153.2 225.8 209.1 168.4" className="tnx-edge" style={{ animationDelay: "-.8s" }} />
+      <path id="tnxSp5" d="M345.7 245.0 Q 316.9 197.7 266.8 174.1" className="tnx-edge" style={{ animationDelay: "-.2s" }} />
       </g>
       {/* packets converging on hub (GSAP-driven) */}
       <g fill="#E6E6E2">
@@ -110,7 +116,7 @@ export function AuthMesh() {
           EPIC 15, and an MCP server is exactly the thing the product is about to treat as a
           first-class destination. Bottom-centre is the one free spoke direction in the design's
           own geometry, so nothing had to move. */}
-      <path id="tnxSp6" d="M240 282 Q 240 220 240 150" className="tnx-edge" style={{ animationDelay: "-2s" }} fill="none" stroke="url(#spoke)" strokeWidth="1.3" />
+      <path id="tnxSp6" d="M240.0 265.5 Q 253.2 225.8 240.0 186.0" className="tnx-edge" style={{ animationDelay: "-2s" }} fill="none" stroke="url(#spoke)" strokeWidth="1.3" />
       {/* nodes */}
       <g className="tnx-node tnx-afloat"><circle cx="41" cy="40" r="15" fill="rgba(26,26,26,.95)" stroke="rgba(255,255,255,0.14)" strokeWidth="1" /><g transform="translate(33,35)"><path d="M0 5 Q 8 11 16 5" fill="none" stroke="#FF9900" strokeWidth="2.4" strokeLinecap="round" /><path d="M12.5 3.6 L17.4 5 L13 8.2 Z" fill="#FF9900" /></g><text x="58" y="49" fill="#E4E4E1" fontFamily="Instrument Sans" fontSize="12" fontWeight="600">AWS VPC</text></g>
       <g className="tnx-node tnx-afloat2"><circle cx="378" cy="43" r="15" fill="rgba(26,26,26,.95)" stroke="rgba(255,255,255,0.14)" strokeWidth="1" /><g transform="translate(370,35) scale(.62)"><path fill="#35C1F1" d="M5.483 21.3H24L14.025 4.013l-3.038 8.347 5.836 6.938L5.483 21.3z" /><path fill="#0078D4" d="M13.23 2.7L6.98 7.98 0 19.966h5.626z" /></g><text x="394" y="49" fill="#E4E4E1" fontFamily="Instrument Sans" fontSize="12" fontWeight="600">Azure</text></g>
