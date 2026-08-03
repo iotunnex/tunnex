@@ -3118,3 +3118,45 @@ whole: *run the command the gate runs* (not one that resembles it) · *output is
 prints is not a command that changed something) · *a mutation whose anchor no longer matches never ran* ·
 and now *a mutation that failed to apply proves nothing.* **Every one is a proof about a subject the proof
 never touched.**
+
+---
+
+# ⛔ A CORRECTLY-RUN CHECK AIMED AT THE WRONG SUBJECT
+
+**S14.13. A NEW VARIANT, and the sharper half of the stale-stack finding.**
+
+The panels were built, committed, CI-green — and invisible on both review stacks. The cause was mundane
+(containers built 08:34, branch point 08:59, first story commit 09:21; the rebuild was never run). **What
+matters is why it survived a check that was specifically supposed to catch it.**
+
+The artifact law was obeyed. The grep ran. It searched `apps/web/dist/assets/index-*.js` for five strings only
+the new consumers can produce, found all five, and was reported as proof the panels reach the artifact.
+
+**It was proof they reach AN artifact. The one nobody was looking at.**
+
+> ## **THE THREE PRIOR INSTANCES WERE CHECKS THAT COULD NOT SEE. THIS ONE SAW PERFECTLY, AND THE SUBJECT WAS**
+> ## **WRONG. Different failure, same family — and strictly more dangerous, because a check that cannot see**
+> ## **often looks wrong, while a correctly-run check aimed at the wrong subject LOOKS LIKE EVIDENCE. That is**
+> ## **exactly why it survives review: nothing about it is malformed.**
+
+**AND THE FIX IS NOT TO STOP RUNNING IT.** The `dist` grep still does its real job — tree-shaking and
+no-caller detection, the "view-model with green tests and no caller" law. It was simply never capable of
+answering *can the reviewer see it*. **The repair is to say WHICH QUESTION EACH GREP ANSWERS**, because both
+greps are correct and they answer different things:
+
+| check | subject | question it answers |
+|---|---|---|
+| **hash changed** | the port | **DEPLOY** — is the served artifact new at all? |
+| **strings present in the SERVED bundle** | the port | **REACH** — did this code get into what is being served? |
+| strings present in `dist` | the local build | **LINKAGE** — does this code have a caller, or did tree-shaking drop it? |
+
+**THE MECHANICAL RULE — added to the handoff:**
+
+> ## **BEFORE A REVIEW, GREP THE SERVED BUNDLE, NOT `dist`.**
+> The hash changing is the **deploy** proof; the served strings are the **reach** proof. Two different checks,
+> both against the same artifact — **the one on the port.**
+
+**Generalized, this is the family's fifth member and it names the axis the others share:** *run the command
+the gate runs* · *output is not effect* · *an unmatched anchor never ran* · *a mutation that failed to apply
+proves nothing* · **and now: a check is only as good as the subject it was pointed at.** Every one is a proof
+about a subject the proof never touched — but this is the first where the proof itself was flawless.
