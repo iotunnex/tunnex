@@ -196,3 +196,28 @@ describe("hyperdrive state", () => {
     expect(st.connAt).toBeNull();
   });
 });
+
+// ⛔ THE VERB'S TARGET — which action a state's button performs.
+//
+// The button shipped with NO onClick at all: it rendered, it looked right, and clicking it did
+// nothing. Pinned here as data so the mapping cannot silently invert (Disconnect wired to up()
+// is a click that turns the tunnel ON while saying it is tearing it down).
+describe("what the primary verb does", () => {
+  it("⛔ tears DOWN from connected and kill-switch, never up", () => {
+    // kill_switch is the trap: its verb reads "restore normal routing", which is a DOWN.
+    for (const s of ["connected", "kill_switch"] as const) {
+      expect(stateView(s).action).toMatch(/disconnect|restore/i);
+    }
+  });
+
+  it("brings UP from every state that offers a connect", () => {
+    for (const s of ["disconnected", "failed", "migrate_failed"] as const) {
+      expect(stateView(s).action).toMatch(/connect · link the mesh/i);
+    }
+  });
+
+  it("⛔ cancels — not disconnects — while connecting", () => {
+    // "Disconnect" mid-handshake would describe tearing down something not yet up.
+    expect(stateView("connecting").action).toMatch(/^cancel/i);
+  });
+});

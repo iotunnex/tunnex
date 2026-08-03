@@ -63,6 +63,39 @@ export function ClientApp() {
 
   const elapsed = stats.since ? Math.floor((Date.now() - stats.since) / 1000) : null;
 
+  /**
+   * ⛔ THE VERB HAD NO HANDLER AT ALL — the button rendered and did nothing.
+   *
+   * Two paths, and they are genuinely different rather than one faked:
+   *
+   *  · IN ELECTRON the bridge exists, so this calls the real `tunnel.up` / `tunnel.down`. The
+   *    renderer holds no secret and no config — main resolves the WG config and forwards it to the
+   *    privileged helper; we only ever see status back.
+   *  · IN A BROWSER there is no bridge and there never will be. Rather than a dead button, the
+   *    surface drives its OWN state so the transitions and the hyperdrive are reviewable — and
+   *    says on screen that it is doing so. A simulated transition presented as a real one would be
+   *    the render-floor violation this epic keeps catching.
+   */
+  const simulated = desktop() === null;
+
+  async function onAction() {
+    const d = desktop();
+    if (d) {
+      if (state === "connected" || state === "kill_switch") await d.tunnel.down();
+      else if (state === "expired_creds") await d.auth.login();
+      else await d.tunnel.up(fullTunnel);
+      return;
+    }
+    // Browser: drive the local state so the animation can be judged.
+    if (state === "connected" || state === "kill_switch") {
+      setLive("disconnected");
+      return;
+    }
+    if (state === "expired_creds") return; // the browser flow has nothing to open here
+    setLive("connecting");
+    window.setTimeout(() => setLive("connected"), 2200);
+  }
+
   // ⛔ THE HYPERDRIVE. Two canvases, both transcribed from the handoff's own draw loop — the window
   // is named after the first of them. The previous build had neither, because I read a TEXT
   // extraction of the block and a text extraction has no canvas in it.
@@ -223,6 +256,7 @@ export function ClientApp() {
           <button
             type="button"
             data-action
+            onClick={() => void onAction()}
             className={
               "w-full rounded-lg px-4 py-3 text-sm font-medium transition-colors " +
               (view.severity === "loud"
@@ -235,6 +269,13 @@ export function ClientApp() {
         ) : (
           <p className="rounded-lg border border-dashed border-line px-4 py-3 text-center text-xs text-ink-secondary">
             Nothing to do here — this resolves elsewhere.
+          </p>
+        )}
+
+        {simulated && (
+          <p className="text-[11px] text-warn">
+            No desktop bridge — this is a browser preview, so Connect drives the
+            surface locally instead of a real tunnel.
           </p>
         )}
 
