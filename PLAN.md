@@ -63,6 +63,32 @@ expected to be rewritten before merge.
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
+**MERGED (2026-08-03): EPIC 14 S14.13 Org Settings — PR #61, ff-only, content tip `e6e23c2`.**
+⛔ **SECOND USE OF THE POINTER RULE, and it landed inside the PR again — the direct-to-`main` bypass count
+stays at 8.**
+
+**The slice:** the SSO collapse fix + the fixture that finally gave it a subject (both arms rendering for the
+first time) · domain capture · pool-CIDR honesty. **Three findings, none visible from the design:**
+**(1)** the wireframe's DNS instruction is wrong in BOTH halves — it says publish `_tunnex-verify.acme.io TXT
+"tnx-domain-…"`, the resolver reads the APEX and compares by exact equality to `tunnex-verify=<token>`, so
+following the design fails forever with the record visibly present in the zone. **A wireframe diff would MATCH
+it — the defect is agreement with the design.** **(2)** `domain_taken` was FALSE 100% of the time on the claim
+path (a fresh insert has `verified_at NULL` and so cannot collide with the partial index; only the same-org
+constraint was reachable) — the product accused another tenant, at the exact moment an admin was recovering a
+lost TXT value, because there is no GET. FIXED, both arms proven. **(3)** an OAuth credential form was being
+autofilled with the admin's email and a saved password — **byte-identical markup, caused by POSITION**, so
+fixing the visible provider would have moved the bug rather than removed it.
+
+⛔⛔ **S14.13's SECTION IS OPEN.** IdP Sync is **S14.14** (4 verbs, 5 endpoints, no surface) · the machine-
+credentials shed is BLOCKED ON A DESTINATION · **VERIFIED-is-not-terminal** (suspend clears verification
+org-wide and fires NO audit action) and the **no-delete-verb cross-tenant item** stay registered · the
+write-only-state trio stands. ⛔ **The `DomainSection` DOM proof is OWED AND UNCLAIMED — proven by artifact
+grep, not DOM assertion, blocked on the `settingswiring` harness story. That is not "untested".**
+
+**NEXT: the harness story or S14.14 IdP Sync — founder rules which. Do not start either unprompted.**
+
+---
+
 **MERGED (2026-08-03): EPIC 14 S14.12 Access Policies — PR #60, ff-only, content tip `7e5a5a1`.**
 ⛔ **FIRST MERGE UNDER THE NEW POINTER RULE: this names the CONTENT TIP — the last non-pointer commit — NOT
 `main`'s head.** A commit cannot contain its own hash, so the post-merge head is unknowable before the merge;
