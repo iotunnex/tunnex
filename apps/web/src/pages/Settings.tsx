@@ -43,6 +43,11 @@ import {
   type IdpHealth,
 } from "../lib/idpsyncview";
 import {
+  enabledLabel,
+  secretPlaceholder,
+  toggleReflectsServer,
+} from "../lib/ssoview";
+import {
   RESIZE_ATOMIC_NOTE,
   orphanReasonCopy,
   orphanTail,
@@ -1416,7 +1421,7 @@ function SsoProvider({
               onChange={(e) => setClientSecret(e.target.value)}
               required
               disabled={!canEdit}
-              placeholder="••••••••"
+              placeholder={secretPlaceholder(configured)}
             />
           </Field>
           {configured && view?.secret_fingerprint && (
@@ -1433,14 +1438,21 @@ function SsoProvider({
               />
             </Field>
           )}
+          {/* ⛔ THE LABEL CHANGES WITH THE ARM, because the control MEANS something different in each.
+              Configured: it reflects STORED STATE. Unconfigured: nothing is stored, so it can only be
+              an INTENT about the config being created — and calling that "Enabled" asserted a fact
+              that did not exist. Google rendered CHECKED + "Enabled" on a provider the server answers
+              404 for. */}
           <label className="flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
+              data-testid={`sso-enabled-${provider}`}
+              data-reflects-server={toggleReflectsServer(configured)}
               checked={enabled}
               onChange={(e) => setEnabled(e.target.checked)}
               disabled={!canEdit}
             />
-            Enabled
+            {enabledLabel(configured)}
           </label>
         </div>
         <div className="mt-4 flex items-center gap-3">
