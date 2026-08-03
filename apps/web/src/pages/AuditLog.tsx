@@ -8,6 +8,11 @@ import {
 } from "../lib/api";
 import { relativeAge } from "../lib/format";
 import {
+  UNATTRIBUTED_NOTE,
+  resolveActor,
+  unattributedCount,
+} from "../lib/auditview";
+import {
   Button,
   Card,
   DataTable,
@@ -188,6 +193,18 @@ export default function AuditLog() {
       {/* S14.3 slice A: a real <table>. The audit log IS tabular — action, actor, target, age are the same
           four facts on every row — and rendering it as <li> blocks meant the tier could only find rows by
           matching their text. Now: getByRole("table", { name: "Audit events" }) and getAllByRole("row"). */}
+      {/* ⛔ THE GAP IS COUNTED AND NAMED, not folded into the actor column. "not recorded" reads as a
+          property of the EVENT; it is a property of OUR WRITE PATH — four system-initiated actions use
+          the human insert path with a NULL actor instead of InsertSystemAuditLog. Saying so stops an
+          operator hunting for a person who was never recorded. Registered server-side; until it is
+          fixed this screen must surface it rather than hide it. */}
+      {unattributedCount(entries) > 0 && (
+        <p className="mt-4 text-xs text-warn">
+          {unattributedCount(entries)} of {entries.length} events on this page have no
+          recorded actor. {UNATTRIBUTED_NOTE}
+        </p>
+      )}
+
       <div className="mt-4">
         <DataTable
           caption="Audit events"
@@ -208,11 +225,30 @@ export default function AuditLog() {
             {
               key: "actor",
               header: "Actor",
-              cell: (a) => (
-                <span className="text-xs text-slate-500">
-                  {a.actor_id ? actorName(members, a.actor_id) : "system"}
-                </span>
-              ),
+              // ⛔ FOUR ARMS, NOT TWO. This cell used to read
+              //     {a.actor_id ? actorName(members, a.actor_id) : "system"}
+              // which rendered the SAME WORD for a NAMED subsystem (26 of 100 served rows) and for a
+              // row with no actor at all (34 of 100). The named actor was discarded, and discarding it
+              // hid an attribution gap behind the word already used for "known, and here is its name".
+              cell: (a) => {
+                const actor = resolveActor(a, members);
+                return (
+                  <span
+                    data-testid="audit-actor"
+                    data-actor-kind={actor.kind}
+                    className={
+                      "text-xs " +
+                      (actor.gap
+                        ? "text-warn"
+                        : actor.kind === "system"
+                          ? "font-mono text-accent-300"
+                          : "text-slate-500")
+                    }
+                  >
+                    {actor.label}
+                  </span>
+                );
+              },
             },
             {
               key: "target",
@@ -259,9 +295,3 @@ export default function AuditLog() {
   );
 }
 
-// actorName resolves an actor id to a display name from the roster (falls back to
-// the short id for actors no longer on the roster, e.g. removed members).
-function actorName(members: Member[], id: string): string {
-  const m = members.find((mm) => mm.user_id === id);
-  return m ? m.name || m.email : id.slice(0, 8);
-}
