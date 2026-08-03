@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { stripJsComments } from "./support/source";
 
 // ⛔ A CENSUS OF WHAT EXISTS CANNOT FIND WHAT WAS NEVER BUILT.
 //
@@ -45,9 +46,6 @@ const EPIC_CLOSING = false;
 
 /** A screen banner is `<!-- ===== NAME ===== -->`. Parsed, never transcribed. */
 /** Remove comments so a source scan judges CODE, not the prose describing it. */
-function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
-}
 
 function banners(src: string): string[] {
   return [
@@ -271,7 +269,7 @@ describe("wireframe census — the DESIGN is the authoritative set", () => {
       // this test GREEN, because the COMMENT explaining the flip contains the word "client.html".
       // A substring search over source counts the prose that describes the code as if it were the
       // code — the third time this exact shape has bitten in this epic.
-      const loader = stripComments(
+      const loader = stripJsComments(
         readFileSync(
           join(__dirname, "..", "..", "client", "src", "main", "index.ts"),
           "utf8",

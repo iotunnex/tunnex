@@ -7,6 +7,7 @@ import {
   isEnterprise,
   gate,
 } from "../src/lib/edition";
+import { stripYamlComments } from "./support/source";
 
 // ⛔ THE SWEEP, MADE STRUCTURAL.
 //
@@ -14,9 +15,11 @@ import {
 // at a call site does not reach the call sites beside it — only an enumeration finds the rest, and only a
 // census keeps the enumeration true.
 
-const spec = readFileSync(
-  fileURLToPath(new URL("../../../openapi/openapi.yaml", import.meta.url)),
-  "utf8",
+const spec = stripYamlComments(
+  readFileSync(
+    fileURLToPath(new URL("../../../openapi/openapi.yaml", import.meta.url)),
+    "utf8",
+  ),
 );
 
 /** Parse the spec the way the sweep did: an operation is enterprise if it says so in its OWN block. */
