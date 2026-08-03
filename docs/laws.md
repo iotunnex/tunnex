@@ -3395,3 +3395,28 @@ The directory-sync credential form shows the **same `••••••••`**
 says *"the fields below always start empty even when a credential is stored"*, so the dots assert nothing
 there. **The glyph is not the claim; the glyph PLUS the surrounding text is.** A sweep for the character would
 have "fixed" a correct panel.
+
+---
+
+# ⛔ A LEDGER SEES ONLY THE SHAPE IT IS KEYED ON
+
+**S14.17.** Two censuses, two shapes, and the collapsible sidebar escaped **both**: `screencensus` is keyed on
+**pages**, `wireframecensus` on **screen banners**, and a shell component is neither.
+
+> ## **AND THE GAP IS NOT CLOSED — IT IS NARROWED. Anything that is neither a page nor a banner still has no**
+> ## **ledger:** a modal, a toast rule, an empty state, a keyboard binding, a notification policy. Saying "the
+> ## census now covers the design" would be the same over-claim the census was built to catch.
+
+**MECHANICAL:** when a ledger misses something, ask *what SHAPE was it keyed on, and what shape was the thing?*
+Adding a row rarely fixes it; adding a **second key** sometimes does; and the honest close is to name what
+neither key can see.
+
+## ⛔ CHECK EVERY OCCURRENCE, NOT THE FIRST
+
+The sidebar spec's **first** `228px` sits inside the DESKTOP CLIENT block — which would have scoped it as
+desktop-only and made S14.18 part of S14.20. Every occurrence shows it in the **shared preamble** as well, so
+it is a shell component.
+
+**Same discipline as reading the whole error rather than the last line, and the same failure mode as a
+first-match `grep` standing in for a census.** A first hit answers *does this exist*; it never answers *where
+does this belong*.
