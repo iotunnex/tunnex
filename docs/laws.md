@@ -3337,3 +3337,23 @@ expiry date and therefore never appears stale.**
 
 **Same family as the sticky-classifier and stale-artifact laws:** something computed once kept being trusted
 long after the thing it described had moved.
+
+---
+
+# ⛔ A FALLBACK THAT REUSES A MEANINGFUL TERM HIDES THE CASE IT FALLS BACK FROM
+
+**S14.16.** The Audit Log rendered `actor_id ? name : "system"`. But **"system" was already the correct word
+for a NAMED subsystem** — 26 of 100 rows carried `actor_system`. So the fallback for *we do not know who* was
+the same token as *we know exactly who, and it is a machine*.
+
+> ## **THE GAP WAS NOT MERELY UNFIXED — IT WAS INVISIBLE, because every unattributed row rendered as a**
+> ## **legitimate, well-understood category.** Nobody reports a bug that reads like a correct answer.
+
+**GENERALISES PAST THIS SCREEN:** an `else` branch, a `default:` case, a `?? "unknown"`, a placeholder — **if
+its value is a term that means something specific elsewhere in the same view, the two states merge and only
+the meaningful one is ever seen.**
+
+**MECHANICAL:** for every fallback, ask *does this token already carry meaning in this view?* If it does, the
+fallback needs its own word — and usually its own visual weight, because a genuine gap is not metadata.
+**Related, and the reason this one survived so long:** the same defect made the count wrong too, so even a
+tally of "system rows" would have agreed with itself.
