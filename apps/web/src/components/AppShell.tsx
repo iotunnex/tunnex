@@ -347,10 +347,17 @@ export function AppShell() {
           Flex items default to `min-width: auto`, so they refuse to shrink below their content. That is the
           single most common cause of horizontal overflow in a flex row, and it is invisible until something
           inside is long enough. */}
-      <header className="flex h-[56px] shrink-0 items-center justify-between gap-2 border-b border-line px-4">
-        <div className="min-w-0 shrink-0">
-          <Logo />
-        </div>
+
+      {/* ⛔ TWO LOGOS, AND THE LAYOUT WAS THE REASON. The topbar spanned the FULL WIDTH — above the
+          sidebar — and carried its own <Logo>, so once the sidebar gained the brand there were two
+          marks stacked in the same corner.
+          The design has the sidebar FULL-HEIGHT with the topbar beside it, which is why it has one:
+          there is only one place the brand can sit. Removing the duplicate without moving the
+          topbar would have left a blank 56px strip above the sidebar instead. */}
+      <div className="relative flex min-h-0 flex-1">
+        <SidebarNav />
+        <div className="flex min-w-0 flex-1 flex-col">
+      <header className="flex h-[56px] shrink-0 items-center justify-end gap-2 border-b border-line px-4">
         <div className="flex min-w-0 items-center gap-3">
           {/* The search field IS the command-palette affordance (S14.3 built the palette; this is its
               discoverable entry point, since a shortcut nobody sees is a shortcut nobody uses). */}
@@ -388,9 +395,6 @@ export function AppShell() {
         </div>
       </header>
 
-      <div className="relative flex flex-1">
-        <SidebarNav />
-
         {/* ⛔ NO max-width. README: "Page body max content width: none — grids fill available width."
             The previous `max-w-3xl` capped EVERY screen at 768px, which is why S14.2's `columns` budget was
             computed, asserted, and never consumable — dormant machinery in our own new code (docs/laws.md).
@@ -406,6 +410,7 @@ export function AppShell() {
           )}
           <Outlet />
         </main>
+        </div>
       </div>
 
       {navMode === "drawer" && <TriageBar />}
