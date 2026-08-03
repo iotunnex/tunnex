@@ -3259,3 +3259,27 @@ does it then trip forever?*
 
 **And `e2e` stays on every push.** It is parallel, sits under the post-fix floor, and deferring integration
 proof to merge time finds breaks at the most expensive moment.
+
+---
+
+# ⛔ WHEN RE-TESTING AN OLD FAILURE, PIN THE TREE IT WAS WRITTEN AGAINST
+
+**S14.15.** Two reds written at S14.13 were re-measured at S14.15 and appeared to reproduce in isolation,
+refuting three sessions of "it is cumulative". **The refutation was false.** The tree had since gained
+S14.14's directory-sync panel, which renders *"status unknown"* once per provider — so a singular query now
+matched **twice** and threw. **A different failure, with a different message, standing exactly where the old
+one had been.**
+
+Suppressing only the new panel restored the truth: alone it **passes**, in the full file it **fails with the
+original errors**. Cumulative after all.
+
+> ## **CHANGING THE SUBJECT AND THE INSTRUMENT IN THE SAME STEP IS NOT RE-MEASURING. A failure re-tested on a**
+> ## **tree that has moved is a NEW experiment wearing the old one's name — and it is most convincing exactly**
+> ## **when the new symptom lands in the same place as the old.**
+
+**The cost was not the wasted measurement.** The false refutation was used to argue an ORDERING decision to
+the founder. *A wrong direction is worse than not having looked* — with a decision attached to it.
+
+**MECHANICAL:** before re-running an old red, either check out the commit it was written against, or suppress
+everything that has landed on that surface since. Then compare the ERROR TEXT, not just pass/fail: a changed
+message means a changed defect.
