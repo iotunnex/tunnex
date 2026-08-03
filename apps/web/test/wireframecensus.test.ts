@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { stripJsComments } from "./support/source";
 
@@ -269,17 +269,37 @@ describe("wireframe census — the DESIGN is the authoritative set", () => {
       // this test GREEN, because the COMMENT explaining the flip contains the word "client.html".
       // A substring search over source counts the prose that describes the code as if it were the
       // code — the third time this exact shape has bitten in this epic.
-      const loader = stripJsComments(
-        readFileSync(
-          join(__dirname, "..", "..", "client", "src", "main", "index.ts"),
-          "utf8",
-        ),
-      );
+      //
+      // ⛔ AND SCANNING `index.ts` ALONE IS WHAT LET THE MIGRATION SHIP HALF-DONE. This asserted the
+      // entry is loaded SOMEWHERE — true — and never asked whether anything loads a DIFFERENT one.
+      // `ipc.ts` still loaded `index.html` on the FIRST-RUN branch of config:setServerUrl, so a
+      // fresh install reached the web dashboard and only a second launch reached the client.
+      // A ledger sees only the shape it is keyed on. This is now keyed on the SET.
+      const MAIN = join(__dirname, "..", "..", "client", "src", "main");
+      const loaded = new Map<string, string[]>();
+      for (const f of readdirSync(MAIN).filter((f) => f.endsWith(".ts"))) {
+        const src = stripJsComments(readFileSync(join(MAIN, f), "utf8"));
+        for (const m of src.matchAll(/app:\/\/tunnex\/([A-Za-z0-9._-]+\.html)/g)) {
+          loaded.set(m[1]!, [...(loaded.get(m[1]!) ?? []), f]);
+        }
+      }
       expect(
-        loader.includes(`app://tunnex/${d.entry}`),
-        `${b} is marked built with entry ${d.entry}, but the client loader does not LOAD it`,
-      ).toBe(true);
+        [...loaded.keys()].sort(),
+        `the client main process references these renderer entries: ` +
+          `${[...loaded].map(([k, v]) => `${k} (${v.join(", ")})`).join("; ")} — ` +
+          `${b} is marked built with entry ${d.entry}, so that must be the ONLY one.`,
+      ).toEqual([d.entry]);
     }
+  });
+
+  it("⛔ the entry URL has ONE definition — two literals in two files are two constants", () => {
+    // The fix for the above, held in place. A second file spelling the URL out again would pass the
+    // set check on the day it was written and drift the moment either copy changed.
+    const MAIN = join(__dirname, "..", "..", "client", "src", "main");
+    const spellers = readdirSync(MAIN)
+      .filter((f) => f.endsWith(".ts"))
+      .filter((f) => /app:\/\/tunnex\/[A-Za-z0-9._-]+\.html/.test(stripJsComments(readFileSync(join(MAIN, f), "utf8"))));
+    expect(spellers, "the entry URL is spelled out in more than one file").toEqual(["entry.ts"]);
   });
 
   it("⛔ NO SHELL COMPONENT IS UNBUILT — banners cannot see these, so they are counted separately", () => {

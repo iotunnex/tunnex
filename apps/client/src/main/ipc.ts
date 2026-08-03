@@ -12,6 +12,7 @@ import { ApprovalMonitor } from "./approvalmonitor";
 import { HealthMonitor } from "./healthmonitor";
 import type { HealthFacts } from "./deviceconfig";
 import { ensureHelperInstalled } from "./helperinstall";
+import { CLIENT_ENTRY } from "./entry";
 import { notifyTunnel } from "./notify";
 import { trayStateFor, type TrayState } from "./tray";
 import type { TunnelStatus } from "./helperclient";
@@ -425,12 +426,16 @@ export function registerIpc(
       await runLogout(store);
     }
     config.commitServerUrl(accepted);
-    // First run (unset → set) must LOAD the SPA — reload() would re-load the
+    // First run (unset → set) must LOAD the renderer — reload() would re-load the
     // current (setup data:) URL and cannot change origin. Otherwise a plain
     // reload picks up the new auth/config state.
+    //
+    // ⛔ THIS LINE STILL SAID `index.html` AFTER STEP 3 — so the FIRST RUN, the one path every new
+    // install takes, landed on the web dashboard and only a second launch reached the client. One
+    // constant now, in entry.ts, because two literals in two files are two constants.
     const w = getWindow();
     if (wasUnset) {
-      void w?.loadURL("app://tunnex/index.html");
+      void w?.loadURL(CLIENT_ENTRY);
     } else {
       w?.webContents.reload();
     }
