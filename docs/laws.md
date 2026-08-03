@@ -3542,3 +3542,30 @@ the instruction gets carried out.
 
 **MECHANICAL:** never report repository state from a filesystem walk. `git ls-files` for what is tracked,
 `git log -- <path>` for what ever was, `git check-ignore -v` for why not. All three are one line.
+
+---
+
+# ⛔ A CAUSE INFERRED FROM A SYMPTOM'S NAME IS NOT A DIAGNOSIS
+
+**S14.20.** A SIGKILL was reported launching Electron. *"SIGKILL on an unsigned Electron binary"* is a real,
+well-known macOS failure — so Gatekeeper **fitted**, and a README section was written with working commands
+to fix it.
+
+**It never reproduced.** The report came from a **different clone on a branch ten stories old** with no client
+work and **no `Electron.app` installed at all**. The binary was ABSENT, not blocked.
+
+> ## **AND THE FIX'S COMMANDS WERE REAL, WHICH IS WHAT MADE IT DANGEROUS. `xattr -cr` and an ad-hoc re-sign**
+> ## **both run, both do something, and neither confirms the cause. REAL COMMANDS AROUND AN UNCONFIRMED**
+> ## **CAUSE READ AS EVIDENCE** — and once written down they become the next person's starting assumption.
+
+⛔ **The tell was present and ignored: I wrote "I could not reproduce it" IN THE SAME COMMIT that shipped the
+remedy.** Stating the doubt is not the same as acting on it. A cause you could not reproduce is a
+**hypothesis**, and a hypothesis in a README is indistinguishable from a finding.
+
+**MECHANICAL:**
+- **Reproduce, or label it a lead.** Documentation may carry "if X, check Y" — it must not carry "X is caused
+  by Y" without a reproduction.
+- **Verify the TREE before diagnosing the CODE.** Clone, branch, head, files present, deps installed. Two
+  clones caused two separate confusions in this epic — a stale served bundle, then this.
+- **A missing artefact and a blocked artefact fail differently.** `NO Electron.app` and `Killed: 9` are not
+  the same sentence, and the first was never checked.
