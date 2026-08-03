@@ -3472,3 +3472,38 @@ message and passes the new one, same file, one line apart.
 **AND THE ASSERTION ORDER IS HALF THE FIX:** await what must APPEAR, then assert what must be ABSENT.
 **Absence-first passes trivially before anything renders at all** — a green that means *too early to tell*,
 which is indistinguishable from a green that means *correct*.
+
+---
+
+# ⛔ THE WIREFRAME IS RELIABLE ABOUT LAYOUT AND UNRELIABLE ABOUT ANYTHING THE SERVER COMPUTES
+
+**Third instance, S14.19 — and the mechanism is now clear enough to predict the next one.**
+
+| story | the design drew | the server actually does |
+|---|---|---|
+| S14.12 | `polFlow` — 4 sources, 4 destinations, 5 hand-authored edges | a rule table the picture never reads; the derivation is OURS to design |
+| S14.14 | `_tunnex-verify.acme.io TXT "tnx-domain-…"` | resolves the **APEX**, compares `tunnex-verify=<token>` by exact equality |
+| S14.19 | four verdict chips: allow · deny · deny_aggregate · terminated | **FIVE** decisions — the fifth, `gap`, means **THE LOG IS INCOMPLETE** |
+
+> ## **ITS AUTHOR COULD ONLY DRAW WHAT THEY COULD SEE. Layout, hierarchy, density and tone are**
+> ## **VISIBLE and the design is authoritative about them. A derivation, a comparison, an enum's**
+> ## **fifth member and a refused inference are INVISIBLE — and the picture is silent, not wrong,**
+> ## **which is why building to it faithfully still produces a defect.**
+
+**The S14.19 case is the sharpest:** building the four chips the design drew would have rendered a
+**tamper-evidence marker as an ordinary row, or dropped it** — presenting an incomplete security log as a
+complete one.
+
+**MECHANICAL, and it is cheap:** for every screen, diff the design's ENUMERATIONS against the schema's —
+chips, tabs, states, badges, columns. Where the design has fewer, ask what the extra one MEANS before deciding
+it is unimportant. **A missing state is usually the failure state**, because a designer drawing a healthy
+product has nothing to look at when drawing it.
+
+## ⛔ AND A REFUSED INFERENCE IS NOT MISSING DATA
+
+`device/user are DEFERRED (nil) — never derived from a racy src_ip lookup`. The design paired a name with the
+address; the server declines to guess one, because an address maps to a device only through a lease that may
+since have moved.
+
+> ### **A WRONG NAME IN A SECURITY LOG IS WORSE THAN NO NAME.** Render what was attributed, and say why the
+> ### rest is absent — the same family as *"could not check" is not "empty"*.
