@@ -258,3 +258,30 @@ export function idpErrorCopy(code: string | null | undefined): string {
       return "Could not complete the request.";
   }
 }
+
+/**
+ * ⛔ A DIRECTORY-OWNED GROUP CANNOT BE HAND-EDITED, AND THE ACCESS SCREEN WAS OFFERING IT ANYWAY.
+ *
+ * MEASURED: `AddGroupMember` refuses with **`409 idp_managed_group`** — *"this group is managed
+ * by directory sync; members cannot be edited manually"* (`enterprise/policy/service.go:125`).
+ * The web read `origin` NOWHERE, so `GroupRow` gated its Add/Remove controls on `canManage`
+ * alone and rendered them on synced groups too. Every use was a guaranteed 409.
+ *
+ * That is the "never imply an action it did not perform" rule in its plainest form, and it is
+ * S14.14's finding about a screen S14.12 shipped: the reconciler owned those rows all along, and
+ * the only place that fact was written down was a server error string nobody could reach without
+ * clicking.
+ *
+ * ⚠ The DELETE control stays. Deleting a synced group is genuinely allowed (it is un-mapping
+ * plus removal); it is only MEMBERSHIP the reconciler owns. Hiding the wrong verb would trade
+ * one wrong affordance for another.
+ */
+export function isDirectoryManaged(g: { origin?: string }): boolean {
+  return g.origin === "idp_sync";
+}
+
+export const DIRECTORY_MANAGED_NOTE =
+  "Members are synced from the directory and cannot be edited here. Change the group in your directory, or un-map it in Settings › Directory sync.";
+
+/** The row badge. Short, because it sits inline next to the group name. */
+export const DIRECTORY_MANAGED_BADGE = "DIRECTORY";

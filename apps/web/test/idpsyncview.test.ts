@@ -11,6 +11,9 @@ import {
   syncTier,
   tierCopy,
   unmapConfirmSatisfied,
+  isDirectoryManaged,
+  DIRECTORY_MANAGED_NOTE,
+  DIRECTORY_MANAGED_BADGE,
 } from "../src/lib/idpsyncview";
 import { can } from "../src/lib/rbac";
 
@@ -255,5 +258,32 @@ describe("idpErrorCopy", () => {
   it("does not invent a diagnosis for an unknown code", () => {
     expect(idpErrorCopy("brand_new")).toBe("Could not complete the request.");
     expect(idpErrorCopy(null)).toBe("Could not complete the request.");
+  });
+});
+
+// ⛔ S14.12 SHIPPED A SCREEN THAT OFFERED AN ACTION THE SERVER ALWAYS REFUSES.
+//
+// AddGroupMember answers 409 idp_managed_group — "this group is managed by directory sync;
+// members cannot be edited manually" (enterprise/policy/service.go:125). The web read `origin`
+// NOWHERE, so Access's GroupRow gated Add/Remove on canManage alone and rendered them on synced
+// groups too. Every use was a guaranteed refusal.
+describe("isDirectoryManaged", () => {
+  it("identifies a directory-owned group", () => {
+    expect(isDirectoryManaged({ origin: "idp_sync" })).toBe(true);
+  });
+
+  it("⛔ never claims a manual or origin-less group is directory-managed", () => {
+    // The direction that matters: a false positive would REMOVE working controls from a group an
+    // operator is entitled to edit, which is the same defect pointed the other way.
+    expect(isDirectoryManaged({ origin: "manual" })).toBe(false);
+    expect(isDirectoryManaged({})).toBe(false);
+  });
+
+  it("tells the operator where the membership CAN be changed", () => {
+    // A refusal that names no alternative is a dead end.
+    expect(DIRECTORY_MANAGED_NOTE).toMatch(/cannot be edited here/i);
+    expect(DIRECTORY_MANAGED_NOTE).toMatch(/directory/i);
+    expect(DIRECTORY_MANAGED_NOTE).toMatch(/un-map/i);
+    expect(DIRECTORY_MANAGED_BADGE).toMatch(/directory/i);
   });
 });

@@ -72,6 +72,11 @@ import {
   managedGrantWarning,
   type LoadState,
 } from "../lib/policyview";
+import {
+  DIRECTORY_MANAGED_BADGE,
+  DIRECTORY_MANAGED_NOTE,
+  isDirectoryManaged,
+} from "../lib/idpsyncview";
 import { ManagedBadge } from "../components/ManagedBadge";
 import {
   POSTURE_HONESTY_LINE,
@@ -2232,6 +2237,11 @@ function GroupRow({
     }
   }
 
+  // ⛔ MEMBERSHIP OF A SYNCED GROUP IS NOT EDITABLE — AddGroupMember answers 409
+  // idp_managed_group (enterprise/policy/service.go:125). The controls below were gated on
+  // canManage ALONE, so every Add/Remove on a directory group was a guaranteed refusal.
+  const directoryManaged = isDirectoryManaged(group);
+  const canEditMembers = canManage && !directoryManaged;
   const rows = loaded?.ok ? loaded.data : [];
   const inGroup = new Set(rows.map((m) => m.user_id));
   const addable = members.filter((m) => !inGroup.has(m.user_id));
@@ -2246,6 +2256,13 @@ function GroupRow({
           className="flex-1 text-left hover:text-white"
         >
           {group.name}
+          {/* The reconciler owns this group's membership — say so where the name is, not only
+              where the (now absent) controls used to be. */}
+          {directoryManaged && (
+            <span className="ml-2 rounded-full border border-accent-500/40 bg-accent-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-accent-300">
+              {DIRECTORY_MANAGED_BADGE}
+            </span>
+          )}
           {/* ⛔ RENDERED ON EVERY ROW, collapsed or not — but only once ASKED. `undefined` (not yet fetched)
               renders NOTHING; it must never become a 0 nobody fetched. A count of 0 is the loudest thing
               here, so it is styled as a warning rather than as metadata. */}
@@ -2281,7 +2298,7 @@ function GroupRow({
             rows.map((m) => (
               <div key={m.user_id} className="flex items-center justify-between py-0.5 text-xs">
                 <span className="text-slate-300">{m.name || m.email}</span>
-                {canManage && (
+                {canEditMembers && (
                   <Button
                     variant="ghost"
                     disabled={busy}
@@ -2299,7 +2316,10 @@ function GroupRow({
                 )}
               </div>
             ))}
-          {canManage && loaded?.ok && addable.length > 0 && (
+          {directoryManaged && loaded?.ok && (
+            <p className="mt-2 text-xs text-slate-500">{DIRECTORY_MANAGED_NOTE}</p>
+          )}
+          {canEditMembers && loaded?.ok && addable.length > 0 && (
             <div className="mt-2 flex gap-2">
               <select
                 className="rounded-md border border-white/10 bg-ink-900 px-2 py-1 text-xs text-white disabled:opacity-50"

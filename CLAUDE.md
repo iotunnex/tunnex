@@ -75,6 +75,17 @@ is invisible to both. Two questions, answered from the **spec and schema**, neve
 
 Both findings were the best of that section and neither appeared in the wireframe.
 
+## ⛔ LOOK-AHEAD DEVELOPMENT — do not block on CI (founder-directed, conditional)
+
+**Push, then keep building.** If CI comes back red, fix it then — **a red on a branch costs one fix; an
+idle session costs the whole session.** Never sit on a check-runs poll waiting for green.
+
+**CONDITIONS — it applies only when the next work does not depend on the CI result.**
+⛔ **IT DOES NOT APPLY TO A MERGE.** A merge still waits for green **on the exact sha**, because that is
+the one place a red costs more than a fix (see the merge standard).
+
+Report the CI result whenever it lands, alongside whatever was built in the meantime.
+
 ## Gates (run before declaring a slice/story done)
 
 The CI `gates` job is the composite; locally that means:
