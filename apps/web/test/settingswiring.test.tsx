@@ -79,6 +79,10 @@ const withAuth = (ui: React.ReactElement) =>
 beforeEach(() => {
   edition = "enterprise";
   ovpnEnabled = false;
+  // ⛔ EVERY mock-controlling global must be reset here. `ssoFail` was added without one, so a test that set
+  // it leaked into the next file-order test — and the symptom was a query "not finding" text that a DOM dump
+  // showed present, because the component under assertion had loaded the OTHER arm.
+  ssoFail = false;
 });
 
 describe("Settings — wiring: the control must reflect the ORG'S state, not a default (destination: `settings`)", () => {
@@ -157,5 +161,26 @@ describe("Settings — failure path", () => {
     );
     // And no enforcement control may be offered against an org that was never loaded.
     expect(screen.queryByRole("button", { name: /OpenVPN/ })).toBeNull();
+  });
+});
+
+
+describe("SSO config — a failed read is not 'not configured'", () => {
+  it("⛔ a NON-`sso_not_configured` failure NEVER offers Configure", async () => {
+    // The destructive path: `if (error || !data) setConfigured(false)` collapsed a transient failure into
+    // "no config yet", so the Configure form rendered over an org that HAS SSO and an admin could
+    // reconfigure from scratch against a live IdP. The server always distinguished them (404 +
+    // `sso_not_configured` vs anything else); the client discarded it twelve lines after documenting it.
+    ssoFail = true;
+    withAuth(<Settings />);
+    expect((await screen.findAllByText(/status unknown/i)).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /^Configure$/ })).toBeNull();
+    expect(screen.getAllByText(/overwrite a live setup/i).length).toBeGreaterThan(0);
+  });
+
+  it("`sso_not_configured` DOES offer Configure — both arms, or the fix is a blank screen", async () => {
+    withAuth(<Settings />);
+    expect((await screen.findAllByRole("button", { name: /Configure/ })).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/status unknown/i)).toBeNull();
   });
 });
