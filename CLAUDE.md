@@ -86,6 +86,10 @@ the one place a red costs more than a fix (see the merge standard).
 
 Report the CI result whenever it lands, alongside whatever was built in the meantime.
 
+⛔ **AND REPORT THE LATEST SHA, NOT THE ONE YOU NAMED.** Pushing while CI runs CANCELS the prior run, so a sha
+you promised a result for may never produce one. **A cancelled `gates` is not evidence of anything** — never
+count it as green, and never count it as red. Re-point the report at the head that actually ran.
+
 ## Gates (run before declaring a slice/story done)
 
 The CI `gates` job is the composite; locally that means:
