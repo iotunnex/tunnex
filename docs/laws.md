@@ -3235,3 +3235,27 @@ diagnosis from `2 of 5 survived`, and only the first one means *go check that th
 `400 provider_not_supported`, deliberately, at config time. **The spec, the handler signature and the
 generated schema all read as though Google works — only the served payload disagreed.** Build the arm for
 what the server ANSWERS, not for what the contract permits you to ask.
+
+---
+
+# ⛔ A CUMULATIVE DIFF MAKES ANY CLASSIFIER STICKY
+
+**S14.15.** CI classified `BASE...HEAD` — the whole PR — so **the first commit that trips a rule trips it for
+every commit after it.** One edit to `fixtures.sql` pinned `go=true` for the rest of the branch: across 18
+runs, 17 were `go=true` and 16 of those were that one file, including 10 commits that were docs-only. **The
+classifier existed and was a constant.**
+
+**The shape will recur wherever a per-push decision is computed from a cumulative range** — cost gates, path
+filters, "did anything security-relevant change". Ask *what is the earliest commit that can trip this, and
+does it then trip forever?*
+
+**TWO THINGS THAT ARE NOT THE FIX, recorded so they are not tried:**
+
+- **Do NOT switch to a per-commit diff.** The PR as a whole is what gets merged, so per-commit classification
+  would skip a leg for a change that IS in the merge. Cumulative is correct; stickiness is its cost.
+- **Do NOT read the skip as a bigger win than it is.** `docs_only` cannot fire on a story branch that already
+  contains code — so end-of-story documentation pushes are covered by the narrowed `go=false` path, **not** by
+  the docs-only skip. Stating that plainly is the difference between a measured result and a claim.
+
+**And `e2e` stays on every push.** It is parallel, sits under the post-fix floor, and deferring integration
+proof to merge time finds breaks at the most expensive moment.
