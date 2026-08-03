@@ -548,4 +548,33 @@ VALUES ('01900000-0000-7000-8000-00000008000a', '01900000-0000-7000-8000-0000000
         false, NULL, NULL, now() - interval '3 days')
 ON CONFLICT (id) DO NOTHING;
 
+-- ⛔ SSO: ENTRA CONFIGURED, GOOGLE NOT — both arms of the panel in one org (S14.13 D2).
+--
+-- `sso_configs` was an unmeasured fixture ZERO, registered at S14.11: GET /sso/{provider} answered
+-- 404 sso_not_configured for every provider, so the CONFIGURED render had never been seen on any stack.
+-- That matters more than a missing state here: the S14.11 DESTRUCTIVE finding lives on this panel — a
+-- non-`sso_not_configured` failure used to render the CONFIGURE form over an org that HAS SSO, inviting an
+-- admin to reconfigure from scratch against a live IdP. UNREVIEWABLE without a configured org.
+--
+-- Entra configured / Google not, deliberately: both arms render side by side, so "configured" and
+-- "not configured" are compared rather than toggled between.
+--
+-- `client_secret_sealed` is AES-GCM at rest and NEVER returned — the API serves only `secret_fingerprint`.
+-- The bytes below are inert filler: nothing reads them back, and the fixture must not imply a real secret.
+-- The FINGERPRINT is what the panel renders, so it is the field that must look truthful.
+INSERT INTO sso_configs (id, org_id, provider, client_id, client_secret_sealed, secret_fingerprint, tenant_id, enabled, created_at, updated_at)
+VALUES ('01900000-0000-7000-8000-000000060001', '01900000-0000-7000-8000-000000000001',
+        'microsoft', 'acme-tunnex-prod', '\x00'::bytea, '3f9c2a71bd04',
+        '72f9c1e4-0a3d-4b77-9d21-8e5a6f0b4c13', true,
+        now() - interval '90 days', now() - interval '12 days')
+ON CONFLICT (id) DO UPDATE
+  SET client_id = EXCLUDED.client_id,
+      secret_fingerprint = EXCLUDED.secret_fingerprint,
+      tenant_id = EXCLUDED.tenant_id,
+      enabled = EXCLUDED.enabled,
+      updated_at = EXCLUDED.updated_at;
+
+-- ⛔ GOOGLE IS DELIBERATELY ABSENT. Do not add it: the unconfigured arm is the state EVERY org passes
+-- through, and it is the one the destructive fix must render correctly.
+
 COMMIT;
