@@ -41,7 +41,13 @@ Stories build one at a time, decision-first:
    merge** to fill it in — bypassing all three required checks. Measured across EPIC 14: **8 such pushes,
    8 forced, 0 avoidable.**
    The content tip is knowable while the PR is open, so **the checkpoint lands inside the PR and the bypass
-   disappears permanently** instead of being counted. Still carry **both** identifiers — the PR number
+   disappears permanently** instead of being counted.
+
+   ⛔ **AND WRITE THE CHECKPOINT LAST — THE FINAL COMMIT BEFORE THE MERGE.** Twice now the pointer has named a
+   commit with content behind it, because more work landed after the checkpoint was written and it had to be
+   re-pointed (S14.14, then S14.17–19). **Both times the rule was fine and the SEQUENCING was wrong.** A
+   procedure gap, not a rule gap, and the fix costs nothing: nothing goes in after the checkpoint except the
+   merge itself. If something must, re-point it in the same breath rather than at merge time. Still carry **both** identifiers — the PR number
    (survives rebase) and the content-tip sha (identifies the merge unambiguously); it is one commit behind
    `main`'s literal head **by construction, and that is the point, not a defect**.
 
