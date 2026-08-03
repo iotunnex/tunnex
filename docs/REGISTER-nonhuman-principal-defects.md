@@ -74,3 +74,31 @@ someone re-adds later with no argument to defeat**, so each carries the thing th
 
 **Guarded mechanically:** `authhero.test.ts` refuses SOC 2 · SCIM · ISO 27001 · HIPAA · FedRAMP · PCI in any
 rendered source, comments stripped and no file exempted. **Proven to fail** on a real rendered claim.
+
+---
+
+# ⛔⛔ THE DESKTOP CLIENT IS UNSIGNED — AND THAT BLOCKS DISTRIBUTION, NOT DEVELOPMENT
+
+**Registered S14.20, ABOVE the UI story.** Measured across the whole client build path:
+
+| what | state |
+|---|---|
+| code signing | **NONE.** `identity: null`, `CSC_IDENTITY_AUTO_DISCOVERY=false`. Ad-hoc (`codesign -s -`) only. |
+| notarization | **NO script, no step, nowhere in the tree.** |
+| entitlements | **NO file exists.** The only plist is the LaunchDaemon — a different thing, easy to mistake for one. |
+| hardened runtime | **impossible without a real signature.** |
+| auto-update feed | **none** (`updater.ts` is 19 lines). |
+
+> ## **THIS IS THE ONE ARTEFACT WE SHIP THAT RUNS WITH ELEVATED PRIVILEGES AND INSTALLS A LaunchDaemon —**
+> ## **and it is the one artefact nobody has signed.**
+
+**THE FRAMING THAT MATTERS: the client cannot ship to anyone outside the building until it is signed and
+notarized, REGARDLESS OF HOW GOOD THE UI IS.** S14.20 can complete in full and change nothing about that.
+
+This is **S6.5b's deferral coming due**. Its named trigger was *public beta OR first outside-circle
+distribution*; the trigger has not fired, so the deferral is still valid — but the item is now a **hard
+distribution gate** rather than a nicety, and it should be read that way when beta is scheduled. Windows EV
+additionally waits on legal-entity formation.
+
+**NOT fixed in S14.20** (founder-directed). Registered so it is impossible to reach a beta date without
+meeting it.

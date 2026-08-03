@@ -3507,3 +3507,38 @@ since have moved.
 
 > ### **A WRONG NAME IN A SECURITY LOG IS WORSE THAN NO NAME.** Render what was attributed, and say why the
 > ### rest is absent — the same family as *"could not check" is not "empty"*.
+
+---
+
+# ⛔ A DELIMITER WITH NO TERMINATOR MAKES THE LAST ITEM ABSORB EVERYTHING TO EOF
+
+**S14.20.** The banner census measures each screen block as **start-to-next-start**. For the FINAL banner
+there is no next start, so `DESKTOP CLIENT` was measured as **167,263 chars — "the largest block by 5×"**.
+
+**It is 11,966.** The other 155k is four app-wide overlay specs (⌘K palette, detail drawer, bulk action bar,
+onboarding checklist) that merely sit after it in the file.
+
+> ## **THE NUMBER WAS COMPUTED, WHICH IS EXACTLY WHY NEITHER OF US DOUBTED IT. A measured figure carries an**
+> ## **authority a guess does not — and this one measured the wrong EXTENT, not the wrong thing.**
+
+**AND IT INVERTED THE CONCLUSION.** "Largest block by 5×" framed the desktop client as the biggest remaining
+build. **It is the SMALLEST screen spec in the file** — which is what the founder had been saying about the
+client all along, against a number that appeared to contradict him.
+
+**MECHANICAL:** when a census measures RANGES, the last range is unbounded unless something terminates it.
+Either give the delimiter an end marker, or **treat the final element's extent as unmeasured** rather than as
+measured-and-large. Same family as the vacuity floor: the check ran, the arithmetic was right, and the
+subject was wrong.
+
+## ⛔ AND `find(1)` LISTS THE WORKING TREE, NOT THE INDEX
+
+In the same pass I reported that **`apps/client/release/` was committed to git — "a full built .app in
+version control"**. It was not. **Zero tracked files, and `.gitignore:60` already covers it.** It is 1.0G of
+local build output that `find` listed because `find` does not know what git is.
+
+**The founder ruled on that premise** — remove and gitignore — and the ruling was already satisfied before it
+was made. **A wrong premise that produces a plausible instruction is worse than an obvious error**, because
+the instruction gets carried out.
+
+**MECHANICAL:** never report repository state from a filesystem walk. `git ls-files` for what is tracked,
+`git log -- <path>` for what ever was, `git check-ignore -v` for why not. All three are one line.
