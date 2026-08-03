@@ -12,7 +12,7 @@ import { ApprovalMonitor } from "./approvalmonitor";
 import { HealthMonitor } from "./healthmonitor";
 import type { HealthFacts } from "./deviceconfig";
 import { ensureHelperInstalled } from "./helperinstall";
-import { CLIENT_ENTRY } from "./entry";
+import { postServerUrlAction } from "./entry";
 import { notifyTunnel } from "./notify";
 import { trayStateFor, type TrayState } from "./tray";
 import type { TunnelStatus } from "./helperclient";
@@ -434,8 +434,9 @@ export function registerIpc(
     // install takes, landed on the web dashboard and only a second launch reached the client. One
     // constant now, in entry.ts, because two literals in two files are two constants.
     const w = getWindow();
-    if (wasUnset) {
-      void w?.loadURL(CLIENT_ENTRY);
+    const act = postServerUrlAction(wasUnset);
+    if (act.kind === "load") {
+      void w?.loadURL(act.url);
     } else {
       w?.webContents.reload();
     }

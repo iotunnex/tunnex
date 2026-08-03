@@ -104,6 +104,20 @@ describe("the strippers do what they claim", () => {
     expect(out).toContain("const flag = 1;");
   });
 
+  it("⛔ a `/*` INSIDE a line comment does not open a phantom block and eat the code below", () => {
+    // The exact shape that bit on day two: entry.ts documents itself with the glob
+    // `app://tunnex/` + star + `.html` in a `//` comment. Block-first stripping treated that as a
+    // block opener, ran to the next close, and swallowed the constant underneath — so a census
+    // searching for the constant found ZERO in a file that plainly contains one.
+    const src = [
+      "// scans for app://tunnex/" + "*" + ".html across the tree",
+      "/** doc */",
+      'export const CLIENT_ENTRY = "app://tunnex/client.html";',
+    ].join("\n");
+    expect(stripJsComments(src)).toContain("CLIENT_ENTRY");
+    expect(stripJsComments(src)).toContain("app://tunnex/client.html");
+  });
+
   it("⛔ the block stripper is not fooled by a comment that spans the interesting line", () => {
     expect(stripJsComments("/*\nloadURL(\"app://tunnex/client.html\")\n*/\nconst x=1;")).not.toContain(
       "client.html",
