@@ -140,9 +140,20 @@ test("a shrink that would strand devices renders the orphan list with names and 
   ).toBeVisible();
   await expect(page.getByText("laptop-a")).toBeVisible();
   await expect(page.getByText("laptop-b")).toBeVisible();
+  // ⛔ THE SUBTLE REASON, ON THE WIRE. `reserved_collision` is numerically INSIDE the new
+  // range (ipalloc.go:78) — 10.99.0.127 is the broadcast address of 10.99.0.0/25 and looks
+  // fine next to the CIDR. The old copy ("collides with a reserved address") let an operator
+  // conclude the server was wrong; naming the three reserved addresses is what stops that.
   await expect(
-    page.getByText(/collides with a reserved address/i),
+    page.getByText(
+      /inside the new range, but on its network, gateway or broadcast address/i,
+    ),
   ).toBeVisible();
   await expect(page.getByText(/outside the new range/i)).toBeVisible();
   await expect(page.getByText(/and 1 more/i)).toBeVisible();
+  // The refusal is atomic — ShrinkOrphansError returns inside withTx (devices/service.go:539)
+  // BEFORE UpdateOrgPoolCidr (:541). Asserted here because this is the only instrument that
+  // sees it rendered: without the sentence an operator cannot tell a clean refusal from a
+  // partial resize.
+  await expect(page.getByText(/nothing was changed/i)).toBeVisible();
 });
