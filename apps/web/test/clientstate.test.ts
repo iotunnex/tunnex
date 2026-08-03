@@ -8,7 +8,6 @@ import {
   parsePreviewState,
   stateView,
   trayAppearance,
-  type ClientState,
 } from "../src/lib/clientstate";
 
 // ⛔ TEN STATES FROM THE BLOCK, PLUS ONE OF OURS.
