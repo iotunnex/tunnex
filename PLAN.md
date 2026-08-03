@@ -64,6 +64,50 @@ expected to be rewritten before merge.
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
 **CURRENT (2026-07-31): EPIC 13 = GATEWAY RECOVERY — BUILD COMPLETE INCLUDING SLICE 7 on `story/S13.1-gateway-recovery` (tip `7c1a127`; Slice 7 = `120ff0c`, since then docs-only), NOT MERGED. Slice 7 (operator-initiated restore, `POST /nodes/{nodeId}/restore-devices`, new perm `device:restore`, re-homes onto a named LIVE gateway because a revoked node never returns) closed the reachability defect and is RED-PROVEN REACHABLE + UI-exposed. **REVIEW STATE POINTER = `docs/S13.1-review-state.md`** (pass 1 COMPLETE — 20 findings + F3, HELD, nothing folded, `docs/S13.1-review-pass1-findings.md`; pass 3 launched before pass 2 by ruling; pass 2 not started and must cover Slice 7). Earlier note: pass 1 was once interrupted — (run `wf_642e5fe8-1ed`: 8/8 finders done, 127/144 verifiers returned, Critic and Synthesize never ran — resumable from cache). The review remains a merge precondition. Next session = REVIEW → WALK → merge word, nothing in between.** The epic exists for one observed event: an AWS gateway went offline past its 48h cert lifetime and could not come back — `/agent/renew` lives behind the mTLS channel its expired cert can no longer authenticate to. Commit-one `docs/S13.1-decisions.md` (six walls, D1–D10 ruled). **SHIPPED:** agent precedence (`identity.Decide`, no network argument — a failed handshake structurally cannot trigger re-key; `Recover` ranked above `UseToken`) · **PoP re-key** on the public listener (RSA over `nonce ‖ CSR DER`; gate BEFORE crypto so timing is not a liveness oracle; **D3 amended: expiry authorizes, revocation REFUSES** — expiry is an absence of action, revocation is the presence of a decision) · its own path-scoped throttle + body cap (registered before `middleware.RealIP` — review #1 was exactly that) · **cascade restore** (`revoked_cause`, reclaim-first via the canonical oracle) · **Slice 6 `provisioned_ip`** (`needs_reexport` gains the ADDRESS cause for EVERY mode; ranges stay static-only; both contract rewrites + the label the census under-scoped) · **D10 second identifier** (key fingerprint: a LOST RESPONSE no longer bricks a gateway; ambiguity refuses; three implementations of one digest pinned to a golden vector; agent persists its pending key before submitting and reuses it so retries CONVERGE; migration guard forced expand/contract with both shim halves). Retroactive review pass 1 (leader election) folded — *leadership was a boolean that lies*; `ConfirmLeader` now matches `pg_locks`. **OWED BEFORE MERGE, IN ORDER: (1) the epic-end review pass — three passes by surface family (unauthenticated re-key surface · identity/cascade data path + migrations 0054–0061 · agent recovery loop), ~4.5–6M tokens, a merge precondition alongside CI and the walk, and a truncated pass is worse than none; (2) the walk per `docs/S13-boxwalk.md` — seven legs, TWO GATEWAYS MUST BE OFFLINE 48h+ BEFORE the session (`agentca.CertTTL` is a constant; the clock is the only way to make a cert expire); (3) the merge word.** **RULED — cascade-restore reachability: SLICE 7 (operator-initiated restore), built AFTER the review pass and BEFORE the walk; two conditions — authorized as a deliberate operator act (same class as minting a join token) and RED-PROVEN REACHABLE, not merely correct. Un-revoke PERMANENTLY REFUSED (it is the attack chain D3 exists to prevent); removing the mechanism refused (re-opens Wall 6). Walk Leg 4 stays a falsification attempt. The defect:** `RestoreCascadeRevokedDevices` has one caller (`Rekey`), devices are cascade-revoked in one place (`Revoke`), and `Rekey` refuses a revoked node — so the trigger may put the node into the one state that can never reach the restorer (dormant-machinery law). Four faces in the paper; walk Leg 4 is written as a falsification attempt. Retroactive **pass 2 (backup/restore)** still attaches to the next natural merge boundary. Registered: the 0061 contract migration (trigger = the release after this one) · no general rate limiting · body caps only on the two re-key routes · failover hysteresis persistence (beta-blocking, owned by the failover story).
+**MERGED (2026-08-04): S13.1 GATEWAY RECOVERY — PR #43, content tip `e8bbd68` pre-merge (SQUASH-merged — see below).**
+**S13.1 CLOSES WF-S13-6 AND DOES NOT CLOSE WF-S13-7. A gateway installed by the documented procedure still
+loops forever on expiry until an S13.1 image is published AND the UI's emitted digest points at it.**
+That sentence is the entry, not a register footnote — the two are different claims with different owners.
+
+⛔ **WF-S13-6 IS CLOSED ON THE WIRE, AND THE PROOF IS STRONGER THAN THE DESIGN ASKED FOR.** §C′
+(`walk-artifacts/S13.1/Cprime-record.md`, 2026-08-03, **21 minutes**): certificate expired at 18:14:40Z while
+the agent ran; `agent_identity_recovery_at_runtime` at 18:17:40 from **local inputs**; recovered in place at
+18:17:41 with `RestartCount`, `StartedAt` and pid all unchanged. **`:8443` WAS BLACK ACROSS THE ENTIRE EXPIRY** —
+`attemptRekey` reaches `apiURL:80`, so the mTLS channel was unreachable for the twelve minutes spanning the
+lapse and **no control-channel outcome could have triggered or assisted the recovery.** That is the claim
+`identityWatchLoop` makes, demonstrated rather than argued, and a network-signal-driven design could not make it.
+
+⛔ **§C — THE 48-HOUR RUN — WAS STRUCTURALLY INCAPABLE OF PRODUCING ITS SUBJECT.** `renewLoop` anchors its first
+tick to `min(every, left/2)` and resets on success, so a reachable CP refreshes the certificate at half-life
+**forever**. The invariant §C confirmed (`renewEvery 24h < TTL 48h`) is precisely the one guaranteeing
+non-expiry. Three clean renewals 24h apart, and `cert_not_after` sitting 41h in the future at verification time,
+are the proof it worked as designed. **Not slow — forbidden.** Its gate was `cert_not_after + 15m`, computed
+once: **A DEADLINE DERIVED FROM A VALUE THE SUBJECT MUTATES IS NOT A DEADLINE.** General form: **a test that
+waits must name the EVENT it waits for and show the path that produces it** — §C named a time.
+Duration was never the variable: `identity.Decide`'s expiry test is `now.After(leaf.NotAfter)`, a boolean with
+no threshold, so one second and 48 hours are indistinguishable to the code under test. **§C's three real
+renewals are KEPT** as wire proof of the renewal path across 48 real hours, which §C′ cannot make.
+
+⛔ **THE MERGE RESOLUTION FOUND A LIVE BUG ON `main`.** S13.1 fixes device creation homing on a **revoked**
+gateway (`nodes[0]` indexes a list including revoked rows ordered by `created_at`). `main` still has it, and the
+EPIC 14 rewrite **added a third call site** — so taking either side of the conflict wholesale would have dropped
+the fix silently. Re-applied and mutation-proven.
+
+**WF-S13-7 RE-SIZED FROM THE REGISTRY.** Publication is AUTOMATIC (`publish` runs on every push to `main`), so
+merging S13.1 publishes an S13.1 image by itself. The gate is the **digest pin**: the CP pins `v0.2.0`,
+published **2026-07-23**, before EPIC 13 existed. Remaining: re-pin, a fourth host, ~20 min on the §C′ rig.
+⚠ **NOT coupled to the signing gate** — cosign is release-tag-scoped; S6.5b is desktop code-signing.
+**Registered as its own release-path story.**
+
+⚠ **MERGED BY SQUASH, DELIBERATELY.** The branch forked at EPIC 11 and was 358 commits behind; a rebase
+replays 109 commits through that divergence and stops on the same files repeatedly, while a merge resolves the
+**19 genuinely-overlapping files once**. Squash keeps `main` linear. The 109 commits were walk narrative and
+that narrative lives in `docs/S13*.md` and `walk-artifacts/S13.1/` — which are FILES, and survive. The
+content tip named above is therefore a **pre-merge** sha with no post-merge counterpart: squash creates one
+new commit, so there is nothing for it to be preserved as.
+
+---
+
 **MERGED (2026-08-03): EPIC 14 S14.20 step 4 — the client becomes a product. PR #71, content tip
 `fb4a147` pre-merge.** Founder-driven review ON THE RUNNING APP, one item at a time. Everything below
 was found by USING it; none of it was visible in the code.
