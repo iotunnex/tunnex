@@ -211,6 +211,7 @@ export function MfaSettings() {
 
       {recovery && (
         <OneTimeSecretModal
+          requireAck="I have saved my recovery codes somewhere I can reach without this device."
           title="Save your recovery codes"
           caption="Each code works once, in place of your authenticator. Store them somewhere safe — they are shown only now and let you sign in if you lose your device."
           secret={recovery.join("\n")}

@@ -92,7 +92,11 @@ const DISPOSITIONS: Record<string, Disposition> = {
 
   // ⛔ UNBUILT — the four the old census could not see. Each names its story so the entry is a
   // commitment rather than a note. Flipping one to `built` is the deliberate edit that records it.
-  "AUTH SCREENS": { kind: "unbuilt", story: "S14.17" },
+  // ⛔ FLIPPED AT S14.17, AND ONLY AFTER THE LAST ITEM IN THE BLOCK WAS REAL. The census refused
+  // this claim once already — the block specifies a forced-enrollment modal that cannot be
+  // dismissed by click-away or Esc, and MfaSettings had no acknowledgement gate. Login hero, the
+  // challenge step, the CLI authorize + device screens and that modal are now all built.
+  "AUTH SCREENS": { kind: "built", route: "/login" },
   "FLOW LOGS": { kind: "unbuilt", story: "S14.19" },
   "DESKTOP CLIENT": { kind: "unbuilt", story: "S14.20" },
 };
