@@ -269,7 +269,11 @@ function SidebarNav() {
           <NavLink
             to="/dashboard"
             className="min-w-0 leading-none"
-            aria-label="Overview"
+            // ⛔ NOT "Overview" — the nav already has a link to /dashboard with that exact name, so
+            // two links shared one accessible name and a screen reader announced them identically.
+            // Playwright's strict mode caught it as an ambiguous locator, which is the same defect
+            // wearing a test's clothes. The brand is a HOME affordance, not the destination's label.
+            aria-label="Tunnex home"
           >
             <Logo size={26} wordmarkOnly />
             {/* The design sets the tagline directly under the wordmark, 8.5px/1.6. */}

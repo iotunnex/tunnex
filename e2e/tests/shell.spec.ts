@@ -9,7 +9,10 @@ test("unauthenticated visitors are gated to the login screen", async ({
   page,
 }) => {
   await page.goto("/devices"); // deep link into a gated route
-  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+  // S14.17: the login heading is the design's "Welcome back"; "Sign in" is the BUTTON.
+  await expect(
+    page.getByRole("heading", { name: "Welcome back" }),
+  ).toBeVisible();
 });
 
 test("signing in reaches the app shell and the dashboard, then navigates to devices", async ({
@@ -39,5 +42,8 @@ test("signing in reaches the app shell and the dashboard, then navigates to devi
 
   // Logging out returns to the login screen.
   await page.getByRole("button", { name: "Log out" }).click();
-  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+  // S14.17: the login heading is the design's "Welcome back"; "Sign in" is the BUTTON.
+  await expect(
+    page.getByRole("heading", { name: "Welcome back" }),
+  ).toBeVisible();
 });
