@@ -12,6 +12,23 @@ import {
 } from "../lib/api";
 import { relativeAge } from "../lib/format";
 import { can } from "../lib/rbac";
+import {
+  CAPTURE_EFFECT,
+  DOMAIN_STEPS,
+  KEEP_RECORD_NOTE,
+  WRITE_ONLY_NOTE,
+  domainErrorCopy,
+  domainGate,
+  domainStepIndex,
+  normalizeDomain,
+  txtInstruction,
+  type DomainClaimState,
+} from "../lib/domainview";
+import {
+  RESIZE_ATOMIC_NOTE,
+  orphanReasonCopy,
+  orphanTail,
+} from "../lib/poolview";
 import { useAuth } from "../lib/auth";
 import { Button, Card, ErrorText, Field, Input } from "../components/ui";
 import { DesktopSettings } from "../components/DesktopSettings";
@@ -26,6 +43,10 @@ export default function Settings() {
   const { state } = useAuth();
   const myId = state.status === "authed" ? state.user.id : "";
   const emailVerified = state.status === "authed" && state.user.email_verified;
+  // The claim guard is an OWNERSHIP guard, not just a verified-email one: CreateClaim
+  // refuses unless the actor's own address is AT the domain (domain.go:100). The panel
+  // needs the address to predict that refusal instead of round-tripping into a 403.
+  const myEmail = state.status === "authed" ? state.user.email : "";
   const [meta, setMeta] = useState<Meta | null>(null);
   const [org, setOrg] = useState<Org | null>(null);
   const [myRole, setMyRole] = useState<Role | undefined>(undefined);
@@ -124,6 +145,15 @@ export default function Settings() {
               </p>
             </Card>
           )}
+          {/* Domain capture. The gate is PERMISSION-then-EDITION (domainGate), matching
+              CreateDomainClaim's own ordering — authorize at sso_handlers.go:180, edition at :183. */}
+          <DomainSection
+            orgId={org.id}
+            role={myRole}
+            isEnterprise={meta?.edition === "enterprise"}
+            canEdit={emailVerified}
+            myEmail={myEmail}
+          />
           {meta?.edition === "enterprise" ? (
             <OrgMfaEnforce orgId={org.id} canEdit={emailVerified} />
           ) : (
@@ -410,7 +440,11 @@ function PoolSection({
             <p className="text-sm text-slate-300">
               Can’t shrink: {conflict.orphan_count} device
               {conflict.orphan_count === 1 ? "" : "s"} must be removed or
-              renumbered first.
+              renumbered first.{" "}
+              {/* The refusal rolls back inside the transaction (service.go:539 returns
+                  BEFORE UpdateOrgPoolCidr at :541), so this is a fact, not reassurance —
+                  and without it the operator cannot tell a refusal from a partial resize. */}
+              <span className="text-slate-400">{RESIZE_ATOMIC_NOTE}</span>
             </p>
             <ul className="mt-2 space-y-1">
               {conflict.orphans.map((o) => (
@@ -422,17 +456,15 @@ function PoolSection({
                   <span className="font-mono text-slate-500">
                     {o.assigned_ip}
                     <span className="ml-2 text-slate-600">
-                      {o.reason === "reserved_collision"
-                        ? "collides with a reserved address"
-                        : "outside the new range"}
+                      {orphanReasonCopy(o.reason)}
                     </span>
                   </span>
                 </li>
               ))}
             </ul>
-            {conflict.orphan_count > conflict.orphans.length && (
+            {orphanTail(conflict.orphan_count, conflict.orphans.length) && (
               <p className="mt-1 text-xs text-slate-600">
-                …and {conflict.orphan_count - conflict.orphans.length} more.
+                {orphanTail(conflict.orphan_count, conflict.orphans.length)}
               </p>
             )}
           </div>
@@ -440,6 +472,187 @@ function PoolSection({
         <ErrorText>{err}</ErrorText>
       </Card>
     </form>
+  );
+}
+
+// DomainSection — claim an email domain and verify it by DNS TXT.
+//
+// ⛔ THE PANEL RENDERS A STATE THE SERVER WILL NOT SERVE BACK. There is no GET for domain
+// claims (openapi.yaml:1793/:1817), so everything below `unknown` is knowledge this session
+// created. WRITE_ONLY_NOTE says that out loud rather than letting a reload quietly reset a
+// verified domain to "never claimed". See domainview.ts's header for the full disposition.
+function DomainSection({
+  orgId,
+  role,
+  isEnterprise,
+  canEdit,
+  myEmail,
+}: {
+  orgId: string;
+  role: Role | undefined;
+  isEnterprise: boolean;
+  canEdit: boolean;
+  myEmail: string;
+}) {
+  const gate = domainGate({ role: role ?? null, isEnterprise });
+  const ownDomain = normalizeDomain(myEmail.split("@").pop() ?? "");
+  const [domain, setDomain] = useState(ownDomain);
+  const [claim, setClaim] = useState<DomainClaimState>({ kind: "unknown" });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  if (gate.kind === "hidden") return null;
+  if (gate.kind === "upsell")
+    return (
+      <Card className="mt-4">
+        <h2 className="text-sm font-semibold text-slate-300">Domain capture</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Capturing an email domain so new signups auto-join this organization
+          is a Tunnex Enterprise feature.
+        </p>
+      </Card>
+    );
+
+  const typed = normalizeDomain(domain);
+  // Predicted client-side from the SERVER'S rule, so the operator is told before the
+  // round-trip — not a second source of truth: the server still refuses if we are wrong.
+  const ownershipBlocked = typed !== "" && typed !== ownDomain;
+  const step = domainStepIndex(claim);
+
+  async function submitClaim(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+    const { data, error } = await api.POST(
+      "/api/v1/organizations/{orgId}/domains",
+      { params: { path: { orgId } }, body: { domain: typed } },
+    );
+    setBusy(false);
+    if (error || !data) return setErr(domainErrorCopy(apiErrorCode(error)));
+    setClaim({
+      kind: "pending",
+      domain: typed,
+      // The server returns the COMPLETE record value; we never assemble it, so this
+      // instruction cannot drift from txtHasToken's exact-equality comparison.
+      txt: txtInstruction(typed, data.txt_record),
+    });
+  }
+
+  async function submitVerify() {
+    setBusy(true);
+    setErr(null);
+    const { error } = await api.POST(
+      "/api/v1/organizations/{orgId}/domains/verify",
+      { params: { path: { orgId } }, body: { domain: typed } },
+    );
+    setBusy(false);
+    if (error) return setErr(domainErrorCopy(apiErrorCode(error)));
+    setClaim({ kind: "verified", domain: typed });
+  }
+
+  return (
+    <Card className="mt-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="text-sm font-semibold text-slate-300">Domain capture</h2>
+        <div className="flex items-center gap-1.5">
+          {DOMAIN_STEPS.map((label, i) => (
+            <span key={label} className="flex items-center gap-1.5">
+              {i > 0 && <span className="text-slate-700">›</span>}
+              <span
+                data-testid={`domain-step-${i}`}
+                aria-current={i === step ? "step" : undefined}
+                className={
+                  "rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold " +
+                  (i <= step
+                    ? "border-accent-500/40 bg-accent-500/10 text-accent-300"
+                    : "border-slate-700 bg-slate-900 text-slate-600")
+                }
+              >
+                {label}
+              </span>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <p className="mt-1 text-xs text-slate-500">{CAPTURE_EFFECT}</p>
+
+      <form onSubmit={submitClaim} className="mt-3 flex flex-wrap items-end gap-3">
+        <div className="min-w-[12rem] flex-1">
+          <Field label="Domain">
+            <Input
+              value={domain}
+              onChange={(e) => setDomain(e.target.value)}
+              required
+              disabled={!canEdit || busy}
+              placeholder="acme.io"
+            />
+          </Field>
+        </div>
+        <Button type="submit" disabled={busy || !canEdit || ownershipBlocked}>
+          {busy ? "Working…" : "Claim domain"}
+        </Button>
+      </form>
+
+      {/* The ownership inversion guard, stated BEFORE the attempt (domain.go:100). */}
+      {ownershipBlocked && (
+        <p className="mt-2 text-xs text-amber-400">
+          You can only claim the domain of your own verified address (
+          <span className="font-mono">{ownDomain || "none"}</span>). Claiming{" "}
+          <span className="font-mono">{typed}</span> would be refused.
+        </p>
+      )}
+
+      {claim.kind === "pending" && (
+        <div className="mt-3 rounded-lg border border-slate-700 bg-slate-900/60 p-3">
+          <p className="text-xs text-slate-400">
+            Publish this DNS record, then verify. It is a TXT record on the
+            domain itself — not on a <span className="font-mono">_tunnex</span>{" "}
+            subdomain.
+          </p>
+          <dl className="mt-2 space-y-1 text-xs">
+            <div className="flex gap-2">
+              <dt className="w-16 text-slate-600">NAME</dt>
+              <dd className="font-mono text-slate-300">{claim.txt.name}</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className="w-16 text-slate-600">TYPE</dt>
+              <dd className="font-mono text-slate-300">TXT</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className="w-16 text-slate-600">VALUE</dt>
+              <dd className="break-all font-mono text-slate-300">
+                {claim.txt.value}
+              </dd>
+            </div>
+          </dl>
+          <Button
+            type="button"
+            className="mt-3"
+            onClick={submitVerify}
+            disabled={busy}
+          >
+            {busy ? "Checking DNS…" : "Verify domain"}
+          </Button>
+        </div>
+      )}
+
+      {claim.kind === "verified" && (
+        <p className="mt-3 text-xs text-accent-400">
+          <span className="font-mono">{claim.domain}</span> is verified. New
+          signups on this domain now auto-join this organization.
+        </p>
+      )}
+
+      <ErrorText>{err}</ErrorText>
+
+      {/* The two facts the wireframe's pill chain cannot carry: the state is not readable
+          back, and VERIFIED is not terminal. */}
+      <p className="mt-3 text-xs text-slate-600">{WRITE_ONLY_NOTE}</p>
+      {claim.kind !== "unknown" && (
+        <p className="mt-1 text-xs text-slate-600">{KEEP_RECORD_NOTE}</p>
+      )}
+    </Card>
   );
 }
 
