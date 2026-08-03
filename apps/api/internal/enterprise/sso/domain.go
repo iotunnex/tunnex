@@ -193,6 +193,37 @@ func (s *DomainService) capturingOrgTx(ctx context.Context, q *sqlc.Queries, ema
 	if !s.txtHasToken(ctx, domain, claim.VerificationToken) {
 		// Verification lost (record removed / domain changed hands): suspend.
 		_ = q.SuspendDomainClaim(ctx, sqlc.SuspendDomainClaimParams{OrgID: claim.OrgID, Domain: domain})
+		// ⛔ THE OTHER DESTRUCTIVE-AND-SILENT VERB, AND IT IS NOT A HUMAN ACTION.
+		//
+		// This clears `verified_at`, so domain capture stops ORG-WIDE — and until now it left no record at
+		// all. Its siblings audit normally (`domain.claim_created` / `verified` / `verification_failed`), so
+		// the only state change nobody could see was the one that silently turns a capture off.
+		//
+		// ⚠ THREE THINGS MAKE THIS DIFFERENT FROM THE UnmapGroup ONE-LINER, and each is why it uses a
+		// different primitive:
+		//
+		//  1. NO ACTOR. It fires from a SIGNUP, so `PrincipalFrom(ctx)` holds the person joining — who did
+		//     not do this and must not be recorded as having done it. `InsertSystemAuditLog` names
+		//     `actor_system` instead, which is what that column exists for.
+		//  2. CROSS-ORG. The row belongs to `claim.OrgID` — the CAPTURING org — while the surrounding
+		//     transaction belongs to a signup for whoever is joining. Writing it against the wrong org would
+		//     file the evidence in a tenant that has nothing to do with it, and the test pins the org id.
+		//  3. THE CAUSE IS THE POINT. "Suspended" alone sends an operator hunting for a person; the metadata
+		//     says the TXT record was missing at the apex, which is both the reason and the fix.
+		if b, e := json.Marshal(map[string]any{
+			"cause":       "txt_record_missing",
+			"domain":      domain,
+			"lookup_name": domain, // the APEX — the name the resolver actually queries
+		}); e == nil {
+			_, _ = q.InsertSystemAuditLog(ctx, sqlc.InsertSystemAuditLogParams{
+				OrgID:       pgtype.UUID{Bytes: [16]byte(claim.OrgID), Valid: true},
+				ActorSystem: ptrTo("domain-capture"),
+				Action:      "domain.capture_suspended",
+				TargetType:  ptrTo("domain"),
+				TargetID:    ptrTo(domain),
+				Metadata:    b,
+			})
+		}
 		return uuid.Nil, false
 	}
 	return claim.OrgID, true
@@ -278,3 +309,6 @@ func audit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, actor *uuid.UU
 	})
 	return err
 }
+
+// ptrTo is the pointer-taking helper the generated params need for nullable text columns.
+func ptrTo[T any](v T) *T { return &v }
