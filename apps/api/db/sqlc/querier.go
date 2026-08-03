@@ -497,6 +497,11 @@ type Querier interface {
 	// "cannot scan NULL into *string" — a 500 on the whole list. Caught on the review stack by the
 	// fixture row seeded for exactly this case; without that row it would have shipped and broken the
 	// first time an inviter was deleted, which is the one moment the list matters most.
+	// ⛔ `deleted_at IS NULL` ON THE JOIN, caught by TestQueriesScopeDeletedAt. A SOFT-deleted inviter
+	// must read the same as a HARD-deleted one: the column is ON DELETE SET NULL, so a hard delete
+	// already yields NULL here and the panel renders "account deleted". Without this filter the two
+	// kinds of deletion would render differently for no reason a user could explain — and the soft
+	// one would keep publishing the address of an account we were asked to remove.
 	ListInvitations(ctx context.Context, orgID uuid.UUID) ([]ListInvitationsRow, error)
 	// ListK8sClusterZonesForOrg feeds (a) cross-mechanism one-zone-one-resolver enforcement (S10.3 (A)): a site
 	// dns_forwarding domain must not collide with a K8s cluster's DNS zone (<cluster>.<dns_zone>), and vice versa;

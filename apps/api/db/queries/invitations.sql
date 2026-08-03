@@ -45,6 +45,11 @@ WHERE org_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL;
 -- first time an inviter was deleted, which is the one moment the list matters most.
 SELECT i.*, COALESCE(u.email::text, '')::text AS invited_by_email
 FROM invitations i
-LEFT JOIN users u ON u.id = i.invited_by_user_id
+-- ⛔ `deleted_at IS NULL` ON THE JOIN, caught by TestQueriesScopeDeletedAt. A SOFT-deleted inviter
+-- must read the same as a HARD-deleted one: the column is ON DELETE SET NULL, so a hard delete
+-- already yields NULL here and the panel renders "account deleted". Without this filter the two
+-- kinds of deletion would render differently for no reason a user could explain — and the soft
+-- one would keep publishing the address of an account we were asked to remove.
+LEFT JOIN users u ON u.id = i.invited_by_user_id AND u.deleted_at IS NULL
 WHERE i.org_id = $1
 ORDER BY i.created_at DESC;

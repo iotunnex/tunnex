@@ -114,7 +114,7 @@ func (q *Queries) GetInvitationByTokenHash(ctx context.Context, tokenHash []byte
 const listInvitations = `-- name: ListInvitations :many
 SELECT i.id, i.org_id, i.email, i.role, i.token_hash, i.expires_at, i.accepted_at, i.revoked_at, i.invited_by_user_id, i.created_at, i.updated_at, COALESCE(u.email::text, '')::text AS invited_by_email
 FROM invitations i
-LEFT JOIN users u ON u.id = i.invited_by_user_id
+LEFT JOIN users u ON u.id = i.invited_by_user_id AND u.deleted_at IS NULL
 WHERE i.org_id = $1
 ORDER BY i.created_at DESC
 `
@@ -143,6 +143,11 @@ type ListInvitationsRow struct {
 // "cannot scan NULL into *string" — a 500 on the whole list. Caught on the review stack by the
 // fixture row seeded for exactly this case; without that row it would have shipped and broken the
 // first time an inviter was deleted, which is the one moment the list matters most.
+// ⛔ `deleted_at IS NULL` ON THE JOIN, caught by TestQueriesScopeDeletedAt. A SOFT-deleted inviter
+// must read the same as a HARD-deleted one: the column is ON DELETE SET NULL, so a hard delete
+// already yields NULL here and the panel renders "account deleted". Without this filter the two
+// kinds of deletion would render differently for no reason a user could explain — and the soft
+// one would keep publishing the address of an account we were asked to remove.
 func (q *Queries) ListInvitations(ctx context.Context, orgID uuid.UUID) ([]ListInvitationsRow, error) {
 	rows, err := q.db.Query(ctx, listInvitations, orgID)
 	if err != nil {

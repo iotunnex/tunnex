@@ -283,9 +283,12 @@ jobs:
   # disposition — NOT a quiet demotion back to continue-on-error.
   e2e:
     needs: gates
-    # Docs-only diffs cannot change API or SPA behaviour. NOT a required check, so a
-    # skip here does not touch branch protection.
-    if: needs.gates.outputs.docs_only != 'true'
+    # ⛔ always() IS LOAD-BEARING. `needs: gates` alone makes a gates FAILURE skip this job — so the
+    # integration signal disappears exactly when something is broken, which is when it is worth most.
+    # The dependency exists only to read `docs_only`, not to gate on success.
+    # Docs-only diffs cannot change API or SPA behaviour. NOT a required check, so a skip here does
+    # not touch branch protection.
+    if: always() && needs.gates.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -326,7 +329,7 @@ jobs:
   visual:
     name: visual — ADVISORY for all of EPIC 14 (no step gates a merge)
     needs: gates
-    if: needs.gates.outputs.docs_only != 'true'
+    if: always() && needs.gates.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -380,9 +383,12 @@ jobs:
   # condition (b)). The SECURITY half of S4.5 also gates in `gates` via TestGetSsoConfigPayloadCarriesNoSecret.
   e2e-enterprise:
     needs: gates
-    # Docs-only diffs cannot change API or SPA behaviour. NOT a required check, so a
-    # skip here does not touch branch protection.
-    if: needs.gates.outputs.docs_only != 'true'
+    # ⛔ always() IS LOAD-BEARING. `needs: gates` alone makes a gates FAILURE skip this job — so the
+    # integration signal disappears exactly when something is broken, which is when it is worth most.
+    # The dependency exists only to read `docs_only`, not to gate on success.
+    # Docs-only diffs cannot change API or SPA behaviour. NOT a required check, so a skip here does
+    # not touch branch protection.
+    if: always() && needs.gates.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
