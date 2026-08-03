@@ -60,7 +60,7 @@ seed-open: ## Seed the open-edition review stack (migrate + base seed + fixtures
 	@# ("the demo org does not exist"). The primary stack was seeded months ago so the ordering was invisible;
 	@# a fresh database is what surfaced it. A one-command switch has to carry the whole chain or it is not one.
 	$(OPEN_ENV) $(MAKE) migrate COMPOSE_PROJECT_NAME=tunnex-open
-	$(OPEN_ENV) $(MAKE) seed COMPOSE_PROJECT_NAME=tunnex-open
+	$(OPEN_ENV) TUNNEX_SEED_FORCE=$(or $(TUNNEX_SEED_FORCE),false) $(MAKE) seed COMPOSE_PROJECT_NAME=tunnex-open
 	$(OPEN_ENV) TUNNEX_SEED_FORCE=true TUNNEX_SEED_STRICT=false $(MAKE) seed-fixtures \
 	  COMPOSE_PROJECT_NAME=tunnex-open
 
@@ -283,7 +283,13 @@ helper-crosscompile: ## Compile-check the helper (incl platform build-tagged fil
 .PHONY: seed
 seed: ## Seed the demo org/user (idempotent, non-destructive)
 	$(COMPOSE) up -d --wait postgres
+	@# TUNNEX_SEED_FORCE is FORWARDED, not swallowed. `seed` refuses when the database already holds
+	@# real orgs — a good guard — but the variable that overrides it never reached the container, so
+	@# `seed-open` could not re-seed a review database once anything had accumulated in it (71 orgs,
+	@# left by pointing a Go test run at that stack). The chain's own comment says a one-command
+	@# switch has to carry the whole chain; it was not carrying this.
 	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=readonly \
+	  -e TUNNEX_SEED_FORCE="$(TUNNEX_SEED_FORCE)" \
 	  -e DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
 	  $(GO_IMAGE) go run ./cmd/seed
 
