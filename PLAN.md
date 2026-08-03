@@ -63,7 +63,21 @@ expected to be rewritten before merge.
 ## Story status (re-entry checkpoint)
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
-**MERGED (2026-08-03): EPIC 14 S14.20 step 3 — PR #68, ff-only, content tip `9cca701`.**
+**MERGED (2026-08-03): EPIC 14 S14.20 step 3 — PR #68. Content tip `51fc056` on `main` (`9cca701` pre-merge).**
+⛔ **AND THE FIRST MERGE UNDER THE CORRECTED SEQUENCING EXPOSED THE REMAINING HALF OF THE RULE.** The checkpoint
+was written LAST, inside the PR, naming the content tip `9cca701` — and **GitHub's rebase-merge rewrote every
+sha in the PR** (`9cca701` → `51fc056`, `dd8dc6e` → `0342e81`; trees byte-identical). Merge commits are
+disabled here for linear history, so **rebase is the only method available and it re-parents unconditionally.**
+So the pointer landed on `main` naming a sha that exists only on the backup ref.
+
+> ## **THE CONTENT-TIP SHA IS NOT KNOWABLE INSIDE THE PR. THE PR NUMBER IS.** Rule 6 already said the number
+> ## survives rebase — I recorded the sha as if it were the identifier and the number as the backup, which is
+> ## the wrong way round under the only merge method this repo permits.
+
+**And the check that missed it was correctly run at the wrong subject:** before merging I verified that PR #67,
+#66 and #65's head shas were present on `main` unchanged — true, and irrelevant, because **I never confirmed
+those PRs were merged by the same method.** A preservation result from an unknown method predicts nothing
+about this one. Corrected below; the sequencing fix itself stands and is unaffected.
 ⛔ **FIRST MERGE UNDER THE CORRECTED SEQUENCING: the checkpoint is the FINAL commit before the merge.** The
 pointer had twice named a commit with content behind it because work landed after it — a procedure gap, not a
 rule gap. Count stays at **8**.
