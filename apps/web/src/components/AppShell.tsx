@@ -64,7 +64,10 @@ export const NAV_GROUPS: Array<{
   },
   {
     group: "OBSERVE",
-    items: [{ to: "/audit", label: "Audit Log", icon: "file-text" }],
+    items: [
+      { to: "/access-events", label: "Access Events", icon: "arrow-right-left" },
+      { to: "/audit", label: "Audit Log", icon: "file-text" },
+    ],
   },
   {
     group: "SETTINGS",

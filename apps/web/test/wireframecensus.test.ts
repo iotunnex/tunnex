@@ -97,7 +97,10 @@ const DISPOSITIONS: Record<string, Disposition> = {
   // dismissed by click-away or Esc, and MfaSettings had no acknowledgement gate. Login hero, the
   // challenge step, the CLI authorize + device screens and that modal are now all built.
   "AUTH SCREENS": { kind: "built", route: "/login" },
-  "FLOW LOGS": { kind: "unbuilt", story: "S14.19" },
+  // ⛔ FLIPPED AT S14.19 — the fourth unreachable-surface instance closed. /access-events and
+  // /access-log/health shipped in S7.5.1 with no consumer; neither the page census nor anyone's
+  // list found it, only running the census against the DESIGN did.
+  "FLOW LOGS": { kind: "built", route: "/access-events" },
   "DESKTOP CLIENT": { kind: "unbuilt", story: "S14.20" },
 };
 

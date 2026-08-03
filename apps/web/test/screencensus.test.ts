@@ -102,6 +102,11 @@ const COVERED: Record<string, string> = {
 // THE ORDER IS THE COMMIT-ONE ORDER, and the reason is recorded with it: surfaces are ranked by where
 // disagreement with the backend is most consequential, not by size.
 const PENDING: Record<string, string> = {
+  // ⛔ S14.19. Routed and rendering; its VIEW-MODEL is covered (flowlogview.test.ts) but the wiring
+  // and failure-path tests are not written yet. PENDING rather than COVERED on purpose — the ledger
+  // is only worth having if a half-covered screen is visibly half-covered.
+  "AccessEvents.tsx":
+    "S14.19 — view-model covered; wiring + failure-path tests owed",
   // ⚠ SHEDDER — the redesign SPLITS this screen. Sites keeps `sites` and sheds ROUTED RANGES to a new
   // `subnets` screen. Its tests MUST assert the DECISION and NAME THE DESTINATION: "a routed range that fails
   // to load is surfaced, not rendered as none" travels to whichever screen renders it; "the Sites page shows a
@@ -159,7 +164,7 @@ describe("screen census", () => {
     // ZERO. Every accountable screen is covered. The list stays, because a screen added tomorrow must land in
     // one of the three lists or fail the census by name — an empty PENDING is a state, not a reason to delete
     // the mechanism.
-    expect(Object.keys(PENDING).length).toBe(0);
+    expect(Object.keys(PENDING).length).toBe(1);
   });
 
   // THE CEILING IS NOT THIS NUMBER. Recorded so the totals above are read as a LEDGER OF TODAY, not a target.
@@ -173,6 +178,6 @@ describe("screen census", () => {
   // RE-BASELINING IS A DELIBERATE, REVIEWABLE EDIT — which is exactly the property the equals-the-total form
   // was chosen for. A `>=` floor would have absorbed the growth silently and nobody would have had to look.
   it("the ledger is a snapshot of today — 9 accountable screens, ceiling ~13 after the redesign", () => {
-    expect(Object.keys(COVERED).length + Object.keys(PENDING).length).toBe(9);
+    expect(Object.keys(COVERED).length + Object.keys(PENDING).length).toBe(10);
   });
 });

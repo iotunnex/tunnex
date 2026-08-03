@@ -27,6 +27,7 @@ import Kubernetes from "./pages/Kubernetes";
 import Access from "./pages/Access";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
+import AccessEvents from "./pages/AccessEvents";
 import AuditLog from "./pages/AuditLog";
 
 /**
@@ -119,6 +120,7 @@ export default function App() {
             <Route path="/access" element={<Access />} />
             <Route path="/users" element={<Users />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/access-events" element={<AccessEvents />} />
             <Route path="/audit" element={<AuditLog />} />
           </Route>
         </Route>
