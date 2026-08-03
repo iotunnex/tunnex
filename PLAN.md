@@ -1767,11 +1767,27 @@ every mechanism we own is L3/L4 and cannot see inside an MCP call. It needs an L
 and the risk are the same item, so it is the LAST slice.
 **Protocol-independent (durable):** principal, role, expiring grants, audit attribution, device identity,
 default-deny. **Protocol-coupled (will rot):** per-tool enforcement, tool discovery, MCP-shaped posture.
-⛔ **POSITIONING — our own rule turned on ourselves. The title and paper describe CAPABILITY, NOT PRIMACY.**
-"World's first" is exactly the unbuilt Tier-3 claim this epic has spent fourteen stories cutting from other
-people's copy. It has its own register row with three conditions — it ships and holds · a real prior-art
-survey with dates · **someone outside the company says it**. **If we ship it and it holds, we earn the
-sentence. We do not open with it.**
+⛔⛔ **THE CATEGORY IS NOT EMPTY — MEASURED, AND IT REPLACES THIS PAPER'S FIRST POSITIONING SECTION.**
+**Versa Networks** already markets *"Industry's first Zero Trust MCP Server"* (~May 2026) · ⛔ **Teleport
+shipped protocol-level MCP access control down to INDIVIDUAL TOOL INVOCATIONS in Dec 2025** (deny-new-tools by
+default, JIT for high-risk tools) · **Octelium** is a FOSS architectural twin (WireGuard+QUIC, unified identity
+for humans/workloads/agents, per-request ABAC, L7 policy, names MCP and A2A) · also Pomerium, AccuKnox,
+TrueFoundry. **NO PRIMACY CLAIM — not "not yet", NOT AT ALL: it is checkable and false.** And Teleport is
+already where per-tool granularity goes, so that is a CATCH-UP item, not a differentiator — the first draft
+called it "the part nobody else is doing" without checking, which is the Tier-3 defect this epic exists to cut.
+**THE ACTUAL REASON TO BUILD:** beta is more compelling with agent support than without it, and our model
+already carries most of the shape. Neither reason needs us to be first.
+⛔ **THE BOUNDARY GOES IN THE OPENING, NOT THE CAVEATS:** under prompt injection, authentication AND
+authorization are both intact — only INTENT is corrupted. ZT bounds the blast radius of a correctly-
+authenticated principal; **it does not detect injection, and any copy claiming detection is a RENDER-FLOOR
+VIOLATION AT PRODUCT SCALE** — a promise the product cannot keep, made to people who cannot check it.
+**POSTURE CUT (founder-ruled):** keep only what binds to a real credential — which human account launched it ·
+which host · which enrollment. **Drop model self-reporting** or label it exactly as existing posture is
+(*client-reported, not attestation*) and never let a rule depend on it.
+**SLICE ORDER:** MCP-as-destination FIRST (small–medium; the `k8s_service` precedent already shipped) → agent
+device type SECOND (medium) → **per-tool LAST (large, and a SECOND enforcement plane)**.
+⛔ **THREE LIVE FINDINGS EXTRACTED AND REGISTERED AGAINST THE CURRENT PRODUCT — they do NOT wait for EPIC 15:**
+`docs/REGISTER-nonhuman-principal-defects.md` (operator+`PermPolicyManage` · `CountOwners` · `managed_by_machine`).
 EPIC 12 (licensing) trigger = **first paying-customer INTENT**.
 - **BETA-SCOPE (AMENDED 2026-07-15):** beta ships 7.5 + EPICs 8/9/10/11 + the bundle. **EPIC M is PARKED — beta
   NO LONGER gates on it.** Mobile ships at beta via the official WireGuard apps (S3.3/S3.4 QR export;
