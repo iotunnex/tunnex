@@ -125,3 +125,74 @@ describe("parsePreviewState", () => {
     expect(PREVIEW_DISCLAIMER).toMatch(/not reached by a real transition/i);
   });
 });
+
+// ⛔ THE HYPERDRIVE — the two canvases I missed by reading a TEXT extraction of the design.
+import {
+  createHyperState,
+  pushSample,
+  stepLink,
+} from "../src/client/hyperdrive";
+
+describe("hyperdrive state", () => {
+  it("⛔ is SEEDED, not random — the one deliberate departure from the handoff", () => {
+    // The handoff seeds node phases with Math.random(), which makes the animation unsnapshottable
+    // and every visual diff noisy forever. Two states built with the same seed must match.
+    const a = createHyperState(7);
+    const b = createHyperState(7);
+    expect(a.nodes.map((n) => n.tw)).toEqual(b.nodes.map((n) => n.tw));
+    // ...and the VARIETY survives: nodes must not all share a phase.
+    expect(new Set(a.nodes.map((n) => n.tw)).size).toBeGreaterThan(1);
+  });
+
+  it("carries the designer's seven nodes and their stagger", () => {
+    const st = createHyperState();
+    expect(st.nodes).toHaveLength(7);
+    expect(st.nodes[0].stagger).toBe(0);
+    expect(st.nodes[6].stagger).toBeCloseTo((6 / 7) * 0.6, 5);
+  });
+
+  it("⛔ connecting eases SLOWLY and connected snaps — the rates are the design's", () => {
+    const slow = createHyperState();
+    slow.mode = "connecting";
+    stepLink(slow);
+    const fast = createHyperState();
+    fast.mode = "connected";
+    stepLink(fast);
+    expect(fast.link).toBeGreaterThan(slow.link);
+    expect(slow.link).toBeCloseTo(0.018, 4);
+    expect(fast.link).toBeCloseTo(0.06, 4);
+  });
+
+  it("⛔ the graph DRAINS when the tunnel drops rather than snapping to zero", () => {
+    const st = createHyperState();
+    st.mode = "connected";
+    st.graph = [0.8];
+    st.mode = "idle";
+    pushSample(st, () => 0.5);
+    expect(st.graph[st.graph.length - 1]).toBeCloseTo(0.71, 5); // 0.8 - 0.09
+  });
+
+  it("never lets a drained graph go negative", () => {
+    const st = createHyperState();
+    st.graph = [0.05];
+    pushSample(st, () => 0.5);
+    expect(st.graph[st.graph.length - 1]).toBe(0);
+  });
+
+  it("caps the window at 64 samples so the plot scrolls", () => {
+    const st = createHyperState();
+    st.mode = "connected";
+    for (let i = 0; i < 200; i++) pushSample(st, () => 0.5);
+    expect(st.graph).toHaveLength(64);
+  });
+
+  it("clears the connected-at clock when the tunnel drops", () => {
+    const st = createHyperState();
+    st.mode = "connected";
+    pushSample(st, () => 0.5);
+    expect(st.connAt).not.toBeNull();
+    st.mode = "idle";
+    pushSample(st, () => 0.5);
+    expect(st.connAt).toBeNull();
+  });
+});

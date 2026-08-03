@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CLIENT_STATES,
   PREVIEW_DISCLAIMER,
@@ -11,7 +11,15 @@ import {
   type ClientState,
 } from "../lib/clientstate";
 import { desktop } from "../lib/desktop";
-import logoUrl from "../assets/tunnex-logo.svg";
+import { Logo } from "../brand";
+import {
+  createHyperState,
+  drawGraph,
+  drawHyper,
+  pushSample,
+  stepLink,
+  type HyperMode,
+} from "./hyperdrive";
 
 /**
  * ClientApp — the desktop client's whole UI.
@@ -55,11 +63,64 @@ export function ClientApp() {
 
   const elapsed = stats.since ? Math.floor((Date.now() - stats.since) / 1000) : null;
 
+  // ⛔ THE HYPERDRIVE. Two canvases, both transcribed from the handoff's own draw loop — the window
+  // is named after the first of them. The previous build had neither, because I read a TEXT
+  // extraction of the block and a text extraction has no canvas in it.
+  const hyperRef = useRef<HTMLCanvasElement | null>(null);
+  const graphRef = useRef<HTMLCanvasElement | null>(null);
+  const hyperState = useRef(createHyperState());
+
+  const mode: HyperMode =
+    state === "connected" ? "connected" : state === "connecting" ? "connecting" : "idle";
+
+  useEffect(() => {
+    hyperState.current.mode = mode;
+  }, [mode]);
+
+  useEffect(() => {
+    // Decorative motion: a reader who asked for stillness gets the static first frame.
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    let raf = 0;
+    const fit = (cv: HTMLCanvasElement) => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const w = cv.clientWidth;
+      const h = cv.clientHeight;
+      if (!w || !h) return null;
+      if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+        cv.width = Math.round(w * dpr);
+        cv.height = Math.round(h * dpr);
+      }
+      const ctx = cv.getContext("2d");
+      if (!ctx) return null;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return { ctx, w, h };
+    };
+    const frame = () => {
+      const st = hyperState.current;
+      stepLink(st);
+      const now = Date.now();
+      if (now - st._last > 70) {
+        st._last = now;
+        pushSample(st, Math.random);
+      }
+      const a = hyperRef.current && fit(hyperRef.current);
+      if (a) drawHyper(a.ctx, a.w, a.h, st, now);
+      const b = graphRef.current && fit(graphRef.current);
+      if (b) drawGraph(b.ctx, b.w, b.h, st.graph);
+      if (!reduced) raf = requestAnimationFrame(frame);
+    };
+    frame();
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   return (
     <div className="flex h-dvh flex-col bg-bg text-ink-body">
       {/* ── TITLE ─────────────────────────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2.5 px-5 pt-4">
-        <img src={logoUrl} alt="" aria-hidden width={22} height={21} className="rounded" />
+        {/* ⛔ THE REAL MARK, via the shared Logo — the previous version drew a bare <img> at 22px
+            and lost the wordmark entirely. Logo derives both dimensions from the asset ratios, so
+            it cannot be squashed the way a hand-sized img was. */}
+        <Logo size={22} markOnly />
         <span className="font-mono text-xs tracking-wide text-ink-secondary">
           tunnex · hyperdrive
         </span>
@@ -87,6 +148,16 @@ export function ClientApp() {
       </div>
 
       <main className="flex min-h-0 flex-1 flex-col gap-4 px-5 py-5">
+        {/* ── HYPERDRIVE ──────────────────────────────────────────────────────────────────── */}
+        <div className="relative min-h-[180px] flex-1">
+          <canvas
+            ref={hyperRef}
+            id="tnxHyper"
+            aria-hidden
+            className="absolute inset-0 block h-full w-full"
+          />
+        </div>
+
         {/* ── STATUS HEAD ─────────────────────────────────────────────────────────────────── */}
         <section>
           <h1
@@ -117,7 +188,14 @@ export function ClientApp() {
               {formatRate(stats.rate)}
             </span>
           </div>
-          <Sparkline history={stats.history} />
+          {/* The designer's plot: a filled area under a 1.6px line over a fixed 64-sample window,
+              so it SCROLLS rather than rescaling. */}
+          <canvas
+            ref={graphRef}
+            id="tnxGraph"
+            aria-hidden
+            className="mt-2 block h-12 w-full"
+          />
           <div className="mt-1 flex justify-between font-mono text-[10px] text-ink-secondary">
             <span>{formatRate(stats.peak)} peak</span>
             <span>{formatRate(stats.rate)}</span>
@@ -195,19 +273,6 @@ export function ClientApp() {
   );
 }
 
-/** A bare sparkline — fixed viewBox, never `w-full` over a viewBox (S14.7's 4× lesson). */
-function Sparkline({ history }: { history: number[] }) {
-  const pts = history.length ? history : new Array(24).fill(0);
-  const max = Math.max(1, ...pts);
-  const d = pts
-    .map((v, i) => `${(i / (pts.length - 1)) * 100},${28 - (v / max) * 26}`)
-    .join(" ");
-  return (
-    <svg viewBox="0 0 100 28" preserveAspectRatio="none" className="mt-2 h-7 w-full" aria-hidden>
-      <polyline points={d} fill="none" stroke="currentColor" strokeWidth="1" className="text-accent-400/70" />
-    </svg>
-  );
-}
 
 /** Map the bridge's status to our state union. Kept tiny and total. */
 function mapStatus(s: { state?: string } | null | undefined): ClientState {
