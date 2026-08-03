@@ -1,4 +1,13 @@
 import { useState } from "react";
+import {
+  NAV_WIDTH,
+  navShows,
+  navToggleTitle,
+  readNavCollapse,
+  toggleNavCollapse,
+  writeNavCollapse,
+  type NavCollapse,
+} from "../lib/navcollapse";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { Logo, PRODUCT_TAGLINE } from "../brand";
 import { useAuth } from "../lib/auth";
@@ -93,15 +102,20 @@ function badgeFor(to: string, c: NavCounts): string | null {
 function NavGroups({
   onNavigate,
   counts,
+  collapsed = false,
 }: {
   onNavigate?: () => void;
   counts: NavCounts;
+  collapsed?: boolean;
 }) {
+  const shows = navShows(collapsed ? "closed" : "open");
   return (
     <>
       {NAV_GROUPS.map((g) => (
         <div key={g.group || "root"} className="mb-3">
-          {g.group && (
+          {/* ⛔ HEADERS GO, DESTINATIONS STAY. A rail that dropped a destination would make it
+              unreachable rather than compact — the collapse is a presentation, never a filter. */}
+          {g.group && shows.sectionHeaders && (
             <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
               {g.group}
             </p>
@@ -112,10 +126,16 @@ function NavGroups({
                 <NavLink
                   to={item.to}
                   onClick={onNavigate}
+                  title={collapsed ? item.label : undefined}
+                  aria-label={collapsed ? item.label : undefined}
                   className={({ isActive }) =>
                     // README: nav item = flex, gap 10, padding 7px 12px, radius 9, 14px icon + 12.5px label,
                     // right-aligned badge. Active = accent at 13%; hover nudges 2px right.
-                    `flex items-center gap-2.5 rounded-nav px-3 py-[7px] text-nav transition-colors ${
+                    `relative flex items-center gap-2.5 rounded-nav text-nav transition-colors ${
+                      // The design's own padding/justification pair: 9px 0 + centre when closed,
+                      // 7px 12px + flex-start when open.
+                      collapsed ? "justify-center py-[9px]" : "px-3 py-[7px]"
+                    } ${
                       isActive
                         ? "bg-white/[.12] text-ink-heading"
                         : "text-ink-body hover:translate-x-[2px] hover:bg-white/[.06] hover:text-ink-primary"
@@ -123,11 +143,20 @@ function NavGroups({
                   }
                 >
                   <Icon name={item.icon} size={14} className="shrink-0" />
-                  <span className="truncate">{item.label}</span>
+                  {/* The label is the only thing the rail drops. `title` keeps it reachable to a
+                      pointer, and the aria-label keeps it reachable to a screen reader — a rail of
+                      unlabelled icons is not a compact nav, it is a quiz. */}
+                  {shows.labels && <span className="truncate">{item.label}</span>}
                   {/* ⛔ The badge is RIGHT-ALIGNED and CONDITIONAL; the destination never is. `null` means
                       render nothing — never 0, never a dash (lib/navcounts.ts). */}
                   {(() => {
                     const b = badgeFor(item.to, counts);
+                    // Badges survive the collapse — they are the reason to glance at a rail at all.
+                    if (collapsed) {
+                      return b === null ? null : (
+                        <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-accent-400" />
+                      );
+                    }
                     return b === null ? null : (
                       <span className="ml-auto font-mono text-badge tracking-[.1em] text-ink-secondary">
                         {b}
@@ -159,6 +188,24 @@ function SidebarNav() {
   const { navMode } = useLayoutCapability();
   const counts = useNavCounts();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // ⛔ USER-CONTROLLED, AND PERSISTED AT THE DESIGNER'S OWN KEY. `navMode` narrows the rail when the
+  // VIEWPORT is small; this is the operator narrowing it on a wide screen and having it remembered.
+  // Read once at mount so the first paint is already correct — a sidebar that expands and then
+  // snaps shut is worse than one that never remembered.
+  const [collapse, setCollapse] = useState<NavCollapse>(() =>
+    readNavCollapse(typeof window === "undefined" ? null : window.localStorage),
+  );
+  const toggle = () => {
+    const next = toggleNavCollapse(collapse);
+    setCollapse(next);
+    writeNavCollapse(
+      typeof window === "undefined" ? null : window.localStorage,
+      next,
+    );
+  };
+  // The narrow-viewport rail already has no room for labels, so it reads as collapsed regardless
+  // of the preference — the preference governs the WIDE case, which is what it was missing.
+  const collapsed = navMode === "rail" || collapse === "closed";
 
   if (navMode === "drawer") {
     return (
@@ -186,15 +233,60 @@ function SidebarNav() {
 
   // rail (compose) and full (operate+) differ in width and label treatment, not in content.
   return (
-    <nav
-      id="main-nav"
-      aria-label="Main"
-      // README: 228px, collapsing to 64px. `rail` is our narrow-viewport mode — the designer authored no
-      // breakpoints, so the collapsed width is ours (founder-ruled), the 228px is theirs.
-      className={`shrink-0 border-r border-line p-2.5 ${navMode === "rail" ? "w-[64px]" : "w-[228px]"}`}
+    // ⛔ THE BRAND HEADER SITS OUTSIDE <nav>, AND THE RESPONSIVE CONTRACT IS WHY.
+    //
+    // The wordmark links to /dashboard, so putting it inside `#main-nav` added a SECOND link to a
+    // destination that was already there — and the contract, which compares the nav's destination
+    // SET across breakpoints, caught it immediately (10 where it expected 9).
+    //
+    // It was right to. A brand mark that happens to navigate is not a nav destination, and
+    // counting it as one would have quietly changed what "every destination" means. <nav> now
+    // contains the destination list and nothing else, which is also what the landmark is for.
+    <div
+      style={{ width: collapsed ? NAV_WIDTH.closed : NAV_WIDTH.open }}
+      className="flex shrink-0 flex-col border-r border-line p-2.5 transition-[width] duration-200"
     >
-      <NavGroups counts={counts} />
-    </nav>
+      {/* ⛔ TWO TARGETS, TWO MEANINGS. The MARK toggles the rail; the WORDMARK goes to Overview.
+          One combined click-target would have to pick one, and whichever it picked would surprise
+          half the people who clicked it. Collapsed, only the mark remains — and it is still the
+          toggle, which is the only way back out. */}
+      <div className="mb-3 flex items-center gap-2.5 px-1">
+        <button
+          type="button"
+          onClick={toggle}
+          title={navToggleTitle(collapsed ? "closed" : "open")}
+          aria-label={navToggleTitle(collapsed ? "closed" : "open")}
+          aria-expanded={!collapsed}
+          aria-controls="main-nav"
+          className="shrink-0 rounded-lg transition-transform hover:scale-105"
+        >
+          <Logo size={26} markOnly />
+        </button>
+        {navShows(collapsed ? "closed" : "open").wordmark && (
+          <NavLink
+            to="/dashboard"
+            className="min-w-0 leading-none"
+            aria-label="Overview"
+          >
+            <Logo size={26} wordmarkOnly />
+            {/* The design sets the tagline directly under the wordmark, 8.5px/1.6. */}
+            <span className="mt-1 block text-[8.5px] leading-[1.6] tracking-[.04em] text-ink-secondary">
+              Connect Everything.
+              <br />
+              Trust Nothing.
+            </span>
+          </NavLink>
+        )}
+      </div>
+
+      <nav
+        id="main-nav"
+        aria-label="Main"
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
+        <NavGroups counts={counts} collapsed={collapsed} />
+      </nav>
+    </div>
   );
 }
 

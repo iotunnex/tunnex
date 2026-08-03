@@ -115,9 +115,12 @@ const DISPOSITIONS: Record<string, Disposition> = {
 type ComponentDisposition = { kind: "built" | "unbuilt"; note: string };
 
 const SHELL_COMPONENTS: Record<string, ComponentDisposition> = {
+  // ⛔ FLIPPED AT S14.18. The responsive collapse already shipped; what was missing was the
+  // USER-CONTROLLED one and its persistence. Both now transcribed from the design's own state
+  // object — including the key `tnx-nav` and its values 'open'/'closed', which are the designer's.
   "collapsible sidebar (228px <-> 64px rail, persisted)": {
-    kind: "unbuilt",
-    note: "S14.18 — the RESPONSIVE collapse ships in AppShell; the USER-CONTROLLED one does not, and neither does persistence",
+    kind: "built",
+    note: "S14.18 — AppShell + lib/navcollapse.ts; widths, key, values and hide-set all from the handoff",
   },
 };
 

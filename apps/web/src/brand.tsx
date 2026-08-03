@@ -33,14 +33,21 @@ const WORDMARK_RATIO = 792 / 120; // 6.6
 export function Logo({
   className = "",
   size = 28,
+  markOnly = false,
+  wordmarkOnly = false,
 }: {
   className?: string;
   /** Height of the MARK in px; the wordmark is scaled to sit with it. */
   size?: number;
+  /** ⛔ The two halves are separately clickable in the sidebar — the mark TOGGLES, the wordmark
+   *  NAVIGATES — so each must be renderable alone without re-deriving its geometry. */
+  markOnly?: boolean;
+  wordmarkOnly?: boolean;
 }) {
   const wordHeight = Math.round(size * 0.54);
   return (
     <span className={`flex select-none items-center gap-2.5 ${className}`}>
+      {!wordmarkOnly && (
       <img
         src={logoUrl}
         alt=""
@@ -50,6 +57,8 @@ export function Logo({
         height={size}
         className="shrink-0 rounded-lg object-contain"
       />
+      )}
+      {!markOnly && (
       <img
         src={wordmarkUrl}
         alt={PRODUCT_NAME}
@@ -58,6 +67,7 @@ export function Logo({
         height={wordHeight}
         className="shrink-0 object-contain"
       />
+      )}
     </span>
   );
 }
