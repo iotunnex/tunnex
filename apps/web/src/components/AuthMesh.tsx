@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import logoUrl from "../assets/tunnex-logo.svg";
 
 /**
  * AuthMesh — the login hero, TRANSCRIBED from the wireframe rather than re-imagined.
@@ -63,6 +64,7 @@ export function AuthMesh() {
       <defs>
       <radialGradient id="hubGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stopColor="#8A8A86" stopOpacity=".55" /><stop offset="60%" stopColor="#C9C9C4" stopOpacity=".14" /><stop offset="100%" stopColor="#C9C9C4" stopOpacity="0" /></radialGradient>
       <linearGradient id="spoke" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#C9C9C4" stopOpacity=".15" /><stop offset="100%" stopColor="#CFCFCA" stopOpacity=".85" /></linearGradient>
+      <clipPath id="hubClip"><rect x="222" y="132" width="36" height="36" rx="9" /></clipPath>
       </defs>
       <circle cx="240" cy="150" r="118" fill="url(#hubGlow)" className="tnx-aglow" />
       {/* spokes */}
@@ -87,6 +89,19 @@ export function AuthMesh() {
       <circle cx="240" cy="150" r="46" fill="none" stroke="#C9C9C4" strokeWidth="1" strokeDasharray="3 7" opacity=".5" className="tnx-orbit" />
       <circle cx="240" cy="150" r="30" fill="none" stroke="#8A8A86" strokeWidth="1" className="tnx-aring" />
       <circle cx="240" cy="150" r="30" fill="none" stroke="#C9C9C4" strokeWidth="1" className="tnx-aring2" />
+      {/* ⛔ THE HUB MARK. The design puts the Tunnex tile at the centre of the mesh — the whole
+          picture is "everything joins HERE", and without it the hub was an anonymous dot. The
+          wireframe layers it as HTML over the SVG; embedded here instead so it scales with the
+          viewBox and cannot drift from the rings at any container size. */}
+      <image
+        href={logoUrl}
+        x="222"
+        y="132"
+        width="36"
+        height="36"
+        clipPath="url(#hubClip)"
+        preserveAspectRatio="xMidYMid slice"
+      />
       {/* nodes */}
       <g className="tnx-node tnx-afloat"><circle cx="41" cy="40" r="15" fill="rgba(26,26,26,.95)" stroke="rgba(255,255,255,0.14)" strokeWidth="1" /><g transform="translate(33,35)"><path d="M0 5 Q 8 11 16 5" fill="none" stroke="#FF9900" strokeWidth="2.4" strokeLinecap="round" /><path d="M12.5 3.6 L17.4 5 L13 8.2 Z" fill="#FF9900" /></g><text x="58" y="49" fill="#E4E4E1" fontFamily="Instrument Sans" fontSize="12" fontWeight="600">AWS VPC</text></g>
       <g className="tnx-node tnx-afloat2"><circle cx="378" cy="43" r="15" fill="rgba(26,26,26,.95)" stroke="rgba(255,255,255,0.14)" strokeWidth="1" /><g transform="translate(370,35) scale(.62)"><path fill="#35C1F1" d="M5.483 21.3H24L14.025 4.013l-3.038 8.347 5.836 6.938L5.483 21.3z" /><path fill="#0078D4" d="M13.23 2.7L6.98 7.98 0 19.966h5.626z" /></g><text x="394" y="49" fill="#E4E4E1" fontFamily="Instrument Sans" fontSize="12" fontWeight="600">Azure</text></g>

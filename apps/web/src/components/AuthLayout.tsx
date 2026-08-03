@@ -1,11 +1,9 @@
 import type { ReactNode } from "react";
-import { PRODUCT_TAGLINE } from "../brand";
+import { Logo, PRODUCT_TAGLINE } from "../brand";
 import { HealthStatus } from "./HealthStatus";
 import { AuthMesh } from "./AuthMesh";
 import { TRUST_BADGES } from "../lib/authhero";
 import { HERO_HEADLINE, HERO_SUBHEAD } from "../lib/authhero";
-import logoUrl from "../assets/tunnex-logo.svg";
-import wordmarkUrl from "../assets/tunnex-wordmark.svg";
 
 /**
  * AuthLayout — the pre-auth frame.
@@ -32,15 +30,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
               "radial-gradient(130% 120% at 12% -5%,#1C1C1C 0%,#141414 48%,#0D0D0D 100%)",
           }}
         >
-          <div className="flex items-center gap-3">
-            <img src={logoUrl} alt="" className="h-9 w-9 rounded-lg" />
-            <img
-              src={wordmarkUrl}
-              alt="Tunnex"
-              className="h-4 opacity-90"
-              style={{ filter: "invert(1)" }}
-            />
-          </div>
+          <Logo className="[&>img:first-child]:h-9 [&>img:first-child]:w-9 [&>img:last-child]:h-[18px]" />
 
           <h1 className="mt-7 max-w-xl text-[34px] font-semibold leading-[1.1] tracking-tight text-white">
             {HERO_HEADLINE}
@@ -73,15 +63,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
         {/* ── FORM RAIL ────────────────────────────────────────────────────────────────────── */}
         <div className="flex w-full flex-col justify-center border-white/5 px-6 py-10 lg:w-[420px] lg:shrink-0 lg:border-l">
           {/* The mark repeats here only where the hero is hidden — otherwise it is duplicated. */}
-          <div className="mb-6 flex items-center gap-2.5 lg:hidden">
-            <img src={logoUrl} alt="" className="h-8 w-8 rounded-lg" />
-            <img
-              src={wordmarkUrl}
-              alt="Tunnex"
-              className="h-3.5 opacity-90"
-              style={{ filter: "invert(1)" }}
-            />
-          </div>
+          <Logo className="mb-6 lg:hidden" />
           <div className="mx-auto w-full max-w-sm">{children}</div>
         </div>
       </main>
