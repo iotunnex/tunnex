@@ -1745,8 +1745,33 @@ Design `expires_at` + the recompile-on-lapse seam so an extend is a window bump,
     obligations on the trial/issuance funnel).
 
 ## DECISIONS RESOLVED (user-directed 2026-07-14, PRE-SESSION FINAL — the planning collisions are closed)
-**LOCKED build order (RESTRUCTURED 2026-07-15): EPIC 7 (done) → EPIC 7.5 → EPIC 8 → EPIC 9 → EPIC 10 → EPIC 11
-(FULL) → BETA BUNDLE → PUBLIC BETA (joint w/ site) → EPIC M (PARKED, founder trigger) → EPIC 12-remainder.**
+**LOCKED build order (RESTRUCTURED 2026-07-15; EPIC 15 INSERTED 2026-08-03): EPIC 7 (done) → EPIC 7.5 →
+EPIC 8 → EPIC 9 → EPIC 10 → EPIC 11 (FULL) → EPIC 14 (UI redesign) → EPIC 15 (Zero Trust for AI agents) →
+BETA BUNDLE → PUBLIC BETA (joint w/ site) → EPIC M (PARKED, founder trigger) → EPIC 12-remainder.**
+
+⛔ **EPIC 15 — ZERO TRUST FOR AI AGENTS. REGISTERED 2026-08-03, sequenced AFTER EPIC 14 and BEFORE the beta
+bundle.** Paper: `docs/EPIC-15-zero-trust-for-ai-agents.md`. **REGISTRATION ONLY — no design, no schema, no
+commit-one.**
+**The thesis:** MCP servers deploy either on localhost (safe, unreachable) or on the public internet behind a
+bearer token and nothing else; there is no network boundary and no device identity between those two. An agent
+is a non-human principal that runs unattended, at machine rate, and **can be prompt-injected into asking for
+the wrong thing while remaining correctly authenticated** — so ZT bounds the BLAST RADIUS of a
+correctly-authenticated principal, and does NOT detect injection.
+**Measured inventory:** audit `actor_system`, `policy_rules.expires_at` and device identity are reusable
+UNCHANGED; `k8s_service` as a named `dst_kind` is the shipped PRECEDENT for an `mcp_server` destination.
+⛔ **And the closest existing thing has a defect: `machine_credentials.role` is FIXED at `operator`, which holds
+`PermPolicyManage` — so today's non-human principal can write its own access rules.** An agent principal needs
+its own role.
+⛔ **Per-tool granularity (`read_file` vs `delete_repo`) is a SECOND ENFORCEMENT PLANE, not an extension:**
+every mechanism we own is L3/L4 and cannot see inside an MCP call. It needs an L7 proxy — the differentiator
+and the risk are the same item, so it is the LAST slice.
+**Protocol-independent (durable):** principal, role, expiring grants, audit attribution, device identity,
+default-deny. **Protocol-coupled (will rot):** per-tool enforcement, tool discovery, MCP-shaped posture.
+⛔ **POSITIONING — our own rule turned on ourselves. The title and paper describe CAPABILITY, NOT PRIMACY.**
+"World's first" is exactly the unbuilt Tier-3 claim this epic has spent fourteen stories cutting from other
+people's copy. It has its own register row with three conditions — it ships and holds · a real prior-art
+survey with dates · **someone outside the company says it**. **If we ship it and it holds, we earn the
+sentence. We do not open with it.**
 EPIC 12 (licensing) trigger = **first paying-customer INTENT**.
 - **BETA-SCOPE (AMENDED 2026-07-15):** beta ships 7.5 + EPICs 8/9/10/11 + the bundle. **EPIC M is PARKED — beta
   NO LONGER gates on it.** Mobile ships at beta via the official WireGuard apps (S3.3/S3.4 QR export;
