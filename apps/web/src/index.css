@@ -110,3 +110,35 @@ body {
    "temporary". Applied to the GROUP so the whole flow wipes in once, left to right. */
 .tnx-flow-edges { animation: tnxFlowReveal 1.4s ease-out 0.15s both; }
 @media (prefers-reduced-motion: reduce) { .tnx-flow-edges { animation: none; clip-path: none } }
+
+/* ⛔ THE AUTH HERO'S MOTION — verbatim from the handoff (TUNNEX Wireframe.html), not re-invented.
+ *
+ * The first build of this screen had NO animation at all and drew its own flat mesh; the design's
+ * own SVG and keyframes were in the handoff file the whole time. Transcribed, so the timings are
+ * the designer's rather than mine:
+ *
+ *   tnxAuthFloat  4s / 5.2s  the node clusters breathing on two offset phases
+ *   tnxAuthRing   3.2s       the hub's expanding pulse, twice on a 1.6s stagger
+ *   tnxAuthGlow   3.6s       the radial bloom behind the hub
+ *   tnxSpin       44s / 60s  the orbit rings, one reversed
+ *
+ * MOTION GATE, same rule as .tnx-edge: killed outright under prefers-reduced-motion. Decorative
+ * motion is the first thing to go, and the mesh still reads as a static picture without it.
+ */
+@keyframes tnxAuthFloat { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-7px) } }
+@keyframes tnxAuthRing  { 0% { transform: scale(.35); opacity: .55 } 100% { transform: scale(1.7); opacity: 0 } }
+@keyframes tnxAuthGlow  { 0%, 100% { opacity: .5 } 50% { opacity: .95 } }
+@keyframes tnxSpin      { to { transform: rotate(360deg) } }
+
+.tnx-afloat  { animation: tnxAuthFloat 4s ease-in-out infinite; }
+.tnx-afloat2 { animation: tnxAuthFloat 5.2s ease-in-out infinite .6s; }
+.tnx-aring   { transform-box: fill-box; transform-origin: center; animation: tnxAuthRing 3.2s ease-out infinite; }
+.tnx-aring2  { transform-box: fill-box; transform-origin: center; animation: tnxAuthRing 3.2s ease-out infinite 1.6s; }
+.tnx-aglow   { animation: tnxAuthGlow 3.6s ease-in-out infinite; }
+.tnx-orbit   { transform-box: fill-box; transform-origin: center; animation: tnxSpin 44s linear infinite; }
+.tnx-orbit-r { transform-box: fill-box; transform-origin: center; animation: tnxSpin 60s linear infinite reverse; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tnx-afloat, .tnx-afloat2, .tnx-aring, .tnx-aring2,
+  .tnx-aglow, .tnx-orbit, .tnx-orbit-r { animation: none; }
+}

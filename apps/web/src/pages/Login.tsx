@@ -236,6 +236,21 @@ function BrowserLogin() {
       <p className="mt-1 text-sm text-slate-400">
         Sign in to {window.location.host}
       </p>
+      {meta && meta.sso_providers.length > 0 && (
+        <>
+          <SsoSection providers={meta.sso_providers} onError={setError} />
+          {/* The design leads with SSO and puts the password form under an OR — that ordering is
+              the recommendation, not decoration. */}
+          <div className="mt-5 flex items-center gap-3">
+            <span className="h-px flex-1 bg-white/10" />
+            <span className="font-mono text-[10px] tracking-widest text-slate-600">
+              OR
+            </span>
+            <span className="h-px flex-1 bg-white/10" />
+          </div>
+        </>
+      )}
+
       <form onSubmit={submit} className="mt-5 space-y-4">
         <Field label="Email">
           <Input
@@ -264,9 +279,7 @@ function BrowserLogin() {
         </Button>
       </form>
 
-      {meta && meta.sso_providers.length > 0 && (
-        <SsoSection providers={meta.sso_providers} onError={setError} />
-      )}
+
 
       {/* ⛔ A SECURITY PROPERTY, NOT REASSURANCE. Sign-up and reset answer the same 202 whether or
           not the address exists, so "check your email" must not be read as "that address was
@@ -311,8 +324,10 @@ function SsoSection({
     window.location.href = data.redirect_url;
   }
   return (
-    <div className="mt-6 border-t border-white/5 pt-5">
-      <p className="text-xs text-slate-500">Or sign in with SSO</p>
+    <div className="mt-5">
+      {/* ⛔ THE ORG SLUG IS A PRECONDITION, NOT AN AFTERTHOUGHT. `/auth/sso/{provider}/start`
+          requires ?org=, so the field comes BEFORE the buttons — the previous order offered two
+          buttons that could only error until a field below them was filled. */}
       <Field label="Organization">
         <Input
           value={org}
@@ -320,26 +335,52 @@ function SsoSection({
           placeholder="acme"
         />
       </Field>
-      <div className="mt-3 flex gap-2">
+      <div className="mt-3 space-y-2">
         {providers.includes("google") && (
-          <Button
-            variant="ghost"
-            className="flex-1"
+          <button
+            type="button"
             onClick={() => start("google")}
+            className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-white/10 bg-ink-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-white/5"
           >
-            Google
-          </Button>
+            <GoogleMark />
+            Continue with Google
+          </button>
         )}
         {providers.includes("microsoft") && (
-          <Button
-            variant="ghost"
-            className="flex-1"
+          <button
+            type="button"
             onClick={() => start("microsoft")}
+            className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-white/10 bg-ink-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-white/5"
           >
-            Microsoft
-          </Button>
+            <MicrosoftMark />
+            Continue with Microsoft
+          </button>
         )}
       </div>
     </div>
+  );
+}
+
+/* Provider marks, inline so the login page makes no third-party request before authentication —
+   a logo fetched from a CDN would tell that CDN who is looking at our login page. */
+function GoogleMark() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="#4285F4" d="M23 12.27c0-.79-.07-1.54-.2-2.27H12v4.3h6.18a5.3 5.3 0 0 1-2.29 3.47v2.88h3.7C21.74 18.7 23 15.76 23 12.27z" />
+      <path fill="#34A853" d="M12 23c3.1 0 5.7-1.03 7.6-2.79l-3.71-2.88c-1.03.69-2.35 1.1-3.89 1.1-2.99 0-5.52-2.02-6.43-4.73H1.74v2.97A11 11 0 0 0 12 23z" />
+      <path fill="#FBBC05" d="M5.57 13.7a6.6 6.6 0 0 1 0-4.22V6.51H1.74a11 11 0 0 0 0 9.87l3.83-2.68z" />
+      <path fill="#EA4335" d="M12 5.55c1.69 0 3.2.58 4.4 1.72l3.28-3.28C17.7 2.11 15.1 1 12 1A11 11 0 0 0 1.74 6.51l3.83 2.97C6.48 7.57 9.01 5.55 12 5.55z" />
+    </svg>
+  );
+}
+
+function MicrosoftMark() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="#F25022" d="M2 2h9.5v9.5H2z" />
+      <path fill="#7FBA00" d="M12.5 2H22v9.5h-9.5z" />
+      <path fill="#00A4EF" d="M2 12.5h9.5V22H2z" />
+      <path fill="#FFB900" d="M12.5 12.5H22V22h-9.5z" />
+    </svg>
   );
 }

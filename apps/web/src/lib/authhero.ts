@@ -22,7 +22,12 @@
 // > IT: do not state more than the system can support.** The same test this epic applied to our own
 // > "world's first" headline, applied to a badge the design supplied.
 
-export type TrustBadge = { text: string; why: string };
+/**
+ * ⛔ THE DESIGN'S STAT BLOCK IS TWO LINES, NOT ONE. "WireGuard®" over "kernel-fast tunnels" — a
+ * headline and a qualifier. The first build flattened it to a bulleted string, which is why it read
+ * as a feature list rather than as the design's three columns.
+ */
+export type TrustBadge = { headline: string; detail: string; text: string; why: string };
 
 /**
  * What the hero may claim. Each entry carries the reason it is TRUE, so a future edit has to
@@ -30,14 +35,20 @@ export type TrustBadge = { text: string; why: string };
  */
 export const TRUST_BADGES: readonly TrustBadge[] = [
   {
+    headline: "WireGuard®",
+    detail: "kernel-fast tunnels",
     text: "WireGuard® kernel tunnels",
     why: "the data plane is wgctrl driving the kernel module; apps/node owns it directly",
   },
   {
+    headline: "SSO",
+    detail: "Microsoft Entra",
     text: "SSO with Microsoft Entra",
     why: "getSsoConfig/setSsoConfig ship and Entra is the implemented provider; Google is refused at config time by supportedProvider",
   },
   {
+    headline: "Zero Trust",
+    detail: "default-deny policy",
     text: "Zero Trust by default",
     why: "default-deny policy model with a pure, deterministic compiler (policyspec.Compiled)",
   },

@@ -1,122 +1,88 @@
 import type { ReactNode } from "react";
-import { Logo, PRODUCT_TAGLINE } from "../brand";
-import { Card } from "./ui";
+import { PRODUCT_TAGLINE } from "../brand";
 import { HealthStatus } from "./HealthStatus";
-import {
-  HERO_HEADLINE,
-  HERO_SUBHEAD,
-  MESH_NODES,
-  TRUST_BADGES,
-} from "../lib/authhero";
+import { AuthMesh } from "./AuthMesh";
+import { TRUST_BADGES } from "../lib/authhero";
+import { HERO_HEADLINE, HERO_SUBHEAD } from "../lib/authhero";
+import logoUrl from "../assets/tunnex-logo.svg";
+import wordmarkUrl from "../assets/tunnex-wordmark.svg";
 
 /**
- * ⛔ THE MESH, DRAWN AT A FIXED viewBox AND NEVER `w-full`.
+ * AuthLayout — the pre-auth frame.
  *
- * S14.7's flow graph shipped at 4x because a viewBox was scaled by a full-width class; the geometry
- * was quoted correctly from the design and then applied wrong. Fixed width/height here for the same
- * reason — the labels are positioned in user units and only stay on their nodes at one scale.
+ * ⛔ THE PROPORTIONS ARE THE FIRST THING THE PREVIOUS BUILD GOT WRONG. It put a 300px illustration
+ * BESIDE the form in a two-up grid, which reads as a decorated form. The design is a FULL-BLEED
+ * HERO with the form as a narrow rail on the right — the mesh is the page and the form sits on it.
+ * Getting that backwards is why the first version looked like a thumbnail of the design even where
+ * the individual pieces matched.
  *
- * Decorative: aria-hidden, so a screen reader hears the headline and the form, not six place names
- * with no relationship to each other.
+ * Below `lg` the hero is dropped entirely rather than squeezed: a mesh at phone width is six
+ * overlapping labels, and the form is the only thing that matters there.
  */
-function MeshIllustration() {
-  // Six nodes on a circle around the mark. Angles are explicit rather than computed in the render
-  // so the layout cannot drift with a refactor.
-  const R = 104;
-  const cx = 150;
-  const cy = 132;
-  const pts = MESH_NODES.map((label, i) => {
-    const a = (Math.PI * 2 * i) / MESH_NODES.length - Math.PI / 2;
-    return { label, x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) };
-  });
-  return (
-    <svg
-      width="300"
-      height="264"
-      viewBox="0 0 300 264"
-      aria-hidden="true"
-      focusable="false"
-      className="tnx-mesh"
-    >
-      {/* Every node joined to every other — the claim the headline makes, drawn. */}
-      {pts.map((p, i) =>
-        pts.slice(i + 1).map((q, j) => (
-          <line
-            key={`${i}-${j}`}
-            x1={p.x}
-            y1={p.y}
-            x2={q.x}
-            y2={q.y}
-            stroke="currentColor"
-            strokeWidth="0.5"
-            className="text-white/10"
-          />
-        )),
-      )}
-      {pts.map((p) => (
-        <g key={p.label}>
-          <line
-            x1={cx}
-            y1={cy}
-            x2={p.x}
-            y2={p.y}
-            stroke="currentColor"
-            strokeWidth="1"
-            className="text-accent-400/30"
-          />
-          <circle cx={p.x} cy={p.y} r="4" className="fill-accent-400/70" />
-          <text
-            x={p.x}
-            y={p.y - 10}
-            textAnchor="middle"
-            className="fill-slate-400 font-mono text-[9px]"
-          >
-            {p.label}
-          </text>
-        </g>
-      ))}
-      <circle cx={cx} cy={cy} r="17" className="fill-accent-500/20" />
-      <circle cx={cx} cy={cy} r="8" className="fill-accent-400" />
-    </svg>
-  );
-}
-
-/** AuthLayout is the shared frame for the pre-auth screens (login, signup, reset,
- * verify): the hero panel beside the form card, health/tagline footer. */
 export function AuthLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-full flex-col">
-      <main className="grid flex-1 place-items-center px-6 py-10">
-        <div className="grid w-full max-w-4xl items-center gap-10 lg:grid-cols-2">
-          {/* Hero: hidden below lg so the form is never pushed off a small screen. */}
-          <div className="hidden flex-col items-center lg:flex">
-            <MeshIllustration />
-            <h2 className="mt-4 text-center text-xl font-semibold text-white">
-              {HERO_HEADLINE}
-            </h2>
-            <p className="mt-2 max-w-xs text-center text-sm text-slate-400">
-              {HERO_SUBHEAD}
-            </p>
-            {/* ⛔ EVERY BADGE IS A CLAIM THE PRODUCT CAN SUPPORT. The design's "SOC 2 Type II
-                certified" and "SSO + SCIM" were CUT — see lib/authhero.ts for the measurement. */}
-            <ul className="mt-5 space-y-1.5">
-              {TRUST_BADGES.map((b) => (
-                <li
-                  key={b.text}
-                  className="flex items-center gap-2 text-xs text-slate-500"
-                >
-                  <span className="h-1 w-1 rounded-full bg-accent-400" />
-                  {b.text}
-                </li>
-              ))}
-            </ul>
+      <main className="relative flex flex-1 flex-col lg:flex-row">
+        {/* ── HERO ─────────────────────────────────────────────────────────────────────────── */}
+        <div
+          className="relative hidden min-w-0 flex-1 flex-col overflow-hidden px-10 py-8 lg:flex"
+          style={{
+            // The handoff's own backdrop, verbatim — an off-centre radial, not a flat panel.
+            background:
+              "radial-gradient(130% 120% at 12% -5%,#1C1C1C 0%,#141414 48%,#0D0D0D 100%)",
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <img src={logoUrl} alt="" className="h-9 w-9 rounded-lg" />
+            <img
+              src={wordmarkUrl}
+              alt="Tunnex"
+              className="h-4 opacity-90"
+              style={{ filter: "invert(1)" }}
+            />
           </div>
-          <div className="mx-auto w-full max-w-sm">
-            <div className="mb-6 flex justify-center lg:justify-start">
-              <Logo />
-            </div>
-            <Card>{children}</Card>
+
+          <h1 className="mt-7 max-w-xl text-[34px] font-semibold leading-[1.1] tracking-tight text-white">
+            {HERO_HEADLINE}
+          </h1>
+          <p className="mt-2 max-w-lg text-sm text-slate-400">{HERO_SUBHEAD}</p>
+
+          {/* The mesh takes the room it is given — it IS the page, not an inset picture. */}
+          <div className="relative mt-2 min-h-0 flex-1">
+            <AuthMesh />
           </div>
+
+          {/* ⛔ THREE STAT BLOCKS, the design's shape — with only claims we can evidence. The
+              wireframe's middle block was "SOC 2 / Type II certified" and the third "SSO + SCIM /
+              enterprise ready"; both were CUT and are gated on what would make them true. The
+              LAYOUT is the design's; the CLAIMS are ours to stand behind. */}
+          <dl className="mt-6 flex flex-wrap gap-x-14 gap-y-4">
+            {TRUST_BADGES.map((b) => (
+              <div key={b.text}>
+                <dt className="text-[13px] font-semibold text-white">
+                  {b.headline}
+                </dt>
+                <dd className="mt-0.5 font-mono text-[11px] text-slate-500">
+                  {b.detail}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+
+        {/* ── FORM RAIL ────────────────────────────────────────────────────────────────────── */}
+        <div className="flex w-full flex-col justify-center border-white/5 px-6 py-10 lg:w-[420px] lg:shrink-0 lg:border-l">
+          {/* The mark repeats here only where the hero is hidden — otherwise it is duplicated. */}
+          <div className="mb-6 flex items-center gap-2.5 lg:hidden">
+            <img src={logoUrl} alt="" className="h-8 w-8 rounded-lg" />
+            <img
+              src={wordmarkUrl}
+              alt="Tunnex"
+              className="h-3.5 opacity-90"
+              style={{ filter: "invert(1)" }}
+            />
+          </div>
+          <div className="mx-auto w-full max-w-sm">{children}</div>
         </div>
       </main>
       <footer className="flex items-center justify-between px-6 py-4 text-xs text-slate-600">
