@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // ⛔ A CENSUS OF WHAT EXISTS CANNOT FIND WHAT WAS NEVER BUILT.
@@ -40,6 +40,9 @@ const WIREFRAME = join(
 );
 const APP = join(__dirname, "..", "src", "App.tsx");
 
+/** Flipped to true when EPIC 14 is declared closed. Until then the close-gate assertion is inert. */
+const EPIC_CLOSING = false;
+
 /** A screen banner is `<!-- ===== NAME ===== -->`. Parsed, never transcribed. */
 function banners(src: string): string[] {
   return [
@@ -51,7 +54,16 @@ type Disposition =
   | { kind: "built"; route: string }
   | { kind: "absorbed"; into: string; why: string }
   | { kind: "cut"; why: string }
-  | { kind: "unbuilt"; story: string };
+  | { kind: "unbuilt"; story: string }
+  // ⛔ built_unadopted — see the header block below before adding one.
+  | {
+      kind: "built_unadopted";
+      surface: string;
+      consumer: string;
+      adoptedWhen: string;
+      story: string;
+      branch: string;
+    };
 
 // ⛔ EVERY DISPOSITION CARRIES ITS REASON INLINE. A name with no reason is indistinguishable from
 // a name someone added to make the census pass.
@@ -101,7 +113,17 @@ const DISPOSITIONS: Record<string, Disposition> = {
   // /access-log/health shipped in S7.5.1 with no consumer; neither the page census nor anyone's
   // list found it, only running the census against the DESIGN did.
   "FLOW LOGS": { kind: "built", route: "/access-events" },
-  "DESKTOP CLIENT": { kind: "unbuilt", story: "S14.20" },
+  // S14.20 steps 1-2: the surface is built and reviewable at /client.html; Electron still loads
+  // index.html, so nothing consumes it yet. Step 3 is a one-line PR and flips this to `built` —
+  // and this entry fails the moment it does.
+  "DESKTOP CLIENT": {
+    kind: "built_unadopted",
+    surface: "client.html",
+    consumer: "../client/src/main/index.ts",
+    adoptedWhen: "client.html",
+    story: "S14.20",
+    branch: "story/S14.19-flow-logs",
+  },
 };
 
 // ⛔ AND BANNERS ALONE ARE NOT THE WHOLE DESIGN — WHICH IS WHY THIS SECOND LEDGER EXISTS.
@@ -127,6 +149,34 @@ const SHELL_COMPONENTS: Record<string, ComponentDisposition> = {
   },
 };
 
+// ⛔⛔ `built_unadopted` — A FACT ABOUT THE CODE, NOT A CLAIM ABOUT US.
+//
+// The state exists because "in progress" was proposed and rejected: **intent is unfalsifiable.** An
+// entry saying *we are working on it* can never be proven wrong by a test, only by someone
+// noticing — and naming a story and a branch does not fix that, because a stale entry with a dead
+// branch still READS true. That is exactly the escape hatch that would have let this epic close
+// early.
+//
+// So this state asserts something checkable instead:
+//
+//   > **THE SURFACE EXISTS AND IS REACHABLE. THE THING THAT SHOULD CONSUME IT DOES NOT YET.**
+//
+//   `surface`      a path that MUST EXIST — fails if the work was never done, so the state cannot
+//                  be used to mean "not started"
+//   `consumer` +   the file that must reference it, and the string that proves adoption. ⛔ WHEN
+//   `adoptedWhen`  THAT STRING APPEARS, THIS DISPOSITION IS A LIE AND THE CENSUS FAILS. The state
+//                  flips ITSELF: the only way back to green is changing it to `built`.
+//   `story` +      for the human reading it (founder's guard, kept)
+//   `branch`
+//
+// ⚠ THE HONEST COST, IN THE HEADER WHERE IT BELONGS: **this is weaker than `built`.** A reviewer
+// must accept "reachable but unconsumed" as a resting state for a merge. That is acceptable HERE
+// because the surface is done and reviewable in a browser and the single line that adopts it is
+// deliberately its own PR. **It would NOT be acceptable for a block with no surface at all — and
+// the `surface` existence check is precisely what stops it becoming a hiding place.**
+//
+// And the epic cannot close while any block sits here — asserted separately and by name, below.
+
 const wireframe = readFileSync(WIREFRAME, "utf8");
 const app = readFileSync(APP, "utf8");
 const BLOCKS = banners(wireframe);
@@ -150,6 +200,47 @@ describe("wireframe census — the DESIGN is the authoritative set", () => {
       (b) => `${b} (${(DISPOSITIONS[b] as { story: string }).story})`,
     );
     expect(unbuilt).toEqual([]);
+  });
+
+  it("⛔ every built_unadopted block's SURFACE actually exists — not a hiding place", () => {
+    for (const b of BLOCKS) {
+      const d = DISPOSITIONS[b];
+      if (d?.kind !== "built_unadopted") continue;
+      const p = join(__dirname, "..", d.surface);
+      expect(existsSync(p), `${b}: surface ${d.surface} must exist`).toBe(true);
+      expect(d.story.length, `${b} must name its story`).toBeGreaterThan(3);
+      expect(d.branch.length, `${b} must name its branch`).toBeGreaterThan(3);
+    }
+  });
+
+  it("⛔ built_unadopted FLIPS ITSELF — the state is a lie once the consumer adopts", () => {
+    // The whole point: this disposition cannot outlive its justification. When the consumer
+    // references the surface, the only way back to green is changing the kind to `built`.
+    for (const b of BLOCKS) {
+      const d = DISPOSITIONS[b];
+      if (d?.kind !== "built_unadopted") continue;
+      const consumer = readFileSync(join(__dirname, "..", d.consumer), "utf8");
+      expect(
+        consumer.includes(d.adoptedWhen),
+        `${b} is marked built_unadopted, but ${d.consumer} now references "${d.adoptedWhen}" — it IS adopted. Change the disposition to { kind: "built", route: … }.`,
+      ).toBe(false);
+    }
+  });
+
+  it("⛔ THE EPIC CANNOT CLOSE while any block is built_unadopted", () => {
+    // Named on its own so it fails LOUDLY rather than as a side effect of something else.
+    // EPIC_CLOSING is flipped by hand when the epic is declared done; until then this is inert.
+    const pending = BLOCKS.filter(
+      (b) => DISPOSITIONS[b]?.kind === "built_unadopted",
+    );
+    if (!EPIC_CLOSING) {
+      expect(Array.isArray(pending)).toBe(true); // inert while the epic is open
+      return;
+    }
+    expect(
+      pending,
+      "EPIC 14 cannot close with blocks still built-but-unadopted",
+    ).toEqual([]);
   });
 
   it("every BUILT block names a route that actually exists in App.tsx", () => {
