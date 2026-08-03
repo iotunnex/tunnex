@@ -3283,3 +3283,37 @@ the founder. *A wrong direction is worse than not having looked* — with a deci
 **MECHANICAL:** before re-running an old red, either check out the commit it was written against, or suppress
 everything that has landed on that surface since. Then compare the ERROR TEXT, not just pass/fail: a changed
 message means a changed defect.
+
+---
+
+# ⛔ `needs:` FOR AN OUTPUT IS ALSO A GATE ON SUCCESS
+
+**S14.15.** `e2e`, `e2e-enterprise` and `visual` were given `needs: gates` **solely to read
+`needs.gates.outputs.docs_only`**. That silently added a success condition: when `gates` went red, all three
+reported **`skipped`** — so the integration signal disappeared **exactly when something was broken**, which is
+when it is worth most. Observed live, not predicted.
+
+> ### **WHEN YOU WANT THE VALUE AND NOT THE CONDITION, WRITE `if: always() && …`.**
+
+**Same family as *a skipped job reads as not-applicable*:** a check that reported **nothing** looked like a
+check that **found** nothing. The earlier instance was a security job skipped by a classifier; this one is a
+dependency added for an unrelated reason. **Both times the absence of a result was mistaken for a result.**
+
+## ⛔ A COMPILE ERROR IS A MUTATION THAT NEVER APPLIED, WEARING A PASS'S CLOTHING
+
+A mutation that swapped a recorded count to `0` orphaned a variable, so the package failed to **compile** and
+the harness scored it *caught*. It proved nothing. **Re-run with the variable kept alive, it caught on the
+assertion.** Belongs with *a mutation that failed to apply proves nothing* — the new part is that a BUILD
+failure is one of the disguises, and it is the most convincing one because the exit code is identical.
+
+## ⛔ AND MY MATCHERS KEEP ASSUMING A CANONICAL RENDERING THE PRODUCER NEVER PROMISED
+
+**Second instance in two stories.** First: `<Input\b([^>]*?)\/>` found ZERO inputs in a tree of five, because
+JSX arrow functions contain `>`. Second: `"members_removed":2` failed against a correct row, because postgres
+renders jsonb **with a space after the colon**.
+
+> ### **A MATCHER OVER A FORMATTED ARTIFACT IS A GUESS ABOUT THE FORMATTER.** Query the STRUCTURE — parse the
+> ### JSON, read the attribute, ask the database — rather than pattern-matching its printed form.
+
+Both were caught only because the surrounding check had a floor or a known-answer case. **A matcher with
+neither would have reported a clean tree and been believed.**
