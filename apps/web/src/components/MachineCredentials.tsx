@@ -226,20 +226,24 @@ export function MachineCredentials({
                       ? ` · last seen ${relativeAge(c.last_used_at)}`
                       : " · never seen"}
                   </span>
-                  {/* ⛔ THE MOMENT A CREDENTIAL ACQUIRED AN OWNER, THAT FACT BECAME INVISIBLE.
-                      `owner_email` was on the DTO, served by the handler, and read by nothing — the
-                      who-reads-this probe failing on a field this very slice added. On a screen whose
-                      entire purpose is accountability, the assigned state was the one state that said
-                      nothing at all.
-                      ⚠ `owner_email` is resolved by join, and the FK is ON DELETE RESTRICT, so an
-                      assigned row cannot outlive its user. If it is ever missing anyway, say the owner
-                      is unreadable — never render an owned row as blank, which is indistinguishable
-                      from unowned. */}
+                  {/* ⛔ THE MOMENT A CREDENTIAL ACQUIRED AN OWNER, THAT FACT BECAME INVISIBLE. On a
+                      screen whose entire purpose is accountability, the assigned state was the one
+                      state that said nothing at all.
+                      ⛔ AND IT IS RESOLVED FROM THE MEMBER ROSTER, NOT FROM `owner_email`. The DTO
+                      carries that field and the handler DELIBERATELY LEAVES IT NULL — the roster is
+                      already fetched for the picker, and resolving server-side too would be a second
+                      source of truth for one fact. Reading `c.owner_email` here would have rendered
+                      "unknown" on every owned row.
+                      ⚠ A MEMBER CAN GO MISSING FOR A REAL REASON: the FK is ON DELETE RESTRICT on
+                      `users`, but nothing pins the MEMBERSHIP, so an owner who left the org keeps the
+                      credential and drops off the roster. That row must say the owner is unresolvable —
+                      never render blank, which is indistinguishable from unowned. */}
                   {c.owner_user_id ? (
                     <span className="ml-2 text-xs text-ink-secondary">
                       · owner{" "}
                       <span className="text-slate-300">
-                        {c.owner_email ?? "unknown (could not resolve this user)"}
+                        {members.find((m) => m.user_id === c.owner_user_id)?.email ??
+                          "not a member of this organization"}
                       </span>
                     </span>
                   ) : (
