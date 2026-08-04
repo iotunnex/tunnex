@@ -99,10 +99,12 @@ reason stated publicly** — a child process on the same host has no network to 
 bundle, **confirmed rather than edited**. *The ceremony was never for the build; it was for the rulings* — D14
 changes shipped behaviour and its migration needs its own surface.
 
-⛔⛔ **AND THE DEPENDENCY A FRESH RE-ENTRY MUST NOT MISS: THE BETA BUNDLE NOW GATES ON EPIC 15.** The bundle is
-sequenced **S12.1 → S12.2 → S6.5b → rest** and **EPIC 15 SITS AHEAD OF IT — the bundle is NOT STARTABLE until
-EPIC 15 lands.** ⚠ **Cost named rather than left to arrive: beta is now behind one principal design PLUS a
-migration that touches every existing machine credential.**
+⛔ **~~THE BETA BUNDLE GATES ON EPIC 15~~ — RECORDED AND WITHDRAWN (2026-08-04).** That line landed after the
+founder had corrected it — a timing overlap, not an error of fact. **EPIC 15 sitting before the bundle is a
+POSITION IN THE ORDER, NOT A GATE**; recording it as one is a claim about a decision nobody has made.
+**The only correct next-step reference: EPIC 15 → full product walk → the founder rules the beta bundle.**
+⛔ **No EPIC 15 artifact sequences, scopes or costs the bundle.** Struck beside its withdrawal deliberately —
+a claim removed without its retraction gets re-derived.
 
 ⛔ **D19 RULED: THE MIGRATION SHAPE IS ASSIGN-EXPLICITLY.** An admin names an owner for each existing machine
 credential — a fourth shape beside the three costed, and the only one that **guesses nothing and breaks
