@@ -4345,3 +4345,51 @@ The branch forked at EPIC 11 and sat for weeks. In that time:
 - **Re-apply, then MUTATION-PROVE the re-application.** Reverting the re-applied fix must fail a test. Without
   that step "I re-applied it" is a claim about intent, not about behaviour.
 - Expect call sites to have MULTIPLIED, not merely moved. Count them on both sides before resolving.
+
+---
+
+# ⛔ A VALUE THAT EXISTS ONLY IN A SHELL INVOCATION IS NOT CONFIGURATION
+
+**2026-08-04, found while scoping the `azure-cp` deploy — before the rebuild, not after.**
+
+The API's open-core edition is chosen by a Docker build arg:
+
+```yaml
+args:
+  TUNNEX_BUILD_TAGS: ${TUNNEX_BUILD_TAGS:-}   # empty builds the OPEN image
+```
+
+`make up-enterprise` supplies it **on the command line** and does not persist it. So a host running
+as enterprise carries that fact in **shell history**, and `.env` — the file every operator would read
+to learn how the host is configured — says nothing about it.
+
+> ## **A PLAIN `docker compose up -d --build` WOULD HAVE SILENTLY REBUILT THE ENTERPRISE CONTROL**
+> ## **PLANE AS OPEN.** Policy, device posture, MFA enforcement and IdP sync begin returning
+> ## `403 edition_required` — and **nothing about the deploy looks like it failed.** Every container
+> ## comes up healthy, `--wait` is satisfied, and the capability is simply gone.
+
+**This is the third instance of one shape this week**, and the shape is what matters more than the
+instance:
+
+| where the value lived | what it did quietly |
+|---|---|
+| a digest pinned in `.env`, never forwarded to the container | the pin no-op'd; the emitted enroll command shipped a stale image (WF-S13-7) |
+| `nodes[0]` indexing a list that includes REVOKED rows | every new device homed on a dead gateway, holding a one-time config that can never connect |
+| an edition selector living in shell history | a rebuild downgrades the control plane and reports success |
+
+**A VALUE LIVING SOMEWHERE NOBODY CHECKS, DOING THE WRONG THING QUIETLY.** In all three the system
+is behaving exactly as written; what is missing is anywhere to *look* that would say so.
+
+⛔ **PERSISTING IT IS THE FIX, NOT A PRECAUTION.** Writing `TUNNEX_BUILD_TAGS=enterprise` into `.env`
+does not merely reduce the chance of the mistake — it moves the value into the file that defines the
+host, where a later reader and a later rebuild both find the same answer.
+
+**MECHANICAL:**
+- **If a build produces a materially different artifact depending on an argument, that argument
+  belongs in the environment file, not in a Makefile target.** A convenience target may still pass
+  it; it must not be the only place it exists.
+- **Verify the CAPABILITY after a deploy, not the container state.** `docker compose ps` said healthy
+  in the failure case too. `/api/v1/meta` reporting `"edition":"enterprise"` is the check that would
+  have caught it — read the property back out of the running system.
+- **Ask of any deploy: what is true about this host that is written down nowhere?** The answer is
+  usually short, and usually the thing that breaks.
