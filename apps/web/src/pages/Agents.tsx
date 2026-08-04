@@ -85,48 +85,77 @@ export default function Agents() {
           <p data-state="load-failed" className="mt-3 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-xs text-danger">
             {rows.error} <strong>This is not the same as having none.</strong>
           </p>
-        ) : rows.data.length === 0 ? (
+        ) : rows.data.filter((a) => a.enrolment_kind === "agent").length === 0 &&
+          rows.data.length === 0 ? (
           <p data-state="no-agents" className="mt-3 text-xs text-ink-secondary">{NO_AGENTS}</p>
         ) : (
-          <ul className="mt-3 space-y-1">
-            {sortAgents(rows.data).map((a) => {
-              const note = attributionNote(a);
-              const kind = enrolmentKind({ enrolled_kind: a.enrolment_kind });
+          <>
+            {(() => {
+              const declared = sortAgents(rows.data.filter((a) => a.enrolment_kind === "agent"));
+              const undetermined = rows.data.filter((a) => a.enrolment_kind === "undetermined");
               return (
-                <li
-                  key={a.node_id}
-                  data-kind={kind}
-                  data-unattributable={a.unattributable ? "yes" : "no"}
-                  className="flex items-center justify-between gap-3 rounded-md bg-white/5 px-3 py-2 text-sm"
-                >
-                  <span className="min-w-0 text-slate-200">
-                    {a.name}
-                    <span className="ml-2 font-mono text-xs text-slate-500">{a.address ?? "no address"}</span>
-                    <span className="ml-2 text-xs text-ink-secondary">
-                      {a.owner_email
-                        ? <>· authorised by <span className="text-slate-300">{a.owner_email}</span></>
-                        : "· no owner recorded"}
-                    </span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-2">
-                    {/* ⛔ THE THIRD STATE, IN ITS RULED WORDS. Not "not an agent" (a fact nobody has), not
-                        "agent" (the defect the marker fixed), and never a fault — the node works; the gap
-                        is in our record. */}
-                    {kind === "undetermined" && (
-                      <span title={UNDETERMINED_DETAIL}>
-                        <Badge tone="neutral">{UNDETERMINED_LABEL}</Badge>
-                      </span>
-                    )}
-                    {note && (
-                      <span title={note.detail}>
-                        <Badge tone="warn">{note.label}</Badge>
-                      </span>
-                    )}
-                  </span>
-                </li>
+                <>
+                  {declared.length === 0 ? (
+                    <p data-state="no-agents" className="mt-3 text-xs text-ink-secondary">{NO_AGENTS}</p>
+                  ) : (
+                    <ul className="mt-3 space-y-1">
+                      {declared.map((a) => {
+                        const note = attributionNote(a);
+                        return (
+                          <li
+                            key={a.node_id}
+                            data-kind={enrolmentKind({ enrolled_kind: a.enrolment_kind })}
+                            data-unattributable={a.unattributable ? "yes" : "no"}
+                            className="flex items-center justify-between gap-3 rounded-md bg-white/5 px-3 py-2 text-sm"
+                          >
+                            <span className="min-w-0 text-slate-200">
+                              {a.name}
+                              <span className="ml-2 font-mono text-xs text-slate-500">
+                                {a.address ?? "no address"}
+                              </span>
+                              <span className="ml-2 text-xs text-ink-secondary">
+                                {a.owner_email
+                                  ? <>· authorised by <span className="text-slate-300">{a.owner_email}</span></>
+                                  : "· no owner recorded"}
+                              </span>
+                            </span>
+                            <span className="flex shrink-0 items-center gap-2">
+                              {note && (
+                                <span title={note.detail}>
+                                  <Badge tone="warn">{note.label}</Badge>
+                                </span>
+                              )}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+
+                  {/* ⛔ UNDETERMINED IS GROUPED, NOT INTERLEAVED — AND THIS IS A JUDGEMENT, RECORDED.
+                      Every node enrolled before the marker is undetermined, so listing each one beside the
+                      declared agents would make the screen mostly legacy gateways AND would imply each is a
+                      candidate agent — a stronger claim than "we do not know".
+                      ⚠ It is still RENDERED, never hidden: the ruling was that it must not arrive as a
+                      blank, and a counted line in its ruled words is not a blank. Excluding them would
+                      assert they are not agents, which is the fact nobody has. */}
+                  {undetermined.length > 0 && (
+                    <p
+                      data-state="undetermined-group"
+                      className="mt-3 rounded-md border border-line bg-white/5 px-3 py-2 text-xs text-ink-secondary"
+                      title={UNDETERMINED_DETAIL}
+                    >
+                      <strong className="text-slate-300">
+                        {undetermined.length} {undetermined.length === 1 ? "node" : "nodes"}:{" "}
+                        {UNDETERMINED_LABEL}
+                      </strong>{" "}
+                      {UNDETERMINED_DETAIL}
+                    </p>
+                  )}
+                </>
               );
-            })}
-          </ul>
+            })()}
+          </>
         )}
       </Card>
       {orgId === null && <span className="sr-only">no organization</span>}
