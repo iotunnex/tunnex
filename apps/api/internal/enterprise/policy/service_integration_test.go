@@ -212,7 +212,7 @@ func TestPerUserGrantDropsOnMemberRemoval(t *testing.T) {
 
 	s := policy.NewService(pool)
 	s.SetNotifier(&fakeNotifier{})
-	res, err := s.CreateResource(ctx, f.org, policyResource())
+	res, err := s.CreateResource(ctx, f.org, policyResource(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -686,7 +686,7 @@ func TestCIDRWarnShedsWhenRangeLands(t *testing.T) {
 	if _, e := pool.Exec(ctx, `INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'A')`, site, org); e != nil {
 		t.Fatalf("site: %v", e)
 	}
-	res, e := svc.CreateResource(ctx, org, policyspec.ResourceInput{Name: "r", CIDR: "10.0.0.4/32", Protocol: "any"})
+	res, e := svc.CreateResource(ctx, org, policyspec.ResourceInput{Name: "r", CIDR: "10.0.0.4/32", Protocol: "any"}, nil)
 	if e != nil {
 		t.Fatalf("resource: %v", e)
 	}
@@ -797,7 +797,7 @@ func TestGrantOwnershipMarker(t *testing.T) {
 	if _, e := pool.Exec(ctx, `INSERT INTO machine_credentials (id,org_id,name,role,token_hash,fingerprint) VALUES ($1,$2,'gitops','operator',$3,'fp')`, mid, org, []byte(mid.String())); e != nil {
 		t.Fatalf("machine: %v", e)
 	}
-	res, e := svc.CreateResource(ctx, org, policyspec.ResourceInput{Name: "r", CIDR: "10.0.0.4/32", Protocol: "any"})
+	res, e := svc.CreateResource(ctx, org, policyspec.ResourceInput{Name: "r", CIDR: "10.0.0.4/32", Protocol: "any"}, nil)
 	if e != nil {
 		t.Fatalf("resource: %v", e)
 	}
@@ -846,7 +846,7 @@ func TestPolicyMachineAudits(t *testing.T) {
 		t.Fatalf("org: %v", e)
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
-	res, e := svc.CreateResource(ctx, org, policyspec.ResourceInput{Name: "r", CIDR: "10.0.0.4/32", Protocol: "any"})
+	res, e := svc.CreateResource(ctx, org, policyspec.ResourceInput{Name: "r", CIDR: "10.0.0.4/32", Protocol: "any"}, nil)
 	if e != nil {
 		t.Fatalf("resource: %v", e)
 	}

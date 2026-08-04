@@ -2229,6 +2229,15 @@ func (s *Service) ListNodes(ctx context.Context, orgID uuid.UUID) ([]sqlc.Node, 
 	return s.q.ListNodes(ctx, orgID)
 }
 
+// ListAgents returns the org's agents — the nodes an operator DECLARED as agents, plus the ones enrolled
+// before the declaration existed (S15.3).
+//
+// ⚠ UNDETERMINED IS INCLUDED, WITH ITS KIND. Excluding it would assert a fact nobody has; including it
+// silently would repeat the defect the marker fixed. The surface says which it is.
+func (s *Service) ListAgents(ctx context.Context, orgID uuid.UUID) ([]sqlc.ListAgentsForOrgRow, error) {
+	return s.q.ListAgentsForOrg(ctx, orgID)
+}
+
 // OwnerEmails maps node id -> the owner's email, resolved from `users` (S15.2; D22 applied to agents).
 //
 // ⚠ A NODE MISSING FROM THIS MAP IS UNATTRIBUTABLE, and that is the ONLY thing absence means here — the

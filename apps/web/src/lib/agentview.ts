@@ -1,7 +1,3 @@
-import type { components } from "@tunnex/shared";
-
-type Device = components["schemas"]["Device"];
-type Node = components["schemas"]["Node"];
 
 /**
  * The AI-agent surface's view model — S15.3.
@@ -24,53 +20,32 @@ type Node = components["schemas"]["Node"];
  * says which ACTIONS they may perform there, because the enforcement plane cannot see actions.
  */
 
-/** One agent, as the screen understands it. */
+/**
+ * One agent, as the screen understands it — served whole by `GET /organizations/{id}/agents`.
+ *
+ * ⚠ ONE SURFACE, ONE SOURCE. This used to be assembled client-side by joining `nodes` to `devices`, which
+ * made the screen a second place deriving "which nodes are agents". The server answers it now, from the
+ * marker, and the join is gone.
+ */
 export interface AgentRow {
-  nodeId: string;
+  node_id: string;
   name: string;
-  /** The human this agent acts for — the join token's ISSUER, resolved server-side. */
-  ownerEmail: string | null;
-  /**
-   * ⛔ UNATTRIBUTABLE IS A STATEMENT ABOUT THE AUDIT TRAIL, NEVER ABOUT PERMISSION. An unattributable agent
-   * is NOT less authorized — the policy engine enforces every rule identically. It keeps running, and what
-   * is lost is the ability to tie its activity to a person.
-   */
+  enrolment_kind: EnrolmentKind;
+  owner_email: string | null;
   unattributable: boolean;
-  /** Its own /32, which is what makes it attributable in the flow log at all. */
   address: string | null;
   status: string;
 }
 
 /**
- * Build the agent rows from what the API already serves.
+ * Order: **unattributable first, then undetermined, then the rest.**
  *
- * ⚠ AN AGENT IS A NODE **AND** A DEVICE ROW, AND BOTH HALVES ARE NEEDED. `nodes` carries the owner and the
- * unattributable flag; the `devices` row carries the /32. Neither alone can answer the screen's questions.
+ * ⚠ THE TWO STATES AN OPERATOR CANNOT LEARN ANYWHERE ELSE COME FIRST, and neither may depend on a name.
  */
-export function agentRows(nodes: Node[], devices: Device[]): AgentRow[] {
-  const agentDevices = new Map<string, Device>();
-  for (const d of devices) {
-    if (d.kind === "agent" && d.node_id) agentDevices.set(d.node_id, d);
-  }
-  return nodes
-    .filter((n) => agentDevices.has(n.id))
-    .map((n) => ({
-      nodeId: n.id,
-      name: n.name,
-      ownerEmail: n.owner_email ?? null,
-      unattributable: n.unattributable === true,
-      address: agentDevices.get(n.id)?.assigned_ip ?? null,
-      status: n.status,
-    }))
-    .sort((a, b) =>
-      // ⚠ UNATTRIBUTABLE FIRST. It is the one state an operator cannot learn anywhere else, and burying it
-      // alphabetically would make the screen's most important claim depend on a name.
-      a.unattributable === b.unattributable
-        ? a.name.localeCompare(b.name)
-        : a.unattributable
-          ? -1
-          : 1,
-    );
+export function sortAgents(rows: AgentRow[]): AgentRow[] {
+  const rank = (a: AgentRow) =>
+    a.unattributable ? 0 : a.enrolment_kind === "undetermined" ? 1 : 2;
+  return [...rows].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 }
 
 /**
@@ -135,4 +110,32 @@ export function enrolmentKind(n: { enrolled_kind?: string | null }): EnrolmentKi
   if (n.enrolled_kind === "agent") return "agent";
   if (n.enrolled_kind === "gateway") return "gateway";
   return "undetermined";
+}
+
+/**
+ * The Overview card's words — S15.3.
+ *
+ * ⛔ COUNTS AND ONE NAMED GAP. NOTHING ELSE. A card is where copy gets shortened until it implies things,
+ * so §0's two forbidden claims bind hardest here: no DETECTION, no PER-TOOL. It says how many agents exist
+ * and how many cannot be tied to a person — both facts the server actually holds.
+ *
+ * ⚠ AND IT IS NOT A HEALTH VERDICT. "3 agents, 1 unattributable" is a count and an audit gap. It is not
+ * "you are secure", not "all good", and not a claim about what any agent is doing.
+ */
+export function agentSummary(rows: Pick<AgentRow, "unattributable">[]): {
+  total: number;
+  unattributable: number;
+  note: string | null;
+} {
+  const unattributable = rows.filter((r) => r.unattributable).length;
+  return {
+    total: rows.length,
+    unattributable,
+    // ⚠ The gap is named only when it exists. A permanent "0 unattributable" would train the reader to
+    // stop seeing the line — and it is the line that matters when it is not zero.
+    note:
+      unattributable > 0
+        ? `${unattributable} cannot be attributed to a person`
+        : null,
+  };
 }

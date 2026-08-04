@@ -1,6 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { agentRows, attributionNote, NO_AGENTS } from "../lib/agentview";
 import { QRCodeSVG } from "qrcode.react";
 import { PRODUCT_NAME } from "../brand";
 import {
@@ -284,80 +283,6 @@ export default function Devices() {
           Open Gateways
         </Link>
       </div>
-
-      {/* ⛔ AI AGENTS — A NAMED SECTION INSIDE DEVICES (S15.3, nav ruled B).
-          A new top-level destination would claim agents are a peer entity to Devices; the schema says an
-          agent IS a devices row (`kind='agent'`). This is the only placement that does not invent an
-          organising principle the model lacks — and a clearly-named section still makes the feature
-          findable, which is what "named feature" required.
-          ⛔ THE COPY IS BOUND BY THE RENDER FLOOR: no detection language, no per-tool claim, and the verb
-          is REACH. See lib/agentview.ts, where the constraint is stated and the tests enforce it. */}
-      <Card>
-        <h2 className="text-sm font-semibold text-slate-300">AI agents</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Agents authenticate as themselves and are bounded by the same policy as any device — they reach
-          only what they are granted. Each is shown with the person who authorised it into this
-          organization.
-        </p>
-        {/* ⛔ THE COPY ABOVE SAYS AGENTS "REACH ONLY WHAT THEY ARE GRANTED", AND NOTHING ON THIS SCREEN
-            SHOWED WHAT ANY AGENT REACHES. A claim with no route to its evidence is a claim the reader
-            cannot check.
-            ⚠ A LINK, NOT A LIST. Rendering an agent's destinations here would be a second surface deriving
-            the same fact as Access Policies — the one-truth class, and the two would diverge exactly where
-            it matters. The honest move is to say where the answer lives. */}
-        <p className="mt-2 text-[11px] text-ink-secondary">
-          What each agent may reach is set by the grants on{" "}
-          <Link to="/access" className="text-slate-300 underline">
-            Access Policies
-          </Link>
-          . An agent with no grant reaches nothing.
-        </p>
-        {(() => {
-          const rows = agentRows(nodes, devices);
-          if (rows.length === 0) {
-            return (
-              <p data-state="no-agents" className="mt-3 text-xs text-ink-secondary">
-                {NO_AGENTS}
-              </p>
-            );
-          }
-          return (
-            <ul className="mt-3 space-y-1">
-              {rows.map((a) => {
-                const note = attributionNote(a);
-                return (
-                  <li
-                    key={a.nodeId}
-                    data-unattributable={a.unattributable ? "yes" : "no"}
-                    className="flex items-center justify-between gap-3 rounded-md bg-white/5 px-3 py-2 text-sm"
-                  >
-                    <span className="min-w-0 text-slate-200">
-                      {a.name}
-                      {/* ⚠ THE ADDRESS IS WHY IT IS ATTRIBUTABLE AT ALL — the flow log resolves an agent by
-                          its /32, so an agent without one cannot be named in an access event. */}
-                      <span className="ml-2 font-mono text-xs text-slate-500">
-                        {a.address ?? "no address"}
-                      </span>
-                      <span className="ml-2 text-xs text-ink-secondary">
-                        {a.ownerEmail
-                          ? <>· authorised by <span className="text-slate-300">{a.ownerEmail}</span></>
-                          : "· no owner recorded"}
-                      </span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      {note && (
-                        <span title={note.detail}>
-                          <Badge tone="warn">{note.label}</Badge>
-                        </span>
-                      )}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          );
-        })()}
-      </Card>
 
       <form onSubmit={create}>
         <Card>

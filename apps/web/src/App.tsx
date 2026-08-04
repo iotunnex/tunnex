@@ -24,6 +24,7 @@ import Gateways from "./pages/Gateways";
 import Sites from "./pages/Sites";
 import RoutedRanges from "./pages/RoutedRanges";
 import Kubernetes from "./pages/Kubernetes";
+import Agents from "./pages/Agents";
 import Access from "./pages/Access";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
@@ -117,6 +118,7 @@ export default function App() {
           <Route path="/sites" element={<Sites />} />
           <Route path="/routed-ranges" element={<RoutedRanges />} />
             <Route path="/kubernetes" element={<Kubernetes />} />
+            <Route path="/agents" element={<Agents />} />
             <Route path="/access" element={<Access />} />
             <Route path="/users" element={<Users />} />
             <Route path="/settings" element={<Settings />} />

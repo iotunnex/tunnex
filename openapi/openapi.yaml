@@ -610,6 +610,32 @@ paths:
               schema: { type: array, items: { $ref: "#/components/schemas/Node" } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/agents:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listAgents
+      summary: List the org's AI agents (enterprise)
+      description: >-
+        S15.3 — the agents enrolled in this organization, each with the human who authorised it and whether
+        its activity is attributable. ⛔ ENTERPRISE: the open edition receives 403 edition_required, which is
+        a SUCCESSFUL REFUSAL — the surface renders ABSENCE, never an error.
+        ⛔ This endpoint says which agents EXIST and who owns them. It says nothing about what they may do:
+        reachability is set by grants on Access Policies, and per-tool control does not exist in this
+        product.
+      tags: [agents]
+      responses:
+        "200":
+          description: The agents.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Agent" } }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/nodes/join-token:
     parameters:
       - name: orgId
@@ -3325,6 +3351,36 @@ components:
         node_id: { type: string, format: uuid }
         certificate: { type: string, description: "PEM agent certificate" }
         ca_certificate: { type: string, description: "PEM CA certificate" }
+
+    Agent:
+      type: object
+      required: [node_id, name, enrolment_kind, unattributable, status]
+      additionalProperties: false
+      properties:
+        node_id: { type: string, format: uuid }
+        name: { type: string }
+        enrolment_kind:
+          type: string
+          enum: [agent, gateway, undetermined]
+          description: >-
+            S15.3 — what the operator DECLARED at enrolment. ⛔ THREE-VALUED, NOT A BOOLEAN. 'undetermined'
+            means the node was enrolled before Tunnex recorded that choice, so the answer was never captured
+            and CANNOT BE RECOVERED — it is neither 'agent' (which would repeat a defect) nor 'gateway'
+            (which would assert a fact nobody has).
+        owner_email:
+          type: string
+          nullable: true
+          description: The human who authorised this agent into the org — the join token's issuer, resolved from `users` so it survives them leaving.
+        unattributable:
+          type: boolean
+          description: >-
+            No owner is recorded, so activity cannot be tied to a person. ⛔ A statement about the AUDIT
+            TRAIL, never about permission — an unattributable agent is not less authorized.
+        address:
+          type: string
+          nullable: true
+          description: The agent's own /32, which is what makes it nameable in a flow event.
+        status: { type: string }
 
     Node:
       type: object
