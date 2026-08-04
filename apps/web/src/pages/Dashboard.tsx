@@ -39,6 +39,7 @@ import {
   Panel,
 } from "../components/ui";
 import { attributionBadge, gatewayHealthRow, policyHealthBadge } from "../lib/healthview";
+import { agentSummary, type AgentRow } from "../lib/agentview";
 import {
   isFreshOrg,
   sortGateways,
@@ -72,6 +73,9 @@ export default function Dashboard() {
   const [rosterRes, setRosterRes] = useState<Loaded<Member[]> | null>(null);
   const [pendingRes, setPendingRes] = useState<Loaded<Device[]> | null>(null);
   const [nodesRes, setNodesRes] = useState<Loaded<Node[]> | null>(null);
+  // ⚠ NULL means "not entitled or not loaded", and that is deliberate: the open edition's 403 is a
+  // SUCCESSFUL refusal, so it must not become an error state. The card simply does not render.
+  const [agentsRes, setAgentsRes] = useState<Loaded<AgentRow[]> | null>(null);
   const [rulesRes, setRulesRes] = useState<Loaded<PolicyRule[]> | null>(null);
   const [devicesRes, setDevicesRes] = useState<Loaded<Device[]> | null>(null);
   const [hubSetRes, setHubSetRes] = useState<Loaded<HubSet> | null>(null);
@@ -162,6 +166,16 @@ export default function Dashboard() {
             params: { path: { orgId: org.id } },
           }),
         ).then((r) => !cancelled && setNodesRes(r as Loaded<Node[]>));
+        // ⛔ ENTERPRISE, AND A 403 IS A SUCCESSFUL REFUSAL — NOT AN ERROR. On the open edition the
+        // endpoint correctly answers edition_required; the card must then be ABSENT, not "unavailable".
+        // Folding a correct refusal into a failure is the defect this repo has already paid for.
+        void api
+          .GET("/api/v1/organizations/{orgId}/agents", { params: { path: { orgId: org.id } } })
+          .then(({ data, error }) => {
+            if (cancelled || error || !data) return; // 403 lands here and stays silent, by design
+            setAgentsRes({ ok: true, data: data as AgentRow[] });
+          })
+          .catch(() => {});
         // Both OPEN endpoints — no gate needed, and the audit that cut them was wrong about the data.
         void loadOne(() =>
           api.GET("/api/v1/organizations/{orgId}/devices", {
@@ -503,6 +517,37 @@ export default function Dashboard() {
                       green while dead.
                     </p>
                   </Panel>
+
+                  {/* ⛔ AI AGENTS — COUNTS AND ONE NAMED GAP, NOTHING ELSE (S15.3).
+                      A card is where copy gets shortened until it implies things, so the render floor
+                      binds hardest here: no detection claim, no per-tool claim, and NOT a health verdict.
+                      "3 agents, 1 unattributable" is a count and an audit gap — it is not "you are secure"
+                      and says nothing about what any agent is doing.
+                      ⚠ Absent in the open edition: the endpoint answers 403 edition_required, which is a
+                      SUCCESSFUL refusal, and agentsRes stays null rather than becoming an error. */}
+                  {agentsRes?.ok && agentsRes.data.length > 0 && (
+                    <Panel title="AI Agents" className="lg:col-span-4">
+                      {(() => {
+                        const sum = agentSummary(agentsRes.data);
+                        return (
+                          <div className="flex flex-col gap-1.5">
+                            <span className="text-[22px] font-semibold text-ink-heading">{sum.total}</span>
+                            <span className="text-cell text-ink-tertiary">
+                              enrolled in this organization
+                            </span>
+                            {/* ⚠ Named only when it exists — a permanent "0 unattributable" would train
+                                the reader to stop seeing the line that matters when it is not zero. */}
+                            {sum.note && (
+                              <span className="text-cell text-warn">{sum.note}</span>
+                            )}
+                            <Link to="/agents" className="text-cell text-ink-body underline">
+                              Open AI agents
+                            </Link>
+                          </div>
+                        );
+                      })()}
+                    </Panel>
+                  )}
 
                   <Panel title="Gateway Health" className="lg:col-span-4">
                     {nodesRes === null ? (

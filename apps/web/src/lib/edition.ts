@@ -20,6 +20,9 @@
  * is precisely how the first sweep would have missed Access Rules a second time.
  */
 export const ENTERPRISE_PATHS: readonly string[] = [
+  // S15.3 — the agent surface. ⛔ The client must KNOW this is enterprise, so a 403 renders as ABSENCE
+  // rather than as a failure: edition_required is a SUCCESSFUL refusal.
+  "/api/v1/organizations/{orgId}/agents",
   "/api/v1/organizations/{orgId}/access-events",
   "/api/v1/organizations/{orgId}/access-log/health",
   "/api/v1/organizations/{orgId}/device-approval",

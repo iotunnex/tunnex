@@ -102,6 +102,13 @@ const COVERED: Record<string, string> = {
 // THE ORDER IS THE COMMIT-ONE ORDER, and the reason is recorded with it: surfaces are ranked by where
 // disagreement with the backend is most consequential, not by size.
 const PENDING: Record<string, string> = {
+  // ⛔ S15.3. The AI-agent surface is routed and rendering, and its VIEW-MODEL is covered
+  // (agentview.test.ts: the render floor, the three-valued kind, UNDETERMINED's ruled words, the
+  // ordering, the Overview card's copy). The WIRING and FAILURE-PATH tests are not written yet —
+  // specifically: that a 403 renders ABSENCE rather than an error, and that a real failure does NOT
+  // render as "no agents". PENDING rather than COVERED on purpose: a half-covered screen must be
+  // VISIBLY half-covered, and those two are the ones this screen would be worst at getting wrong.
+  "Agents.tsx": "S15.3 — view-model covered; 403-as-absence + failure-path wiring tests owed",
   // ⛔ S14.19. Routed and rendering; its VIEW-MODEL is covered (flowlogview.test.ts) but the wiring
   // and failure-path tests are not written yet. PENDING rather than COVERED on purpose — the ledger
   // is only worth having if a half-covered screen is visibly half-covered.
@@ -164,7 +171,7 @@ describe("screen census", () => {
     // ZERO. Every accountable screen is covered. The list stays, because a screen added tomorrow must land in
     // one of the three lists or fail the census by name — an empty PENDING is a state, not a reason to delete
     // the mechanism.
-    expect(Object.keys(PENDING).length).toBe(1);
+    expect(Object.keys(PENDING).length).toBe(2);
   });
 
   // THE CEILING IS NOT THIS NUMBER. Recorded so the totals above are read as a LEDGER OF TODAY, not a target.
@@ -178,6 +185,6 @@ describe("screen census", () => {
   // RE-BASELINING IS A DELIBERATE, REVIEWABLE EDIT — which is exactly the property the equals-the-total form
   // was chosen for. A `>=` floor would have absorbed the growth silently and nobody would have had to look.
   it("the ledger is a snapshot of today — 9 accountable screens, ceiling ~13 after the redesign", () => {
-    expect(Object.keys(COVERED).length + Object.keys(PENDING).length).toBe(10);
+    expect(Object.keys(COVERED).length + Object.keys(PENDING).length).toBe(11);
   });
 });
