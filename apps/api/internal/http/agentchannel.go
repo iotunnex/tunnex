@@ -13,8 +13,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/google/uuid"
+
+	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/accesslog"
 	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
+	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
+	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
@@ -77,14 +82,8 @@ func (a *AgentChannel) Handler() http.Handler {
 // unauthenticated surface. The batch is best-effort observability; a decode/ingest failure
 // is reported to the agent (which keeps retrying) but never touches the data plane.
 func (a *AgentChannel) flowEvents(w http.ResponseWriter, r *http.Request) {
-	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-		http.Error(w, "client certificate required", http.StatusUnauthorized)
-		return
-	}
-	serial := hex.EncodeToString(r.TLS.PeerCertificates[0].SerialNumber.Bytes())
-	node, err := a.svc.AuthenticateCert(r.Context(), serial)
-	if err != nil {
-		http.Error(w, "unauthorized agent", http.StatusUnauthorized)
+	node, r, ok := a.authenticateAgent(w, r)
+	if !ok {
 		return
 	}
 	if a.ingest == nil {
@@ -110,14 +109,8 @@ func (a *AgentChannel) flowEvents(w http.ResponseWriter, r *http.Request) {
 // status ingests per-peer live telemetry (handshake/bytes/endpoint) from the
 // agent and upserts it against the node's devices.
 func (a *AgentChannel) status(w http.ResponseWriter, r *http.Request) {
-	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-		http.Error(w, "client certificate required", http.StatusUnauthorized)
-		return
-	}
-	serial := hex.EncodeToString(r.TLS.PeerCertificates[0].SerialNumber.Bytes())
-	node, err := a.svc.AuthenticateCert(r.Context(), serial)
-	if err != nil {
-		http.Error(w, "unauthorized agent", http.StatusUnauthorized)
+	node, r, ok := a.authenticateAgent(w, r)
+	if !ok {
 		return
 	}
 	var body struct {
@@ -150,14 +143,8 @@ func (a *AgentChannel) status(w http.ResponseWriter, r *http.Request) {
 
 // report records the agent's locally-generated WireGuard public key.
 func (a *AgentChannel) report(w http.ResponseWriter, r *http.Request) {
-	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-		http.Error(w, "client certificate required", http.StatusUnauthorized)
-		return
-	}
-	serial := hex.EncodeToString(r.TLS.PeerCertificates[0].SerialNumber.Bytes())
-	node, err := a.svc.AuthenticateCert(r.Context(), serial)
-	if err != nil {
-		http.Error(w, "unauthorized agent", http.StatusUnauthorized)
+	node, r, ok := a.authenticateAgent(w, r)
+	if !ok {
 		return
 	}
 	var body struct {
@@ -196,14 +183,8 @@ func (a *AgentChannel) report(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *AgentChannel) desiredState(w http.ResponseWriter, r *http.Request) {
-	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-		http.Error(w, "client certificate required", http.StatusUnauthorized)
-		return
-	}
-	serial := hex.EncodeToString(r.TLS.PeerCertificates[0].SerialNumber.Bytes())
-	node, err := a.svc.AuthenticateCert(r.Context(), serial)
-	if err != nil {
-		http.Error(w, "unauthorized agent", http.StatusUnauthorized)
+	node, r, ok := a.authenticateAgent(w, r)
+	if !ok {
 		return
 	}
 	// Read the change-version BEFORE the peer query so the reported version can
@@ -226,13 +207,11 @@ func (a *AgentChannel) desiredState(w http.ResponseWriter, r *http.Request) {
 // (pushed via the hub) so revocations apply within the S3.1 <5s bound, or after
 // watchHold as a safety net. The agent re-fetches on return.
 func (a *AgentChannel) watch(w http.ResponseWriter, r *http.Request) {
-	serial := ""
-	if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
-		serial = hex.EncodeToString(r.TLS.PeerCertificates[0].SerialNumber.Bytes())
-	}
-	node, err := a.svc.AuthenticateCert(r.Context(), serial)
-	if err != nil {
-		http.Error(w, "unauthorized agent", http.StatusUnauthorized)
+	// ⚠ ROUTED THROUGH THE SAME SEAM. This handler used to tolerate a missing TLS block and pass an empty
+	// serial to AuthenticateCert, relying on the lookup to fail. That is the same outcome by a longer road,
+	// and it is one more place a principal would not have been built.
+	node, r, ok := a.authenticateAgent(w, r)
+	if !ok {
 		return
 	}
 	var changed <-chan struct{}
@@ -258,14 +237,8 @@ func (a *AgentChannel) watch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *AgentChannel) renew(w http.ResponseWriter, r *http.Request) {
-	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-		http.Error(w, "client certificate required", http.StatusUnauthorized)
-		return
-	}
-	serial := hex.EncodeToString(r.TLS.PeerCertificates[0].SerialNumber.Bytes())
-	node, err := a.svc.AuthenticateCert(r.Context(), serial)
-	if err != nil {
-		http.Error(w, "unauthorized agent", http.StatusUnauthorized)
+	node, r, ok := a.authenticateAgent(w, r)
+	if !ok {
 		return
 	}
 	csr, _ := io.ReadAll(io.LimitReader(r.Body, 1<<16))
@@ -281,4 +254,47 @@ func (a *AgentChannel) renew(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// authenticateAgent is THE ONE SEAM where an agent becomes a principal (S15.2, D4).
+//
+// ⛔ ONE SEAM, NOT SIX. This exact block — TLS check, serial, AuthenticateCert, 401 — was repeated at every
+// agent route. Attaching the principal at each of them would have made the construction the CALLER's
+// responsibility, which is the class this repo has already paid for: a guard the next route is free to
+// forget, and a census that has to be re-run every time someone adds a handler.
+//
+// ⚠ AND IT IS WHY THE CENSUS GATE CAN BE HONEST. `agent_principal_census_test.go` asserts that `NodeID` is
+// written inside a `Principal` literal in exactly one file. That claim is only worth making because there is
+// one place an agent principal is ever built — here, through NewAgentPrincipal.
+//
+// Returns the node, a request whose context carries the principal, and ok=false when it has already written
+// the 401 (the caller must simply return).
+func (a *AgentChannel) authenticateAgent(w http.ResponseWriter, r *http.Request) (sqlc.Node, *http.Request, bool) {
+	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+		http.Error(w, "client certificate required", http.StatusUnauthorized)
+		return sqlc.Node{}, r, false
+	}
+	serial := hex.EncodeToString(r.TLS.PeerCertificates[0].SerialNumber.Bytes())
+	node, err := a.svc.AuthenticateCert(r.Context(), serial)
+	if err != nil {
+		// ⚠ ONE MESSAGE FOR EVERY FAILURE — unknown serial, revoked node, wrong org. No oracle: an agent
+		// learning WHICH of those it hit is an agent learning about nodes it is not.
+		http.Error(w, "unauthorized agent", http.StatusUnauthorized)
+		return sqlc.Node{}, r, false
+	}
+	// ⚠ owner_user_id may be NULL — D25(C). The principal is still built, and it reports itself
+	// UNATTRIBUTABLE rather than being refused: an unattributable tunnel is a logging failure, not an
+	// access-control one, and the policy engine enforces every rule regardless.
+	var owner uuid.UUID
+	if node.OwnerUserID.Valid {
+		owner = uuid.UUID(node.OwnerUserID.Bytes)
+	}
+	p := authctx.NewAgentPrincipal(node.ID, node.OrgID, node.Name, rbac.RoleAgent, owner, "agent_mtls")
+	if p == nil {
+		// Defensive: NewAgentPrincipal refuses a nil node/org, which an authenticated row cannot produce.
+		// If it ever does, refusing is correct — an agent principal with no identity is not a principal.
+		http.Error(w, "unauthorized agent", http.StatusUnauthorized)
+		return sqlc.Node{}, r, false
+	}
+	return node, r.WithContext(authctx.WithPrincipal(r.Context(), p)), true
 }
