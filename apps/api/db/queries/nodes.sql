@@ -15,8 +15,10 @@ ON CONFLICT (name) DO NOTHING;
 -- at exactly the moment it was thrown away.
 -- ⚠ ISSUED_BY, NOT OWNER: enrolment is an agent redeeming this token unattended, so the installer is not
 -- capturable by construction. This column claims only what happened, never who installed the agent.
-INSERT INTO node_join_tokens (org_id, node_name, token_hash, expires_at, issued_by)
-VALUES ($1, $2, $3, $4, $5)
+-- ⚠ `enrols_kind` is the OPERATOR'S DECLARATION, captured at the same instant as the issuer. Absence is
+-- the CLOSED state: the column defaults to 'gateway', so a caller that omits it mints a plain gateway.
+INSERT INTO node_join_tokens (org_id, node_name, token_hash, expires_at, issued_by, enrols_kind)
+VALUES ($1, $2, $3, $4, $5, COALESCE(NULLIF(sqlc.arg(enrols_kind)::text, ''), 'gateway'))
 RETURNING *;
 
 -- name: ConsumeJoinToken :one
@@ -31,8 +33,10 @@ RETURNING *;
 -- owner_user_id is carried from the redeemed token's issuer (S15.2 slice 1). ⚠ It may be NULL: tokens minted
 -- before 0066 have no issuer and never will, and D25 ruled an agent is NEVER refused at use for want of an
 -- owner — it degrades and is flagged. The refusal lives at enrolment (slice 2), on NEW nodes.
-INSERT INTO nodes (org_id, name, cert_serial, agent_version, cert_not_after, cert_public_key, owner_user_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+-- ⚠ `enrolled_kind` is carried from the redeemed token. NULL is impossible for a node enrolled after 0069
+-- (the token's column is NOT NULL); a NULL here means the node predates the marker — UNDETERMINED.
+INSERT INTO nodes (org_id, name, cert_serial, agent_version, cert_not_after, cert_public_key, owner_user_id, enrolled_kind)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: GetNodeByCertSerial :one

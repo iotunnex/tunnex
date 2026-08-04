@@ -279,6 +279,7 @@ type Node struct {
 	// FALSE only while the CURRENT cert_serial has never authenticated — the only state the D3 redelivery carve-out authorizes. DEFAULT TRUE so any writer that does not know this column (an older control-plane replica mid-roll, or CreateNode) lands in the CLOSED state (S13.1).
 	CertDelivered bool        `json:"cert_delivered"`
 	OwnerUserID   pgtype.UUID `json:"owner_user_id"`
+	EnrolledKind  *string     `json:"enrolled_kind"`
 }
 
 type NodeJoinToken struct {
@@ -291,6 +292,7 @@ type NodeJoinToken struct {
 	ConsumedNodeID pgtype.UUID        `json:"consumed_node_id"`
 	CreatedAt      time.Time          `json:"created_at"`
 	IssuedBy       pgtype.UUID        `json:"issued_by"`
+	EnrolsKind     string             `json:"enrols_kind"`
 }
 
 type NodePeerStatus struct {

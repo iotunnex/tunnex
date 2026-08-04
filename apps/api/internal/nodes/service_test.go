@@ -91,7 +91,7 @@ func TestNodeEnrollmentLifecycle(t *testing.T) {
 	svc := &Service{q: q, ca: ca, sealer: sealer}
 
 	// Issue a name-pinned token and enroll.
-	raw, err := svc.IssueJoinToken(ctx, actor, org, "gw-1")
+	raw, err := svc.IssueJoinToken(ctx, actor, org, "gw-1", "")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}

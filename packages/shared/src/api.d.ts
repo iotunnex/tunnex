@@ -2636,6 +2636,11 @@ export interface components {
         };
         JoinTokenRequest: {
             node_name?: string;
+            /**
+             * @description S15.3 — THE OPERATOR'S DECLARATION of what this token enrols. Captured at mint, the same instant as the issuer, because that is the one act that says both who is accountable and what is being brought online. ⛔ ABSENCE IS THE CLOSED STATE: omitted means 'gateway'. A token that enrols an agent must say so, and an agent additionally requires an issuer (D14) — both conditions, not one.
+             * @enum {string}
+             */
+            enrols_kind?: "gateway" | "agent";
         };
         JoinTokenResponse: {
             join_token: string;

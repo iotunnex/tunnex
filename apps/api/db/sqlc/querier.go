@@ -191,6 +191,8 @@ type Querier interface {
 	// at exactly the moment it was thrown away.
 	// ⚠ ISSUED_BY, NOT OWNER: enrolment is an agent redeeming this token unattended, so the installer is not
 	// capturable by construction. This column claims only what happened, never who installed the agent.
+	// ⚠ `enrols_kind` is the OPERATOR'S DECLARATION, captured at the same instant as the issuer. Absence is
+	// the CLOSED state: the column defaults to 'gateway', so a caller that omits it mints a plain gateway.
 	CreateJoinToken(ctx context.Context, arg CreateJoinTokenParams) (NodeJoinToken, error)
 	// S10.3: Kubernetes cluster + exposed-Service queries. Org-scoped (tenant isolation).
 	CreateK8sCluster(ctx context.Context, arg CreateK8sClusterParams) (K8sCluster, error)
@@ -205,6 +207,8 @@ type Querier interface {
 	// owner_user_id is carried from the redeemed token's issuer (S15.2 slice 1). ⚠ It may be NULL: tokens minted
 	// before 0066 have no issuer and never will, and D25 ruled an agent is NEVER refused at use for want of an
 	// owner — it degrades and is flagged. The refusal lives at enrolment (slice 2), on NEW nodes.
+	// ⚠ `enrolled_kind` is carried from the redeemed token. NULL is impossible for a node enrolled after 0069
+	// (the token's column is NOT NULL); a NULL here means the node predates the marker — UNDETERMINED.
 	CreateNode(ctx context.Context, arg CreateNodeParams) (Node, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	// ── policy_rules (allow grants) ─────────────────────────────────────────────────

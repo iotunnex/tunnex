@@ -119,7 +119,13 @@ func (s apiServer) IssueJoinToken(ctx context.Context, req api.IssueJoinTokenReq
 	if req.Body != nil && req.Body.NodeName != nil {
 		name = *req.Body.NodeName
 	}
-	tok, err := s.nodes.IssueJoinToken(ctx, p.UserID, req.OrgId, name)
+	// ⚠ ABSENCE IS THE CLOSED STATE — an omitted marker enrols a plain gateway. The zero value of a
+	// missing enum pointer is "", which the query COALESCEs to 'gateway'.
+	kind := ""
+	if req.Body != nil && req.Body.EnrolsKind != nil {
+		kind = string(*req.Body.EnrolsKind)
+	}
+	tok, err := s.nodes.IssueJoinToken(ctx, p.UserID, req.OrgId, name, kind)
 	if err != nil {
 		return nil, err
 	}
