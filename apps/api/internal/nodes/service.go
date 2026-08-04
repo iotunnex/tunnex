@@ -261,7 +261,7 @@ func (s *Service) IssueJoinToken(ctx context.Context, actor, orgID uuid.UUID, no
 		// before 0066 discarded its issuer to a table nobody joins against. One parameter, and it stops.
 		if _, e := q.CreateJoinToken(ctx, sqlc.CreateJoinTokenParams{
 			OrgID: orgID, NodeName: namePin, TokenHash: hash, ExpiresAt: time.Now().Add(joinTokenTTL),
-			IssuedBy: pgtype.UUID{Bytes: actor, Valid: actor != uuid.Nil},
+			IssuedBy:   pgtype.UUID{Bytes: actor, Valid: actor != uuid.Nil},
 			EnrolsKind: enrolsKind,
 		}); e != nil {
 			return e
