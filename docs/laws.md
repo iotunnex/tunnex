@@ -4247,6 +4247,35 @@ remedy.** Stating the doubt is not the same as acting on it. A cause you could n
 - **A missing artefact and a blocked artefact fail differently.** `NO Electron.app` and `Killed: 9` are not
   the same sentence, and the first was never checked.
 
+## ⛔ THE STRONGEST INSTANCE YET — AND IT CAME ONE DAY AFTER FILING THIS LAW
+
+**2026-08-04.** A host was needed for the WF-S13-7 enrolment. `azure-gw` was checked and reported **bare**:
+
+```
+docker ps -a          -> no containers
+docker volume ls      -> no tunnex volumes
+wg show interfaces    -> none
+```
+
+**All three answers were correct.** The host was nonetheless running a live gateway — `/usr/local/bin/tunnex-node`,
+pid 48233, up 7 days, holding `:53` on two addresses and an established control-plane connection, alongside an
+`openvpn` server. **`azure-gw` the SSH alias and `k8s` the node are the same machine**, and it was the gateway the
+founder's own laptop had been homed on.
+
+> ## **"NO CONTAINERS, NO VOLUMES, NO WG INTERFACES" WAS A COMPLETE AND CORRECT ANSWER TO A QUESTION**
+> ## **NOBODY ASKED.** Three container-surface checks on a host that runs the agent NATIVELY.
+
+The cost: a second agent was enrolled into one network namespace — an unapproved state — and the planned run
+would have taken a fleet-wide 10-minute certificate TTL and a control-plane partition across a **live**
+gateway that was never in the approved blast radius.
+
+**MECHANICAL — BEFORE CALLING A HOST BARE, CHECK `ps` AND `ss`, NOT JUST `docker`. A PROCESS IS NOT A
+CONTAINER.**
+- `ps aux | grep <product>` and `ss -tulpn` answer "is anything running", which is the actual question.
+- `docker ps` answers "is anything running **the way I expect it to be run**" — a narrower question that looks
+  like the same one.
+- An SSH alias is not an inventory. Confirm which node row a host owns before treating it as free.
+
 ---
 
 # ⛔ ANY CENSUS OVER SOURCE STRIPS COMMENTS FIRST — AS THE STARTING SHAPE
@@ -4448,6 +4477,24 @@ forming the verdict it is named for**, which is precisely why the guard ended up
 - ⚠ **A raw field read can bypass any function.** The degraded COUNT is
   `.filter(n => n.policy_degraded).length`; a widened signature ENABLES correct sourcing but cannot FORCE
   it. Say so rather than reporting the class closed.
+
+## ⛔ AND THE SAME SHAPE ONE LEVEL UP: A SAFETY CLAUSE REUSED WITHOUT RE-DERIVING WHAT IT PROTECTS
+
+**2026-08-04, two deletes an hour apart.** The first removed revoked walk rows and carried
+`AND status = 'revoked'` as a belt — so a mistyped id could not reach a live gateway. The second removed an
+orphaned node created by an aborted enrolment, and the row to remove **was the active one**, so the correct
+belt was `AND status = 'active'` — the exact inverse.
+
+> **A COPIED PREDICATE WOULD HAVE PROTECTED THE WRONG THING.** The guard that was correct an hour earlier
+> was, by then, precisely backwards: it would have excluded the only row the statement was meant to touch
+> while leaving the rows that must never be touched eligible.
+
+It is the caller-inherited guard one level up. There, a rule restated at each call site was remembered rather
+than enforced. Here, a rule **restated in each statement** is worse — it looks identical, so re-derivation
+feels redundant exactly when it is load-bearing.
+
+**MECHANICAL:** a safety predicate is derived from *what this statement must not touch*, never copied from the
+last one that worked. State the protected set out loud before writing the clause.
 
 ---
 
