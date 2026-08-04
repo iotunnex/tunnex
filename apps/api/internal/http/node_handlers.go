@@ -217,6 +217,13 @@ func toAPINode(n sqlc.Node) api.Node {
 		t := n.LastSeenAt.Time
 		out.LastSeenAt = &t
 	}
+	// ⛔ SERVED SO A CLIENT CAN REFUSE AN UNUSABLE CONFIG (S15.3). A gateway with no endpoint cannot be
+	// dialled; issuing a peer config for it produces `Endpoint = `, which wg-quick rejects. Without this on
+	// the wire the picker could only show a name, and the operator got a command that could never work.
+	if n.Endpoint != "" {
+		e := n.Endpoint
+		out.Endpoint = &e
+	}
 	if n.SiteID.Valid { // S8.3 D2/CH: the site binding the topology view joins on
 		sid := uuid.UUID(n.SiteID.Bytes)
 		out.SiteId = &sid

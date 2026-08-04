@@ -3420,6 +3420,13 @@ components:
             Resolved server-side from owner_user_id by LEFT JOIN on users (S15.1/D22 — the roster cannot
             name an owner who has LEFT the org, and that is exactly the row an accountability screen exists
             for). NULL when unattributable.
+        endpoint:
+          type: string
+          nullable: true
+          description: >-
+            The public host:port peers dial to reach this gateway. ⛔ EMPTY MEANS NO PEER CAN CONNECT: a
+            config issued for such a gateway carries `Endpoint = ` and wg-quick refuses it. Surfaced so a
+            client can refuse to issue an unusable config rather than emitting one.
         unattributable:
           type: boolean
           description: >-

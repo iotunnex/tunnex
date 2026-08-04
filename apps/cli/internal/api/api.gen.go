@@ -1223,9 +1223,12 @@ type MintedMachineCredential struct {
 
 // Node defines model for Node.
 type Node struct {
-	AgentVersion string             `json:"agent_version"`
-	EnrolledAt   time.Time          `json:"enrolled_at"`
-	Id           openapi_types.UUID `json:"id"`
+	AgentVersion string `json:"agent_version"`
+
+	// Endpoint The public host:port peers dial to reach this gateway. ⛔ EMPTY MEANS NO PEER CAN CONNECT: a config issued for such a gateway carries `Endpoint = ` and wg-quick refuses it. Surfaced so a client can refuse to issue an unusable config rather than emitting one.
+	Endpoint   *string            `json:"endpoint"`
+	EnrolledAt time.Time          `json:"enrolled_at"`
+	Id         openapi_types.UUID `json:"id"`
 
 	// IsSiteHub S8.3 (D2): true iff this gateway is the org's transit HUB — a PROJECTION of the ONE hub election (`electSiteHub`, the endpoint-bearing gateway with the lowest id; single hub v1). Backend-derived so the UI never re-elects the hub in TS. Absent/false for non-gateway nodes and NAT-only meshes.
 	IsSiteHub  *bool      `json:"is_site_hub,omitempty"`

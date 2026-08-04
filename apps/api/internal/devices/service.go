@@ -190,7 +190,17 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 	// S9.1 Part-2: for a STATIC export, snapshot the org's currently-approved routed ranges NOW — used
 	// for BOTH the baked config and the recorded snapshot (one truth, one query). A nil provider or a
 	// query error → no enrichment (pool-only, pre-Part-2), never a mint failure.
-	isStatic := in.Provisioning == "static"
+	// ⛔ AN AGENT IS ALWAYS A STATIC EXPORT, AND THIS IS THE LINE THAT MAKES IT REACHABLE AT ALL.
+	//
+	// A managed device runs the Tunnex client and LEARNS the org's routed ranges from the control plane. An
+	// AI agent runs `wg-quick` and polls nothing — so if its config is not enriched at issue time, its
+	// AllowedIPs is the pool alone and traffic to any destination beyond it never enters the tunnel. The
+	// grant would be correct, the policy chain would never see the packet, and the operator would be told
+	// access was granted while nothing worked.
+	//
+	// ⚠ This is the defect my own end-to-end test concealed: I added the destination route BY HAND to prove
+	// the policy leg, and in doing so supplied the very thing the product was failing to supply.
+	isStatic := in.Provisioning == "static" || in.Kind == "agent"
 	var staticRanges []string
 	var staticHasDNS bool
 	if isStatic && s.exportEnrich != nil {

@@ -761,6 +761,14 @@ type Querier interface {
 	// the product's loudest promise at the topology tier). Revoking a gateway drops it here → the derive-then-
 	// filter drops it from the active order (no blackhole) and RevokeNode's ReconcileHubSet trigger makes the
 	// configured drop durable + audited.
+	// ⛔ FORMAT, NOT PRESENCE (S15.3) — THE SAME GUARD THE DEVICE PEER PATH GOT, IN THE PATH THAT WAS MISSED.
+	// A site-link peer's key goes to `wg syncconf` exactly as a device peer's does, and syncconf is
+	// ALL-OR-NOTHING: one malformed key rejects the ENTIRE interface config, so a single bad site peer takes
+	// down every peer on that gateway, including every human device.
+	//
+	// ⚠ `<> ''` ANSWERS "IS THERE A KEY"; THE PARSER ASKS "IS THIS A KEY". The S15.2 census scoped itself to
+	// queries returning a DEVICE public_key and stopped there — but the hazard is any key reaching syncconf,
+	// and node keys reach it through here.
 	ListSiteGatewaysForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteGatewaysForOrgRow, error)
 	// S8.2 compiler input: the (site_id, node_id, endpoint) binding for every site-bound gateway in the org.
 	// The compiler places a src_kind='site' grant on the src + dst gateways AND the transit HUB (B1) — the
