@@ -1,60 +1,34 @@
 import { describe, expect, it } from "vitest";
 import {
-  agentRows, attributionNote, enrolmentKind, NO_AGENTS,
-  UNDETERMINED_DETAIL, UNDETERMINED_LABEL,
+  agentSummary, attributionNote, enrolmentKind, NO_AGENTS, sortAgents,
+  UNDETERMINED_DETAIL, UNDETERMINED_LABEL, type AgentRow,
 } from "../src/lib/agentview";
 
-const node = (o: Partial<Record<string, unknown>> = {}) => ({
-  id: String(o.id ?? "n1"),
-  name: String(o.name ?? "agent-a"),
-  status: "active",
-  agent_version: "1",
-  enrolled_at: new Date().toISOString(),
-  owner_email: "owner_email" in o ? o.owner_email : "owner@demo.tunnex.local",
-  unattributable: o.unattributable ?? false,
-}) as never;
-
-const dev = (o: Partial<Record<string, unknown>> = {}) => ({
-  id: String(o.id ?? "d1"),
-  user_id: "u1",
-  node_id: String(o.node_id ?? "n1"),
-  name: "x",
-  public_key: "k",
-  status: "active",
-  created_at: new Date().toISOString(),
-  kind: o.kind ?? "agent",
-  assigned_ip: "assigned_ip" in o ? o.assigned_ip : "10.99.0.4",
-}) as never;
-
 describe("the agent surface — S15.3", () => {
-  it("⛔ ONLY nodes with an AGENT device row are agents — a gateway is not one", () => {
-    const rows = agentRows(
-      [node({ id: "n1", name: "agent-a" }), node({ id: "n2", name: "plain-gateway" })],
-      [dev({ node_id: "n1" }), dev({ id: "d2", node_id: "n2", kind: "human" })],
-    );
-    expect(rows.map((r) => r.name)).toEqual(["agent-a"]);
+  const row = (o: Partial<AgentRow> = {}): AgentRow => ({
+    node_id: o.node_id ?? "n1",
+    name: o.name ?? "agent-a",
+    enrolment_kind: o.enrolment_kind ?? "agent",
+    owner_email: "owner_email" in o ? (o.owner_email ?? null) : "owner@demo.tunnex.local",
+    unattributable: o.unattributable ?? false,
+    address: "address" in o ? (o.address ?? null) : "10.99.0.4",
+    status: o.status ?? "active",
   });
 
-  it("⛔ AN UNATTRIBUTABLE AGENT SORTS FIRST — it is the one state found nowhere else", () => {
-    const rows = agentRows(
-      [
-        node({ id: "n1", name: "aaa-owned", unattributable: false }),
-        node({ id: "n2", name: "zzz-orphan", unattributable: true, owner_email: null }),
-      ],
-      [dev({ node_id: "n1" }), dev({ id: "d2", node_id: "n2" })],
-    );
-    // ⚠ Alphabetically 'aaa' precedes 'zzz'; the ordering must NOT depend on the name.
-    expect(rows[0].name).toBe("zzz-orphan");
-    expect(rows[0].unattributable).toBe(true);
+  it("⛔ THE TWO STATES FOUND NOWHERE ELSE SORT FIRST — unattributable, then undetermined", () => {
+    const sorted = sortAgents([
+      row({ node_id: "n1", name: "aaa-normal" }),
+      row({ node_id: "n2", name: "zzz-undetermined", enrolment_kind: "undetermined" }),
+      row({ node_id: "n3", name: "mmm-orphan", unattributable: true, owner_email: null }),
+    ]);
+    // ⚠ Neither may depend on a name: alphabetically this order would be aaa, mmm, zzz.
+    expect(sorted.map((r) => r.name)).toEqual(["mmm-orphan", "zzz-undetermined", "aaa-normal"]);
   });
 
-  it("⛔ THE ABSENCES ARE FIRST-CLASS — no owner and no address render as null, never as a guess", () => {
-    const rows = agentRows(
-      [node({ id: "n1", unattributable: true, owner_email: null })],
-      [dev({ node_id: "n1", assigned_ip: null })],
-    );
-    expect(rows[0].ownerEmail).toBeNull();
-    expect(rows[0].address).toBeNull();
+  it("⛔ THE ABSENCES ARE FIRST-CLASS — no owner and no address stay null, never a guess", () => {
+    const [r] = sortAgents([row({ owner_email: null, address: null, unattributable: true })]);
+    expect(r.owner_email).toBeNull();
+    expect(r.address).toBeNull();
   });
 
   describe("the attribution note", () => {
@@ -122,6 +96,28 @@ describe("the UNDETERMINED state — S15.3, ruled before the surface", () => {
     expect(UNDETERMINED_DETAIL).toMatch(/gap in our record/i);
     for (const fault of [/\berror\b/i, /\bfailed?\b/i, /\bbroken\b/i, /\bmisconfigur/i, /\bproblem with (this|the) node\b/i]) {
       expect(UNDETERMINED_DETAIL).not.toMatch(fault);
+    }
+  });
+});
+
+describe("the Overview card — S15.3", () => {
+  const r = (u: boolean) => ({ unattributable: u });
+
+  it("counts, and names the gap only when it exists", () => {
+    expect(agentSummary([r(false), r(false)])).toMatchObject({ total: 2, unattributable: 0, note: null });
+    const s = agentSummary([r(true), r(false), r(true)]);
+    expect(s).toMatchObject({ total: 3, unattributable: 2 });
+    expect(s.note).toMatch(/cannot be attributed to a person/i);
+  });
+
+  // ⛔ §0 BINDS HARDEST AT CARD SIZE — this is where copy gets shortened until it implies things.
+  it("⛔ the card's copy makes no detection, per-tool or health claim", () => {
+    const copy = agentSummary([r(true)]).note ?? "";
+    for (const forbidden of [
+      /\bdetect\w*/i, /\bblocks?\b/i, /\bprevent\w*/i, /\btool\b/i,
+      /\bsecure\b/i, /\bprotected\b/i, /\ball good\b/i, /\bhealthy\b/i,
+    ]) {
+      expect(copy).not.toMatch(forbidden);
     }
   });
 });

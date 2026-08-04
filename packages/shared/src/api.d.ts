@@ -546,6 +546,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List the org's AI agents (enterprise)
+         * @description S15.3 — the agents enrolled in this organization, each with the human who authorised it and whether its activity is attributable. ⛔ ENTERPRISE: the open edition receives 403 edition_required, which is a SUCCESSFUL REFUSAL — the surface renders ABSENCE, never an error. ⛔ This endpoint says which agents EXIST and who owns them. It says nothing about what they may do: reachability is set by grants on Access Policies, and per-tool control does not exist in this product.
+         */
+        get: operations["listAgents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/nodes/join-token": {
         parameters: {
             query?: never;
@@ -2588,6 +2610,23 @@ export interface components {
             /** @description PEM CA certificate */
             ca_certificate: string;
         };
+        Agent: {
+            /** Format: uuid */
+            node_id: string;
+            name: string;
+            /**
+             * @description S15.3 — what the operator DECLARED at enrolment. ⛔ THREE-VALUED, NOT A BOOLEAN. 'undetermined' means the node was enrolled before Tunnex recorded that choice, so the answer was never captured and CANNOT BE RECOVERED — it is neither 'agent' (which would repeat a defect) nor 'gateway' (which would assert a fact nobody has).
+             * @enum {string}
+             */
+            enrolment_kind: "agent" | "gateway" | "undetermined";
+            /** @description The human who authorised this agent into the org — the join token's issuer, resolved from `users` so it survives them leaving. */
+            owner_email?: string | null;
+            /** @description No owner is recorded, so activity cannot be tied to a person. ⛔ A statement about the AUDIT TRAIL, never about permission — an unattributable agent is not less authorized. */
+            unattributable: boolean;
+            /** @description The agent's own /32, which is what makes it nameable in a flow event. */
+            address?: string | null;
+            status: string;
+        };
         Node: {
             /** Format: uuid */
             id: string;
@@ -3769,6 +3808,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Node"][];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listAgents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The agents. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Agent"][];
                 };
             };
             default: components["responses"]["Error"];

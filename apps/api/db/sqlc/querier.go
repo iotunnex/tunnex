@@ -585,6 +585,19 @@ type Querier interface {
 	//   the WG fleet on a hub member). The OVPN device's /32 reaches the data plane via the compiled
 	//   artifact + the OVPN roster (which now shares the identity gate), never this list.
 	ListActiveWireGuardPeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActiveWireGuardPeersForNodeRow, error)
+	// S15.3 — the agent surface's one query.
+	//
+	// ⛔ AN AGENT IS A NODE THE OPERATOR DECLARED AS ONE, not a node that happens to have a device row. Before
+	// the marker, `allocateAgentDevice` ran on "the token had an issuer" alone, so every issuer-enrolled
+	// gateway acquired a `kind='agent'` row — which is exactly the wrong predicate to select on here.
+	//
+	// ⚠ SO THE SELECTOR IS `enrolled_kind`, AND UNDETERMINED IS INCLUDED DELIBERATELY. A node enrolled before
+	// 0069 is neither agent nor gateway; excluding it would assert a fact nobody has, and including it silently
+	// would repeat the defect. It is returned WITH ITS KIND so the surface can say what it is.
+	//
+	// lint:allow-deleted — resolves a RECORDED IDENTITY for display (same argument as ListNodeOwnerEmails):
+	// filtering `u.deleted_at` would blank the owner of an agent whose owner was soft-deleted.
+	ListAgentsForOrg(ctx context.Context, orgID uuid.UUID) ([]ListAgentsForOrgRow, error)
 	// Org-scoped audit feed with optional filters (actor / action / date range) and
 	// KEYSET pagination on (created_at, id) DESC. Every filter + cursor param is
 	// nullable, so the S4.3 dashboard passes none (latest N). The cursor is written

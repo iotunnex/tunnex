@@ -357,3 +357,27 @@ SET cert_serial = $2, cert_public_key = $3, cert_not_after = $4, agent_version =
     cert_delivered = false, cert_delivered_at = NULL
 WHERE id = $1 AND cert_serial = $6 AND status = 'active'
 RETURNING *;
+
+-- name: ListAgentsForOrg :many
+-- S15.3 — the agent surface's one query.
+--
+-- ⛔ AN AGENT IS A NODE THE OPERATOR DECLARED AS ONE, not a node that happens to have a device row. Before
+-- the marker, `allocateAgentDevice` ran on "the token had an issuer" alone, so every issuer-enrolled
+-- gateway acquired a `kind='agent'` row — which is exactly the wrong predicate to select on here.
+--
+-- ⚠ SO THE SELECTOR IS `enrolled_kind`, AND UNDETERMINED IS INCLUDED DELIBERATELY. A node enrolled before
+-- 0069 is neither agent nor gateway; excluding it would assert a fact nobody has, and including it silently
+-- would repeat the defect. It is returned WITH ITS KIND so the surface can say what it is.
+--
+-- lint:allow-deleted — resolves a RECORDED IDENTITY for display (same argument as ListNodeOwnerEmails):
+-- filtering `u.deleted_at` would blank the owner of an agent whose owner was soft-deleted.
+SELECT n.id AS node_id, n.name, n.status,
+       COALESCE(n.enrolled_kind, 'undetermined') AS enrolment_kind,
+       u.email AS owner_email,
+       d.assigned_ip AS address
+FROM nodes n
+LEFT JOIN users u ON u.id = n.owner_user_id
+LEFT JOIN devices d ON d.node_id = n.id AND d.kind = 'agent' AND d.deleted_at IS NULL
+WHERE n.org_id = $1
+  AND (n.enrolled_kind = 'agent' OR n.enrolled_kind IS NULL)
+ORDER BY (n.owner_user_id IS NULL) DESC, n.name;

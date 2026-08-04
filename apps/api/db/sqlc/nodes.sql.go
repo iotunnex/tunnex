@@ -623,6 +623,67 @@ func (q *Queries) ListActiveNodeIDsForOrg(ctx context.Context, orgID uuid.UUID) 
 	return items, nil
 }
 
+const listAgentsForOrg = `-- name: ListAgentsForOrg :many
+SELECT n.id AS node_id, n.name, n.status,
+       COALESCE(n.enrolled_kind, 'undetermined') AS enrolment_kind,
+       u.email AS owner_email,
+       d.assigned_ip AS address
+FROM nodes n
+LEFT JOIN users u ON u.id = n.owner_user_id
+LEFT JOIN devices d ON d.node_id = n.id AND d.kind = 'agent' AND d.deleted_at IS NULL
+WHERE n.org_id = $1
+  AND (n.enrolled_kind = 'agent' OR n.enrolled_kind IS NULL)
+ORDER BY (n.owner_user_id IS NULL) DESC, n.name
+`
+
+type ListAgentsForOrgRow struct {
+	NodeID        uuid.UUID `json:"node_id"`
+	Name          string    `json:"name"`
+	Status        string    `json:"status"`
+	EnrolmentKind string    `json:"enrolment_kind"`
+	OwnerEmail    *string   `json:"owner_email"`
+	Address       *string   `json:"address"`
+}
+
+// S15.3 — the agent surface's one query.
+//
+// ⛔ AN AGENT IS A NODE THE OPERATOR DECLARED AS ONE, not a node that happens to have a device row. Before
+// the marker, `allocateAgentDevice` ran on "the token had an issuer" alone, so every issuer-enrolled
+// gateway acquired a `kind='agent'` row — which is exactly the wrong predicate to select on here.
+//
+// ⚠ SO THE SELECTOR IS `enrolled_kind`, AND UNDETERMINED IS INCLUDED DELIBERATELY. A node enrolled before
+// 0069 is neither agent nor gateway; excluding it would assert a fact nobody has, and including it silently
+// would repeat the defect. It is returned WITH ITS KIND so the surface can say what it is.
+//
+// lint:allow-deleted — resolves a RECORDED IDENTITY for display (same argument as ListNodeOwnerEmails):
+// filtering `u.deleted_at` would blank the owner of an agent whose owner was soft-deleted.
+func (q *Queries) ListAgentsForOrg(ctx context.Context, orgID uuid.UUID) ([]ListAgentsForOrgRow, error) {
+	rows, err := q.db.Query(ctx, listAgentsForOrg, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentsForOrgRow{}
+	for rows.Next() {
+		var i ListAgentsForOrgRow
+		if err := rows.Scan(
+			&i.NodeID,
+			&i.Name,
+			&i.Status,
+			&i.EnrolmentKind,
+			&i.OwnerEmail,
+			&i.Address,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFailoverOrgs = `-- name: ListFailoverOrgs :many
 SELECT org_id FROM org_hub_set WHERE array_length(configured, 1) > 1
 `

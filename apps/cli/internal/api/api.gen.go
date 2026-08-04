@@ -32,6 +32,13 @@ const (
 	Terminated    AccessEventDecision = "terminated"
 )
 
+// Defines values for AgentEnrolmentKind.
+const (
+	AgentEnrolmentKindAgent        AgentEnrolmentKind = "agent"
+	AgentEnrolmentKindGateway      AgentEnrolmentKind = "gateway"
+	AgentEnrolmentKindUndetermined AgentEnrolmentKind = "undetermined"
+)
+
 // Defines values for ChangeRoleRequestRole.
 const (
 	ChangeRoleRequestRoleAdmin  ChangeRoleRequestRole = "admin"
@@ -412,6 +419,27 @@ type AffectedDevice struct {
 	Id   openapi_types.UUID `json:"id"`
 	Name string             `json:"name"`
 }
+
+// Agent defines model for Agent.
+type Agent struct {
+	// Address The agent's own /32, which is what makes it nameable in a flow event.
+	Address *string `json:"address"`
+
+	// EnrolmentKind S15.3 — what the operator DECLARED at enrolment. ⛔ THREE-VALUED, NOT A BOOLEAN. 'undetermined' means the node was enrolled before Tunnex recorded that choice, so the answer was never captured and CANNOT BE RECOVERED — it is neither 'agent' (which would repeat a defect) nor 'gateway' (which would assert a fact nobody has).
+	EnrolmentKind AgentEnrolmentKind `json:"enrolment_kind"`
+	Name          string             `json:"name"`
+	NodeId        openapi_types.UUID `json:"node_id"`
+
+	// OwnerEmail The human who authorised this agent into the org — the join token's issuer, resolved from `users` so it survives them leaving.
+	OwnerEmail *string `json:"owner_email"`
+	Status     string  `json:"status"`
+
+	// Unattributable No owner is recorded, so activity cannot be tied to a person. ⛔ A statement about the AUDIT TRAIL, never about permission — an unattributable agent is not less authorized.
+	Unattributable bool `json:"unattributable"`
+}
+
+// AgentEnrolmentKind S15.3 — what the operator DECLARED at enrolment. ⛔ THREE-VALUED, NOT A BOOLEAN. 'undetermined' means the node was enrolled before Tunnex recorded that choice, so the answer was never captured and CANNOT BE RECOVERED — it is neither 'agent' (which would repeat a defect) nor 'gateway' (which would assert a fact nobody has).
+type AgentEnrolmentKind string
 
 // AssignMachineCredentialOwnerRequest defines model for AssignMachineCredentialOwnerRequest.
 type AssignMachineCredentialOwnerRequest struct {
@@ -2026,6 +2054,9 @@ type ClientInterface interface {
 	// GetAccessLogHealth request
 	GetAccessLogHealth(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListAgents request
+	ListAgents(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListAuditLogs request
 	ListAuditLogs(ctx context.Context, orgId openapi_types.UUID, params *ListAuditLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -2968,6 +2999,18 @@ func (c *Client) ListAccessEvents(ctx context.Context, orgId openapi_types.UUID,
 
 func (c *Client) GetAccessLogHealth(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetAccessLogHealthRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListAgents(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListAgentsRequest(c.Server, orgId)
 	if err != nil {
 		return nil, err
 	}
@@ -5807,6 +5850,40 @@ func NewGetAccessLogHealthRequest(server string, orgId openapi_types.UUID) (*htt
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/organizations/%s/access-log/health", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListAgentsRequest generates requests for ListAgents
+func NewListAgentsRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/agents", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -10098,6 +10175,9 @@ type ClientWithResponsesInterface interface {
 	// GetAccessLogHealthWithResponse request
 	GetAccessLogHealthWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetAccessLogHealthResponse, error)
 
+	// ListAgentsWithResponse request
+	ListAgentsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListAgentsResponse, error)
+
 	// ListAuditLogsWithResponse request
 	ListAuditLogsWithResponse(ctx context.Context, orgId openapi_types.UUID, params *ListAuditLogsParams, reqEditors ...RequestEditorFn) (*ListAuditLogsResponse, error)
 
@@ -11198,6 +11278,29 @@ func (r GetAccessLogHealthResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r GetAccessLogHealthResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListAgentsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *[]Agent
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r ListAgentsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListAgentsResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -13702,6 +13805,15 @@ func (c *ClientWithResponses) GetAccessLogHealthWithResponse(ctx context.Context
 	return ParseGetAccessLogHealthResponse(rsp)
 }
 
+// ListAgentsWithResponse request returning *ListAgentsResponse
+func (c *ClientWithResponses) ListAgentsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListAgentsResponse, error) {
+	rsp, err := c.ListAgents(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListAgentsResponse(rsp)
+}
+
 // ListAuditLogsWithResponse request returning *ListAuditLogsResponse
 func (c *ClientWithResponses) ListAuditLogsWithResponse(ctx context.Context, orgId openapi_types.UUID, params *ListAuditLogsParams, reqEditors ...RequestEditorFn) (*ListAuditLogsResponse, error) {
 	rsp, err := c.ListAuditLogs(ctx, orgId, params, reqEditors...)
@@ -15870,6 +15982,39 @@ func ParseGetAccessLogHealthResponse(rsp *http.Response) (*GetAccessLogHealthRes
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest AccessLogHealth
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListAgentsResponse parses an HTTP response from a ListAgentsWithResponse call
+func ParseListAgentsResponse(rsp *http.Response) (*ListAgentsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListAgentsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []Agent
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
