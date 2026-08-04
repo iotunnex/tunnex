@@ -702,17 +702,53 @@ ON CONFLICT (id) DO UPDATE
 INSERT INTO machine_credentials (id, org_id, name, role, token_hash, fingerprint, created_at, last_used_at, user_id)
 VALUES
   ('019fd000-0000-7000-8000-00000000f001', '01900000-0000-7000-8000-000000000001',
-   'gitops-prod',    'operator', gen_random_bytes(32), 'fp-gitops-prod',
+   'gitops-prod',    'operator', sha256('fixture-gitops-prod'::bytea), 'fp-gitops-prod',
    now() - interval '21 days', NULL, NULL),
   ('019fd000-0000-7000-8000-00000000f002', '01900000-0000-7000-8000-000000000001',
-   'gitops-staging', 'operator', gen_random_bytes(32), 'fp-gitops-stag',
+   'gitops-staging', 'operator', sha256('fixture-gitops-staging'::bytea), 'fp-gitops-stag',
    now() - interval '9 days',  now() - interval '2 hours', NULL),
   ('019fd000-0000-7000-8000-00000000f003', '01900000-0000-7000-8000-000000000001',
-   'ci-runner',      'operator', gen_random_bytes(32), 'fp-ci-runner',
+   'ci-runner',      'operator', sha256('fixture-ci-runner'::bytea), 'fp-ci-runner',
    now() - interval '5 days',  now() - interval '11 minutes',
    (SELECT id FROM users WHERE email = 'owner@demo.tunnex.local')),
   ('019fd000-0000-7000-8000-00000000f004', '01900000-0000-7000-8000-000000000001',
-   'backup-agent',   'operator', gen_random_bytes(32), 'fp-backup-agt',
+   'backup-agent',   'operator', sha256('fixture-backup-agent'::bytea), 'fp-backup-agt',
    now() - interval '2 days',  NULL,
    (SELECT id FROM users WHERE email = 'owner@demo.tunnex.local'))
+ON CONFLICT (id) DO NOTHING;
+
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+-- S15.1 — THE ALL-OWNED ORG. The banner state, reachable FROM DATA.
+--
+-- ⛔ THE OTHER FOUR STATES LIVE IN THE DEMO ORG AND LEAVE TWO CREDENTIALS UNASSIGNED, SO THE
+-- "every machine credential has an owner" BANNER IS UNREACHABLE THERE. The component computes it with
+-- `creds.data.every(c => c.owner_user_id)`, so a single unassigned row suppresses it — which is correct,
+-- and means a second SET in the same org cannot produce the state. It needs a second ORG.
+--
+-- ⚠ AND ASSIGNING THE TWO DEMO CREDENTIALS DURING THE REVIEW IS NOT A REVIEW OF THIS STATE. That exercises
+-- the ASSIGNMENT FLOW — a different screen behaviour — and leaves the banner seen once, transiently, at the
+-- end of an interaction rather than as the screen's own answer to "is the migration done".
+--
+-- The same owner as the demo org, so one login reaches both.
+INSERT INTO organizations (id, name, slug, pool_cidr)
+VALUES ('01900000-0000-7000-8000-0000000000a1', 'Demo — migration complete', 'demo-migrated', '10.98.0.0/24')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO memberships (id, org_id, user_id, role)
+SELECT '01900000-0000-7000-8000-0000000000a2',
+       '01900000-0000-7000-8000-0000000000a1',
+       u.id, 'owner'
+FROM users u WHERE u.email = 'owner@demo.tunnex.local'
+ON CONFLICT DO NOTHING;
+
+-- BOTH owned — so `.every()` is true and the banner renders from data.
+-- ⚠ One with a last-seen and one never seen, so the banner is not accidentally coupled to that field.
+INSERT INTO machine_credentials (id, org_id, name, role, token_hash, fingerprint, created_at, last_used_at, user_id)
+SELECT v.id, '01900000-0000-7000-8000-0000000000a1', v.name, 'operator',
+       sha256(('fixture-' || v.name)::bytea), v.fp, now() - v.age, v.seen,
+       (SELECT id FROM users WHERE email = 'owner@demo.tunnex.local')
+FROM (VALUES
+  ('01900000-0000-7000-8000-0000000000b1'::uuid, 'gitops-eu',  'fp-gitops-eu',  interval '30 days', now() - interval '6 minutes'),
+  ('01900000-0000-7000-8000-0000000000b2'::uuid, 'backup-eu',  'fp-backup-eu',  interval '12 days', NULL)
+) AS v(id, name, fp, age, seen)
 ON CONFLICT (id) DO NOTHING;
