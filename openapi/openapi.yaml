@@ -3476,6 +3476,14 @@ components:
       additionalProperties: false
       properties:
         node_name: { type: string, maxLength: 100 }
+        enrols_kind:
+          type: string
+          enum: [gateway, agent]
+          description: >-
+            S15.3 — THE OPERATOR'S DECLARATION of what this token enrols. Captured at mint, the same instant
+            as the issuer, because that is the one act that says both who is accountable and what is being
+            brought online. ⛔ ABSENCE IS THE CLOSED STATE: omitted means 'gateway'. A token that enrols an
+            agent must say so, and an agent additionally requires an issuer (D14) — both conditions, not one.
 
     JoinTokenResponse:
       type: object

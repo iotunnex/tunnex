@@ -35,6 +35,16 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/wgkey"
 )
 
+// enrolKindAgent / enrolKindGateway — the OPERATOR'S DECLARATION of what a join token enrols (S15.3).
+//
+// ⛔ ABSENCE IS THE CLOSED STATE. `node_join_tokens.enrols_kind` is NOT NULL DEFAULT 'gateway', so a token
+// minted by a caller that has never heard of agents enrols a plain gateway. A nullable marker read as
+// "agent" would be the same fail-open one column over.
+const (
+	enrolKindGateway = "gateway"
+	enrolKindAgent   = "agent"
+)
+
 // ProtocolVersion is the control-plane protocol version, kept in lockstep with
 // policyspec.ProtocolVersion (TestProtocolVersionConstantsAgree). v2 (S7.5.1): rule_id.
 // v3 (S7.5.4): src_device_id — both additive + hash-invisible. v4 (S8.1 Slice 3): sites as a
@@ -231,7 +241,12 @@ func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) erro
 
 // IssueJoinToken mints a single-use enrollment token for an org, optionally
 // pinning a node name.
-func (s *Service) IssueJoinToken(ctx context.Context, actor, orgID uuid.UUID, nodeName string) (string, error) {
+// ⭐ `enrolsKind` IS THE OPERATOR'S DECLARATION — "gateway" or "agent" — and it is captured HERE, at the
+// same instant as the issuer, because minting a join token is the one act that says both who is
+// accountable and what is being brought online.
+// ⚠ An empty string means 'gateway': absence is the closed state (the query COALESCEs it), so a caller
+// that has never heard of agents cannot mint one by omission.
+func (s *Service) IssueJoinToken(ctx context.Context, actor, orgID uuid.UUID, nodeName, enrolsKind string) (string, error) {
 	raw, hash, err := newToken()
 	if err != nil {
 		return "", err
@@ -247,6 +262,7 @@ func (s *Service) IssueJoinToken(ctx context.Context, actor, orgID uuid.UUID, no
 		if _, e := q.CreateJoinToken(ctx, sqlc.CreateJoinTokenParams{
 			OrgID: orgID, NodeName: namePin, TokenHash: hash, ExpiresAt: time.Now().Add(joinTokenTTL),
 			IssuedBy: pgtype.UUID{Bytes: actor, Valid: actor != uuid.Nil},
+			EnrolsKind: enrolsKind,
 		}); e != nil {
 			return e
 		}
@@ -300,7 +316,8 @@ func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentV
 		// of an owner: it degrades and is flagged. The refusal is at ENROLMENT and lands in slice 2.
 		node, e := q.CreateNode(ctx, sqlc.CreateNodeParams{OrgID: tok.OrgID, Name: nodeName, CertSerial: iss.Serial,
 			AgentVersion: agentVersion, CertNotAfter: pgtype.Timestamptz{Time: iss.NotAfter, Valid: true},
-			CertPublicKey: spkiText(iss.PublicKeySPKI), OwnerUserID: tok.IssuedBy})
+			CertPublicKey: spkiText(iss.PublicKeySPKI), OwnerUserID: tok.IssuedBy,
+			EnrolledKind: &tok.EnrolsKind})
 		if e != nil {
 			if pgerr.IsUnique(e) {
 				return apierr.Conflict("node_exists", "a node with this name already exists")
@@ -335,7 +352,15 @@ func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentV
 		// device row, and therefore has no /32 and no attribution. That is exactly what D25(C)'s
 		// `unattributable` flag already says. The invariant and the flag agree instead of colliding: an
 		// unowned agent RUNS, and what it loses is the audit trail, not the tunnel.
-		if tok.IssuedBy.Valid {
+		// ⛔ BOTH CONDITIONS, NOT ONE REPLACING THE OTHER.
+		//
+		// The marker says this was MEANT to be an agent; the issuer says an accountable human exists. D14
+		// has not changed — an agent still needs an owner — so dropping the issuer check here would let a
+		// marked-but-unowned token produce an unattributable agent, which is precisely what D14 ended.
+		//
+		// ⚠ AND THE OLD CONDITION WAS THE DEFECT: `IssuedBy.Valid` ALONE made every issuer-enrolled gateway
+		// an agent. The marker is what the old condition was standing in for and could not express.
+		if tok.EnrolsKind == enrolKindAgent && tok.IssuedBy.Valid {
 			if e := s.allocateAgentDevice(ctx, q, tok.OrgID, uuid.UUID(tok.IssuedBy.Bytes), node.ID, nodeName); e != nil {
 				return e
 			}
