@@ -117,8 +117,17 @@ assignment surface, real work not a footnote** (a capability with no caller is u
 NULL owner AT USE, with a red** — *a nullable `user_id` IS the grandfather clause whether or not it is called
 one* · (4) contract to `NOT NULL`.
 
-**ALL SEVEN DECIDE-ITEMS RULED. NOTHING HELD.** Owed before any slice: which enforcement point step 3 uses,
-and what an admin sees in step 2.
+**ALL SEVEN DECIDE-ITEMS RULED. NOTHING HELD.** Owed before any slice — **D14/D19 work, not S15.1**: which
+enforcement point step 3 uses, and what an admin sees in step 2.
+
+**`AuthMethod` MEASURED (2026-08-04), out of the unverified list.** `authctx.Principal.AuthMethod`
+(`authctx/authctx.go:42`) ∈ {`AuthLocalPassword`, `AuthSSO`, `AuthBearer`, `AuthMachine`, `""`}; stamped at
+mint and immutable (S7.5.5 confirmed). ⛔ **Consulted in EXACTLY ONE place and it is NOT an authorization
+decision** — the MFA-enrollment gate (`mfa_enforce_handlers.go:124`). **No permission check reads it**, so an
+agent's auth-method is an MFA-exemption discriminator, `AuthMachine` already exists exempt-by-construction,
+and **D4 is unaffected by it.** ⚠ The first search failed because it was aimed at `internal/authn`, which does
+not exist — *an absence found by one encoding is not an absence.* **Four unverified items remain, including
+the pass itself.**
 
 **§2 written against sources, not memory** — Teleport enforces on `tools/call` **and** filters `tools/list`
 (nothing stops a client calling an unlisted tool), and their SHIPPED default is deny-if-unspecified, the
