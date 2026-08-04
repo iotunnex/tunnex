@@ -9,7 +9,7 @@ import { Badge, Button, Card, Field, Input } from "../components/ui";
 // ⛔ THE SAME COMMAND BUILDER THE GATEWAY CEREMONY USES — imported, never re-implemented. Two places
 // emitting enrolment commands is the one-truth risk the founder refused shape C over; what makes this an
 // agent enrolment is the TOKEN's marker, not a different command.
-import { enrollCommand } from "../components/Gateways";
+import { cpEndpoints, GATEWAY_IMAGE, remoteEnrollCommand } from "../components/Gateways";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
 
 /**
@@ -32,12 +32,32 @@ export default function Agents() {
   // The enrolment ceremony — mint a MARKED token, show the command once.
   const [name, setName] = useState("");
   const [token, setToken] = useState<string | null>(null);
+  // The name the token was PINNED to — the emitted command must carry it, or the agent enrols under its
+  // hostname and the server refuses the pinned token under any other name.
+  const [pinnedName, setPinnedName] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  // ⛔ THE CP'S OWN CONFIGURED PUBLIC URL, NOT window.location. The emitted command runs on someone else's
+  // host; a URL taken from the browser is the dashboard's address, which need not be reachable from there.
+  const [meta, setMeta] = useState<{ public_base_url?: string; node_agent_image?: string } | null>(null);
+  useEffect(() => {
+    void api.GET("/api/v1/meta").then(({ data }) => data && setMeta(data as typeof meta));
+  }, []);
+
+  const ep = cpEndpoints(meta?.public_base_url, window.location.origin);
 
   async function enrol() {
     if (!orgId) return;
+    // ⛔ BLOCK THE MINT IF THE CP'S PUBLIC URL IS UNUSABLE. A join token is SINGLE-USE: minting one against
+    // a broken URL burns it and hands the operator a command that cannot work — worse than refusing, and
+    // the refusal names the cause. Same rule the gateway ceremony applies.
+    if (!ep.ok) {
+      setErr(
+        `The control plane's public URL is not usable, so an enrolment command would not work: ${ep.reason}. Fix it in Org Settings, then enrol.`,
+      );
+      return;
+    }
     setBusy(true);
     setErr(null);
     // ⛔ enrols_kind: "agent" IS THE WHOLE DIFFERENCE. Same endpoint, same ceremony, same emitted command —
@@ -55,6 +75,7 @@ export default function Agents() {
       return;
     }
     setToken((data as { join_token: string }).join_token);
+    setPinnedName(name.trim() || null);
     setName("");
     setReload((n) => n + 1);
   }
@@ -227,8 +248,28 @@ export default function Agents() {
               the agent. Shown <span className="font-semibold">exactly once</span>, single-use: copy it now.
             </>
           }
-          secret={enrollCommand(token, null)}
-          onDismiss={() => setToken(null)}
+          // ⛔ THE SELF-CONTAINED `docker run`, NOT THE COMPOSE LINE. An agent runs on whatever host runs
+          // the AI workload — that host has no `tunnex.yml`, so a `docker compose -f tunnex.yml` command
+          // is uncopyable there. This is the same builder the remote-gateway ceremony uses, and its own
+          // note records why: a multi-line/compose form LOOKS copyable and was mis-pasted twice in the
+          // cross-cloud demo.
+          secret={remoteEnrollCommand({
+            token,
+            name: pinnedName,
+            endpoint: null,
+            apiURL: ep.ok ? ep.apiURL : "",
+            agentURL: ep.ok ? ep.agentURL : "",
+            serverName: ep.ok ? ep.serverName : "",
+            image:
+              meta?.node_agent_image && meta.node_agent_image.trim()
+                ? meta.node_agent_image.trim()
+                : GATEWAY_IMAGE,
+          })}
+          copyLabel="Copy command"
+          onDismiss={() => {
+            setToken(null);
+            setPinnedName(null);
+          }}
         />
       )}
       {orgId === null && <span className="sr-only">no organization</span>}
