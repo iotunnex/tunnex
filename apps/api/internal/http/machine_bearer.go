@@ -1,11 +1,13 @@
 package http
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
@@ -20,7 +22,18 @@ import (
 // EXISTING authorize()/RoleIn plumbing applies unchanged; it has NO UserID (a non-human is out of the
 // identity-binding subject space, D4), and its downstream mutations attribute to a SYSTEM actor
 // (authctx.Principal.AuditActor).
-func MachineAuth(q *sqlc.Queries) BearerAuthFunc {
+// machineCredStore is the narrow slice of the query layer this seam actually uses.
+//
+// ⛔ NARROWED SO THE SEAM CAN BE PROVED. It took *sqlc.Queries — a concrete type — which made the refusal arm
+// untestable by construction, and THAT is why S15.1a's third mutation could remove the arm and still pass:
+// the only reachable proof was the constructor's. A guard that cannot be exercised on its own is a guard
+// nobody has shown can fail.
+type machineCredStore interface {
+	GetMachineCredentialByHash(ctx context.Context, tokenHash []byte) (sqlc.MachineCredential, error)
+	TouchMachineCredentialUsed(ctx context.Context, id uuid.UUID) error
+}
+
+func MachineAuth(q machineCredStore) BearerAuthFunc {
 	return func(r *http.Request) (*authctx.Principal, error) {
 		raw, ok := machineToken(r)
 		if !ok {

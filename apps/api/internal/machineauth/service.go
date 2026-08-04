@@ -121,6 +121,39 @@ func (s *Service) List(ctx context.Context, orgID uuid.UUID) ([]sqlc.MachineCred
 	return s.q.ListMachineCredentialsForOrg(ctx, orgID)
 }
 
+// AssignOwner names the HUMAN a machine credential acts for (S15.1, D14/D19 step 2).
+//
+// ⛔ THE ADMIN IS CHOOSING, NOT CONFIRMING. There is no `created_by` on this table, so the minting user is not
+// recoverable from the row — nothing here derives, suggests or defaults an owner. The statement itself scopes
+// the user to the credential's org through `memberships` (users has no org_id), so a cross-org pair updates
+// ZERO rows rather than succeeding quietly.
+//
+// Audited as the HUMAN who assigned, with both the credential and the new owner in the metadata: this is the
+// act that decides whose cap the credential spends and whose name rides the delegation link, so an
+// unattributed assignment would be the missing-audit-write class in a new place.
+func (s *Service) AssignOwner(ctx context.Context, orgID, actor, credID, ownerID uuid.UUID) (bool, error) {
+	var assigned bool
+	err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		n, e := q.AssignMachineCredentialOwner(ctx, sqlc.AssignMachineCredentialOwnerParams{
+			ID: credID, OrgID: orgID, UserID: pgUUID(ownerID),
+		})
+		if e != nil {
+			return e
+		}
+		// Zero rows is NOT success. It means the credential is missing/revoked, OR the user is not a live
+		// member of this org — deliberately indistinguishable to the caller (no oracle for which).
+		assigned = n > 0
+		if !assigned {
+			return nil
+		}
+		return audit(ctx, q, orgID, actor, "machine_credential.owner_assigned", map[string]any{
+			"credential_id": credID.String(),
+			"owner_user_id": ownerID.String(),
+		})
+	})
+	return assigned, err
+}
+
 // ---- helpers ----------------------------------------------------------------
 
 func newSecret(prefix string) (string, []byte, error) {
