@@ -144,3 +144,36 @@ person's starting assumption.
 **The DISTRIBUTION gate above is unaffected and stands on its own measurements** (no identity, no
 notarization, no entitlements, no hardened runtime). **The development claim needs a reproduction on a
 verified tree before it goes back in.**
+
+
+---
+
+## ⚠ 4 — `devices.user_id` IS `ON DELETE CASCADE` WHILE `machine_credentials.user_id` IS `ON DELETE RESTRICT`
+
+**Status: OPEN, carried KNOWINGLY. Ruled out of S15.2's scope 2026-08-04; registered so it is not discovered
+by whoever deletes a user.**
+
+| table | FK action | citation |
+| --- | --- | --- |
+| `devices` | **`ON DELETE CASCADE`** — *"owner; no unowned peers"* | `0010_devices.up.sql:11` |
+| `machine_credentials` | **`ON DELETE RESTRICT`** | `0065_machine_credential_owner.up.sql` |
+
+> ## **THE TWO TABLES ARE NOT PERMITTED TO DISAGREE ABOUT WHAT AN OWNER'S DELETION MEANS.** One says
+> ## *deleting a user silently deletes what they owned*; the other says *deleting a user is refused while
+> ## they own anything*. Both are defensible. **Holding both is not a position, it is an accident.**
+
+⚠ **The direction is not neutral.** RESTRICT is the deliberate S15.1 choice, made against the S14.12 cascade
+class (*we ruled on a delete without asking what cascades*). **`devices` is the one out of step.**
+
+### ⛔ AND S15.2 MAKES IT REACHABLE ON THE DATA PLANE
+
+S15.2 ruled that an **agent is a `devices` row**, so an agent inherits **CASCADE**. **Deleting a user
+silently deletes every agent they enrolled** — and an agent is a gateway, so that is **a tunnel that
+disappears**, not a credential that stops working.
+
+⚠ **D25 does not cover this and must not be read as covering it.** D25 rules that an agent is never *refused
+at use* for an ownership reason. It says nothing about an agent being **deleted out from under a running
+tunnel by a `DELETE` on `users`.** **Two different doors; D25 closed one.**
+
+**Not fixed here by ruling** — changing a long-shipped FK on `devices` is its own change with its own blast
+radius. Registered so the divergence is carried deliberately.
