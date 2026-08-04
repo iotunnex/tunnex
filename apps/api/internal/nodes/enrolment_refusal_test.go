@@ -1,6 +1,10 @@
 package nodes
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 // ⛔ THE RULE IS TESTED SEPARATELY FROM ITS ARMING, AND THAT SEPARATION IS THE POINT.
 //
@@ -22,26 +26,71 @@ func TestRefusalRuleBothDirections(t *testing.T) {
 	}
 }
 
-// TestRefusalIsUnarmedAndSaysSo pins the shipped state, so arming is a DELIBERATE act rather than a drift.
+// TestRefusalIsArmed — ⭐ THE ASSERTION THAT HAS NEVER RUN UNTIL NOW, AND THAT WAS THE DESIGN.
 //
-// ⚠ THIS TEST IS EXPECTED TO BE EDITED — that is its job. The commit that arms the refusal must change this
-// file, which makes the arming visible in a diff and impossible to do by accident. A constant with no test
-// can be flipped in a one-line commit nobody notices; this one cannot.
-func TestRefusalIsUnarmedAndSaysSo(t *testing.T) {
-	if EnrolmentRefusalArmed() {
-		t.Fatal("the enrolment refusal must ship UNARMED until the D14 restore proof is discharged " +
-			"(docs/S15.0-decisions.md §15): one credential, three states, on the wire — " +
-			"refused → assigned → authenticates. Arming it before then ships a refusal whose cure has " +
-			"never been watched working, on a data plane.")
+// While the constant was false, this file's other test exercised the RULE (`RefusalWouldFire`) and the gate
+// (`RefuseUnownedEnrolment`) returned false for every input — so nothing here had ever asserted the armed
+// path. That separation is precisely what made arming a boolean flip over a proven implementation instead
+// of a leap of faith, and this is where it pays.
+//
+// ⛔ THE LICENCE IS THE D14 RESTORE PROOF, DISCHARGED ON THE WIRE at EPIC 15 walk Leg 1
+// (`walk-artifacts/EPIC-15-leg1-leg4.md`): 401 refused → 204 assign → 200 authenticates, same token, same
+// call, with a control proving the flip was ownership and not the endpoint.
+func TestRefusalIsArmed(t *testing.T) {
+	if !EnrolmentRefusalArmed() {
+		t.Fatal("the enrolment refusal is ARMED as of the D14 restore proof's discharge (EPIC 15 walk Leg 1). " +
+			"If this is being disarmed, say why in the commit — a refusal that goes back to sleep needs a " +
+			"reason as explicit as the one that woke it.")
 	}
-	// Unarmed means the gate returns false REGARDLESS of the rule — both inputs, so this cannot pass by
-	// accidentally agreeing with the rule on one of them.
-	if RefuseUnownedEnrolment(false) || RefuseUnownedEnrolment(true) {
-		t.Fatal("while unarmed, no enrolment may be refused for want of an owner")
+}
+
+// TestArmedGateRefusesUnownedAndAdmitsOwned — ⛔ BOTH DIRECTIONS THROUGH THE GATE, NOT THE RULE.
+//
+// The rule is tested separately above. This is the GATE — arming composed with the rule — and it is the
+// thing that now actually runs in production.
+//
+// ⚠ THE SECOND HALF IS WHY THE FIRST MEANS ANYTHING. An armed gate that refused EVERYTHING would pass the
+// refusal assertion and would brick every enrolment in the product, including every owned one. That is a
+// worse outcome than the defect the refusal exists to prevent, and it is one boolean away at all times.
+func TestArmedGateRefusesUnownedAndAdmitsOwned(t *testing.T) {
+	if !RefuseUnownedEnrolment(false) {
+		t.Fatal("ARMED: an enrolment with NO owner must be REFUSED")
 	}
-	// ⛔ AND THE RULE UNDERNEATH IS STILL CORRECT WHILE UNARMED — the thing that will be switched on is
-	// known-good, which is the entire reason for building it now rather than later.
-	if !RefusalWouldFire(false) || RefusalWouldFire(true) {
-		t.Fatal("the rule must remain correct while unarmed, or arming it later is a leap of faith")
+	if RefuseUnownedEnrolment(true) {
+		t.Fatal("ARMED: an enrolment WITH an owner must still SUCCEED — a gate that refuses everything is " +
+			"not a guard, it is an outage")
+	}
+}
+
+// ⛔ AND THE GATE MUST BE CALLED, WHICH IS A DIFFERENT CLAIM FROM THE GATE BEING CORRECT.
+//
+// Arming `enrolmentRefusalArmed` changed nothing on its own: `RefuseUnownedEnrolment` had **zero call
+// sites**. A guard that is armed, tested in both directions, mutation-proven — and never invoked — is the
+// dormant-machinery law wearing a passing test suite.
+//
+// > **THE WHO-READS-THIS PROBE APPLIES TO GUARDS, NOT ONLY TO CHANNEL FIELDS.** Name the caller and cite the
+// > line, or the guard is decoration.
+//
+// This test reads the enrolment path's source and fails if the call disappears — a rename or a refactor that
+// drops it is caught here rather than by an unowned agent appearing in production.
+func TestEnrolmentPathActuallyCallsTheGate(t *testing.T) {
+	b, err := os.ReadFile("service.go")
+	if err != nil {
+		t.Fatalf("read service.go: %v", err)
+	}
+	src := string(b)
+	if !strings.Contains(src, "RefuseUnownedEnrolment(") {
+		t.Fatal("the enrolment path does not call RefuseUnownedEnrolment — the refusal is armed and " +
+			"UNREACHABLE, which is worse than unarmed: the constant claims a protection nothing applies")
+	}
+	// ⚠ AND IT MUST BE INSIDE Enroll, not merely somewhere in the file. A call in an unrelated function
+	// would satisfy the check above while leaving enrolment ungated.
+	enroll := src[strings.Index(src, "func (s *Service) Enroll("):]
+	if end := strings.Index(enroll, "\nfunc "); end > 0 {
+		enroll = enroll[:end]
+	}
+	if !strings.Contains(enroll, "RefuseUnownedEnrolment(") {
+		t.Fatal("RefuseUnownedEnrolment is called, but NOT inside Enroll — the gate is on a path that " +
+			"enrolment does not take")
 	}
 }
