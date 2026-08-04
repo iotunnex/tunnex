@@ -94,6 +94,11 @@ func (s apiServer) CreateDevice(ctx context.Context, req api.CreateDeviceRequest
 	if req.Body.Platform != nil {
 		in.Platform = *req.Body.Platform
 	}
+	// S15.3 — an AI agent is enrolled as a peer on a gateway. The only difference from a laptop is the
+	// kind, which carries the cap exemption and makes the agent grantable as a policy source.
+	if req.Body.Kind != nil {
+		in.Kind = string(*req.Body.Kind)
+	}
 	if req.Body.PublicKey != nil {
 		in.PublicKey = *req.Body.PublicKey
 	}

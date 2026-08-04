@@ -30,21 +30,18 @@ func (s apiServer) ListAgents(ctx context.Context, req api.ListAgentsRequestObje
 	}
 	out := make([]api.Agent, 0, len(rows))
 	for _, r := range rows {
-		// ⛔ THE KIND IS THREE-VALUED. A boolean here would force UNDETERMINED into one of the other two,
-		// which is the failure the ruling exists to prevent: 'gateway' asserts a fact nobody has, 'agent'
-		// repeats the defect the marker was built to fix.
 		a := api.Agent{
-			NodeId:        r.NodeID,
-			Name:          r.Name,
-			Status:        r.Status,
-			EnrolmentKind: api.AgentEnrolmentKind(r.EnrolmentKind),
-			// ⚠ Unattributable is derived from the OWNER, never from the email lookup — an owner who exists
-			// but cannot be resolved is still attributable, and blaming the join for the fact would be a
-			// second source of truth for one question.
+			DeviceId:       r.DeviceID,
+			Name:           r.Name,
+			NodeId:         &r.NodeID,
+			GatewayName:    r.GatewayName,
+			Status:         r.Status,
 			Unattributable: r.OwnerEmail == nil,
 		}
 		a.OwnerEmail = r.OwnerEmail
 		a.Address = r.Address
+		connected := r.PublicKey != ""
+		a.Connected = &connected
 		out = append(out, a)
 	}
 	return api.ListAgents200JSONResponse{Body: out, Headers: api.ListAgents200ResponseHeaders{XRequestId: reqID(ctx)}}, nil

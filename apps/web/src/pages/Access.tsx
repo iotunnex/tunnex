@@ -1079,7 +1079,7 @@ function RuleFormModal({
   // ⛔ S15.3 — agents enrolled in this org, offered as a policy SOURCE. Without this the AI-agents screen
   // says an agent "reaches only what it is granted" and nothing could grant it anything: a capability the
   // product had and the operator could not reach.
-  const [agents, setAgents] = useState<Array<{ node_id: string; name: string; enrolment_kind: string }>>([]);
+  const [agents, setAgents] = useState<Array<{ device_id: string; name: string; gateway_name: string }>>([]);
   const [srcAgent, setSrcAgent] = useState("");
   // ⚠ Enterprise-only endpoint: a 403 is a SUCCESSFUL refusal, so the list simply stays empty and the
   // "AI agent" option is never offered. It must not surface as an error in a rule dialog.
@@ -1089,7 +1089,7 @@ function RuleFormModal({
       .GET("/api/v1/organizations/{orgId}/agents", { params: { path: { orgId } } })
       .then(({ data, error }) => {
         if (cancelled || error || !data) return;
-        setAgents(data as Array<{ node_id: string; name: string; enrolment_kind: string }>);
+        setAgents(data as Array<{ device_id: string; name: string; gateway_name: string }>);
       })
       .catch(() => {});
     return () => {
@@ -1281,19 +1281,17 @@ function RuleFormModal({
               )}
             </Select>
           </Field>
-          {/* ⛔ ONLY DECLARED AGENTS ARE OFFERED. A node whose enrolment kind was never recorded is
-              UNDETERMINED — granting to it would assert it is an agent, which is the fact nobody has. */}
+          {/* ⚠ THE GATEWAY IS SHOWN BESIDE THE NAME because two agents may share a name across gateways,
+              and the grant matches ONE device — the operator must be able to tell which. */}
           {srcKind === "agent" && (
             <Field label="Source agent">
               <Select value={srcAgent} onChange={(e) => setSrcAgent(e.target.value)}>
                 <option value="">Choose an agent…</option>
-                {agents
-                  .filter((a) => a.enrolment_kind === "agent")
-                  .map((a) => (
-                    <option key={a.node_id} value={a.node_id}>
-                      {a.name}
-                    </option>
-                  ))}
+                {agents.map((a) => (
+                  <option key={a.device_id} value={a.device_id}>
+                    {a.name} (via {a.gateway_name})
+                  </option>
+                ))}
               </Select>
             </Field>
           )}

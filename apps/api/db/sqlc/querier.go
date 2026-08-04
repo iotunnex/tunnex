@@ -587,16 +587,12 @@ type Querier interface {
 	ListActiveWireGuardPeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListActiveWireGuardPeersForNodeRow, error)
 	// S15.3 — the agent surface's one query.
 	//
-	// ⛔ AN AGENT IS A NODE THE OPERATOR DECLARED AS ONE, not a node that happens to have a device row. Before
-	// the marker, `allocateAgentDevice` ran on "the token had an issuer" alone, so every issuer-enrolled
-	// gateway acquired a `kind='agent'` row — which is exactly the wrong predicate to select on here.
+	// ⛔ AN AGENT IS A PEER HOMED ON A GATEWAY, NOT A GATEWAY. It holds its own /32, its traffic is FORWARDED
+	// through the gateway it is homed on, and the policy chain therefore sees it. A gateway would be the thing
+	// traffic passes THROUGH — nothing it originates is ever forwarded, so no grant could ever match it.
 	//
-	// ⚠ SO THE SELECTOR IS `enrolled_kind`, AND UNDETERMINED IS INCLUDED DELIBERATELY. A node enrolled before
-	// 0069 is neither agent nor gateway; excluding it would assert a fact nobody has, and including it silently
-	// would repeat the defect. It is returned WITH ITS KIND so the surface can say what it is.
-	//
-	// lint:allow-deleted — resolves a RECORDED IDENTITY for display (same argument as ListNodeOwnerEmails):
-	// filtering `u.deleted_at` would blank the owner of an agent whose owner was soft-deleted.
+	// lint:allow-deleted — resolves a RECORDED IDENTITY for display: filtering u.deleted_at would blank the
+	// owner of an agent whose owner was soft-deleted.
 	ListAgentsForOrg(ctx context.Context, orgID uuid.UUID) ([]ListAgentsForOrgRow, error)
 	// Org-scoped audit feed with optional filters (actor / action / date range) and
 	// KEYSET pagination on (created_at, id) DESC. Every filter + cursor param is

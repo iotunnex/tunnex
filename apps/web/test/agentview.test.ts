@@ -1,28 +1,27 @@
 import { describe, expect, it } from "vitest";
 import {
-  agentSummary, attributionNote, enrolmentKind, NO_AGENTS, sortAgents,
-  UNDETERMINED_DETAIL, UNDETERMINED_LABEL, type AgentRow,
+  agentConnectCommand, agentSummary, attributionNote, NO_AGENTS, sortAgents, type AgentRow,
 } from "../src/lib/agentview";
 
 describe("the agent surface — S15.3", () => {
   const row = (o: Partial<AgentRow> = {}): AgentRow => ({
-    node_id: o.node_id ?? "n1",
+    device_id: o.device_id ?? "d1",
     name: o.name ?? "agent-a",
-    enrolment_kind: o.enrolment_kind ?? "agent",
     owner_email: "owner_email" in o ? (o.owner_email ?? null) : "owner@demo.tunnex.local",
     unattributable: o.unattributable ?? false,
     address: "address" in o ? (o.address ?? null) : "10.99.0.4",
+    gateway_name: o.gateway_name ?? "gw-1",
     status: o.status ?? "active",
   });
 
-  it("⛔ THE TWO STATES FOUND NOWHERE ELSE SORT FIRST — unattributable, then undetermined", () => {
+  it("⛔ UNATTRIBUTABLE SORTS FIRST — the one state found nowhere else", () => {
     const sorted = sortAgents([
-      row({ node_id: "n1", name: "aaa-normal" }),
-      row({ node_id: "n2", name: "zzz-undetermined", enrolment_kind: "undetermined" }),
-      row({ node_id: "n3", name: "mmm-orphan", unattributable: true, owner_email: null }),
+      row({ device_id: "d1", name: "aaa-normal" }),
+      row({ device_id: "d2", name: "zzz-normal" }),
+      row({ device_id: "d3", name: "mmm-orphan", unattributable: true, owner_email: null }),
     ]);
-    // ⚠ Neither may depend on a name: alphabetically this order would be aaa, mmm, zzz.
-    expect(sorted.map((r) => r.name)).toEqual(["mmm-orphan", "zzz-undetermined", "aaa-normal"]);
+    // ⚠ Must not depend on a name: alphabetically this order would be aaa, mmm, zzz.
+    expect(sorted.map((r) => r.name)).toEqual(["mmm-orphan", "aaa-normal", "zzz-normal"]);
   });
 
   it("⛔ THE ABSENCES ARE FIRST-CLASS — no owner and no address stay null, never a guess", () => {
@@ -72,34 +71,6 @@ describe("the agent surface — S15.3", () => {
 //
 // > **"UNKNOWN" SOFTENING INTO "NONE" IS EXACTLY HOW THE PHRASE WOULD DRIFT INTO A VERDICT** — one is an
 // > absence of knowledge, the other is a claim about the world.
-describe("the UNDETERMINED state — S15.3, ruled before the surface", () => {
-  it("⛔ THREE STATES, NOT TWO — a boolean would force undetermined into one of the others", () => {
-    expect(enrolmentKind({ enrolled_kind: "agent" })).toBe("agent");
-    expect(enrolmentKind({ enrolled_kind: "gateway" })).toBe("gateway");
-    // NULL and absent both mean undetermined — a pre-marker node, and a payload that omits the field.
-    expect(enrolmentKind({ enrolled_kind: null })).toBe("undetermined");
-    expect(enrolmentKind({})).toBe("undetermined");
-  });
-
-  it("⛔ THE COPY SAYS WE DO NOT KNOW — never that there is nothing", () => {
-    const copy = `${UNDETERMINED_LABEL} ${UNDETERMINED_DETAIL}`;
-    expect(copy).toMatch(/do not know/i);
-    expect(copy).toMatch(/cannot be recovered/i);
-    // ⛔ NOT A VERDICT. These are the words it must never drift into.
-    for (const verdict of [/\bnone\b/i, /\bnot an agent\b/i, /\bno agent\b/i, /\bis a gateway\b/i]) {
-      expect(copy).not.toMatch(verdict);
-    }
-  });
-
-  it("⚠ AND IT MUST NOT READ AS A FAULT — the gap is in our record, not in the node", () => {
-    expect(UNDETERMINED_DETAIL).toMatch(/working normally/i);
-    expect(UNDETERMINED_DETAIL).toMatch(/gap in our record/i);
-    for (const fault of [/\berror\b/i, /\bfailed?\b/i, /\bbroken\b/i, /\bmisconfigur/i, /\bproblem with (this|the) node\b/i]) {
-      expect(UNDETERMINED_DETAIL).not.toMatch(fault);
-    }
-  });
-});
-
 describe("the Overview card — S15.3", () => {
   const r = (u: boolean) => ({ unattributable: u });
 
@@ -119,5 +90,26 @@ describe("the Overview card — S15.3", () => {
     ]) {
       expect(copy).not.toMatch(forbidden);
     }
+  });
+});
+
+describe("the connect command — S15.3", () => {
+  const conf = "[Interface]\nPrivateKey = k+ey/with$dollar=\nAddress = 10.99.0.7/32\n";
+
+  it("⛔ ONE COMMAND, not a file to save and then a command to run", () => {
+    const c = agentConnectCommand(conf);
+    expect(c).toMatch(/tee \/etc\/wireguard\/tunnex\.conf/);
+    expect(c).toMatch(/wg-quick up tunnex/);
+  });
+
+  it("⛔ THE HEREDOC IS QUOTED — an unquoted one would let the shell mangle a key containing $", () => {
+    const c = agentConnectCommand(conf);
+    expect(c).toContain("<<'TUNNEXEOF'");
+    // the key survives verbatim
+    expect(c).toContain("k+ey/with$dollar=");
+  });
+
+  it("⚠ the config is chmod 600 — a private key must not be world-readable", () => {
+    expect(agentConnectCommand(conf)).toMatch(/chmod 600/);
   });
 });

@@ -279,16 +279,16 @@ func (s apiServer) CreatePolicyRule(ctx context.Context, req api.CreatePolicyRul
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
 	in := policyspec.RuleInput{
-		SrcUserID:       req.Body.SrcUserId,
-		SrcSiteID:       req.Body.SrcSiteId, // S8.2: src_kind=site
-		SrcCIDR:         req.Body.SrcCidr,   // S8.7: src_kind=cidr
-		SrcNodeID:       req.Body.SrcNodeId, // S15.3: src_kind=agent
-		DstKind:         string(req.Body.DstKind),
-		DstResourceID:   req.Body.DstResourceId,
-		DstGroupID:      req.Body.DstGroupId,
-		DstSiteID:       req.Body.DstSiteId,       // S8.1: dst_kind=site
-		DstK8sServiceID: req.Body.DstK8sServiceId, // S10.3: dst_kind=k8s_service
-		ExpiresAt:       req.Body.ExpiresAt,
+		SrcUserID:        req.Body.SrcUserId,
+		SrcSiteID:        req.Body.SrcSiteId,   // S8.2: src_kind=site
+		SrcCIDR:          req.Body.SrcCidr,     // S8.7: src_kind=cidr
+		SrcAgentDeviceID: req.Body.SrcDeviceId, // S15.3: src_kind=agent
+		DstKind:          string(req.Body.DstKind),
+		DstResourceID:    req.Body.DstResourceId,
+		DstGroupID:       req.Body.DstGroupId,
+		DstSiteID:        req.Body.DstSiteId,       // S8.1: dst_kind=site
+		DstK8sServiceID:  req.Body.DstK8sServiceId, // S10.3: dst_kind=k8s_service
+		ExpiresAt:        req.Body.ExpiresAt,
 	}
 	if req.Body.SrcKind != nil {
 		in.SrcKind = string(*req.Body.SrcKind)
@@ -504,9 +504,9 @@ func toAPIRule(r sqlc.PolicyRule, cidrOutside, k8sVanished bool) api.PolicyRule 
 		u := uuid.UUID(r.SrcSiteID.Bytes)
 		out.SrcSiteId = &u
 	}
-	if r.SrcNodeID.Valid { // S15.3: src_kind=agent
-		n := uuid.UUID(r.SrcNodeID.Bytes)
-		out.SrcNodeId = &n
+	if r.SrcDeviceID.Valid { // S15.3: src_kind=agent
+		n := uuid.UUID(r.SrcDeviceID.Bytes)
+		out.SrcDeviceId = &n
 	}
 	if r.SrcCidr != nil { // S8.7: src_kind=cidr
 		out.SrcCidr = r.SrcCidr

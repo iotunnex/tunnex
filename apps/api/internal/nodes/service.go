@@ -340,31 +340,17 @@ func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentV
 					"issue a new join token and enrol with that")
 		}
 
-		// ⛔ THE AGENT IS ADDRESS-BEARING (D15), AND THE ADDRESS IS A `devices` ROW (rank-3 ruled).
+		// ⛔ A GATEWAY ENROLMENT NO LONGER CREATES AN "AGENT" (S15.3, corrected).
 		//
-		// Attribution rides the artifact's /32→device map (`accesslog/ingest.go:40-75`). A principal design
-		// that avoids the /32 goes dark on attribution SILENTLY — no error, no gap, and the flow log will
-		// not complain. Reusing `devices` means the agent lands in that map by construction rather than
-		// through a parallel implementation, and inherits the revocation full-sweep unchanged.
+		// It used to allocate a kind='agent' device row here, which made every issuer-enrolled gateway an
+		// agent — and, worse, made the agent a GATEWAY. A gateway is what traffic passes THROUGH; nothing it
+		// originates is ever forwarded, so no grant could ever match it and the address was held by nothing.
 		//
-		// ⚠ ONLY FOR AN OWNED AGENT, AND THAT IS NOT A LIMITATION — IT IS THE DEGRADED STATE MADE CONCRETE.
-		// `devices.user_id` is NOT NULL ("owner; no unowned peers"), so an agent with no owner CANNOT have a
-		// device row, and therefore has no /32 and no attribution. That is exactly what D25(C)'s
-		// `unattributable` flag already says. The invariant and the flag agree instead of colliding: an
-		// unowned agent RUNS, and what it loses is the audit trail, not the tunnel.
-		// ⛔ BOTH CONDITIONS, NOT ONE REPLACING THE OTHER.
+		// > AN AGENT IS A PEER. It is enrolled through the DEVICE path, homed on a gateway, with its own /32
+		// > and a config it dials in with — which is what puts it in front of the policy chain at all.
 		//
-		// The marker says this was MEANT to be an agent; the issuer says an accountable human exists. D14
-		// has not changed — an agent still needs an owner — so dropping the issuer check here would let a
-		// marked-but-unowned token produce an unattributable agent, which is precisely what D14 ended.
-		//
-		// ⚠ AND THE OLD CONDITION WAS THE DEFECT: `IssuedBy.Valid` ALONE made every issuer-enrolled gateway
-		// an agent. The marker is what the old condition was standing in for and could not express.
-		if tok.EnrolsKind == enrolKindAgent && tok.IssuedBy.Valid {
-			if e := s.allocateAgentDevice(ctx, q, tok.OrgID, uuid.UUID(tok.IssuedBy.Bytes), node.ID, nodeName); e != nil {
-				return e
-			}
-		}
+		// ⚠ The join token's `enrols_kind` marker is retained: it still records what the operator declared,
+		// and `nodes.enrolled_kind` still distinguishes a node enrolled before the question was asked.
 		res = EnrollResult{NodeID: node.ID.String(), CertPEM: iss.CertPEM, CAPEM: string(s.ca.CertPEM())}
 		// Same keyed fingerprint as the node.token_issued row — issue and redeem
 		// correlate in the audit stream without the raw token appearing anywhere.

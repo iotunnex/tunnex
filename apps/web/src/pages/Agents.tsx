@@ -2,83 +2,39 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, loadOne, type Loaded } from "../lib/api";
 import {
-  attributionNote, enrolmentKind, NO_AGENTS,
-  UNDETERMINED_DETAIL, UNDETERMINED_LABEL, sortAgents, type AgentRow,
+  agentConnectCommand, AGENT_PREREQ, attributionNote, NO_AGENTS,
+  sortAgents, type AgentRow,
 } from "../lib/agentview";
-import { Badge, Button, Card, Field, Input } from "../components/ui";
-// ⛔ THE SAME COMMAND BUILDER THE GATEWAY CEREMONY USES — imported, never re-implemented. Two places
-// emitting enrolment commands is the one-truth risk the founder refused shape C over; what makes this an
-// agent enrolment is the TOKEN's marker, not a different command.
-import { cpEndpoints, GATEWAY_IMAGE, remoteEnrollCommand } from "../components/Gateways";
+import { Badge, Button, Card, Field, Input, Select } from "../components/ui";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
+
+type Node = { id: string; name: string; status: string };
 
 /**
  * AI agents — S15.3. A top-level destination in NETWORK, beside Kubernetes.
  *
- * ⛔ THE RENDER FLOOR GOVERNS EVERY STRING HERE, and it is stated in `lib/agentview.ts` with tests that
- * enforce it: no DETECTION language (the product does not inspect intent) and no PER-TOOL claim
- * (enforcement is five fields and a tool name is not among them). The honest verb is REACH.
+ * ⛔ AN AGENT IS A PEER HOMED ON A GATEWAY. It is enrolled the way any device is: it holds its own /32, it
+ * dials the gateway with a WireGuard config, and its traffic is FORWARDED through that gateway — which is
+ * what puts it in front of the policy chain. A grant then names that one device.
  *
- * ⛔ ENTERPRISE. The open edition receives `403 edition_required`, which is a SUCCESSFUL REFUSAL — this
- * screen renders ABSENCE for it, never an error. Folding a correct refusal into the failed state would show
- * "could not load" for a server that answered correctly.
+ * ⛔ THE RENDER FLOOR GOVERNS EVERY STRING HERE (see lib/agentview.ts, tests enforce it): no DETECTION
+ * language, no PER-TOOL claim. The honest verb is REACH.
+ *
+ * ⛔ ENTERPRISE. The open edition gets 403 edition_required — a SUCCESSFUL refusal — and this screen renders
+ * ABSENCE, never an error.
  */
 export default function Agents() {
   const [orgId, setOrgId] = useState<string | null>(null);
   const [rows, setRows] = useState<Loaded<AgentRow[]> | null>(null);
-  // ⚠ A SEPARATE FLAG, NOT AN ERROR. edition_required is a successful answer and must not reach the
-  // failed state — see load() below.
+  const [gateways, setGateways] = useState<Node[]>([]);
   const [notEntitled, setNotEntitled] = useState(false);
-  // The enrolment ceremony — mint a MARKED token, show the command once.
+
   const [name, setName] = useState("");
-  const [token, setToken] = useState<string | null>(null);
-  // The name the token was PINNED to — the emitted command must carry it, or the agent enrols under its
-  // hostname and the server refuses the pinned token under any other name.
-  const [pinnedName, setPinnedName] = useState<string | null>(null);
+  const [gw, setGw] = useState("");
+  const [conf, setConf] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
-  // ⛔ THE CP'S OWN CONFIGURED PUBLIC URL, NOT window.location. The emitted command runs on someone else's
-  // host; a URL taken from the browser is the dashboard's address, which need not be reachable from there.
-  const [meta, setMeta] = useState<{ public_base_url?: string; node_agent_image?: string } | null>(null);
-  useEffect(() => {
-    void api.GET("/api/v1/meta").then(({ data }) => data && setMeta(data as typeof meta));
-  }, []);
-
-  const ep = cpEndpoints(meta?.public_base_url, window.location.origin);
-
-  async function enrol() {
-    if (!orgId) return;
-    // ⛔ BLOCK THE MINT IF THE CP'S PUBLIC URL IS UNUSABLE. A join token is SINGLE-USE: minting one against
-    // a broken URL burns it and hands the operator a command that cannot work — worse than refusing, and
-    // the refusal names the cause. Same rule the gateway ceremony applies.
-    if (!ep.ok) {
-      setErr(
-        `The control plane's public URL is not usable, so an enrolment command would not work: ${ep.reason}. Fix it in Org Settings, then enrol.`,
-      );
-      return;
-    }
-    setBusy(true);
-    setErr(null);
-    // ⛔ enrols_kind: "agent" IS THE WHOLE DIFFERENCE. Same endpoint, same ceremony, same emitted command —
-    // the operator's declaration rides the token, captured at the same instant as the issuer.
-    const { data, error } = await api.POST(
-      "/api/v1/organizations/{orgId}/nodes/join-token",
-      {
-        params: { path: { orgId } },
-        body: { node_name: name.trim() || undefined, enrols_kind: "agent" },
-      },
-    );
-    setBusy(false);
-    if (error || !data) {
-      setErr("Could not create the enrolment token.");
-      return;
-    }
-    setToken((data as { join_token: string }).join_token);
-    setPinnedName(name.trim() || null);
-    setName("");
-    setReload((n) => n + 1);
-  }
 
   useEffect(() => {
     let cancelled = false;
@@ -87,17 +43,26 @@ export default function Agents() {
       if (cancelled || !o.ok || o.data.length === 0) return;
       const id = o.data[0].id;
       setOrgId(id);
+
+      const n = await loadOne<Node[]>(() =>
+        api.GET("/api/v1/organizations/{orgId}/nodes", { params: { path: { orgId: id } } }),
+      );
+      if (!cancelled && n.ok) {
+        const live = n.data.filter((x) => x.status === "active");
+        setGateways(live);
+        setGw((g) => g || live[0]?.id || "");
+      }
+
       const { data, error, response } = await api.GET(
         "/api/v1/organizations/{orgId}/agents",
         { params: { path: { orgId: id } } },
       );
       if (cancelled) return;
-      // ⛔ 403 IS NOT A FAILURE. It is the server correctly stating an edition boundary; the screen shows
-      // absence. Any other error is a real failure and must NOT render as "no agents" — a failed load
-      // rendering as emptiness is a zero nobody measured.
+      // ⛔ 403 IS NOT A FAILURE — it is the server correctly stating an edition boundary. Any OTHER error is
+      // a real failure and must not render as "no agents": a failed load shown as emptiness is a zero
+      // nobody measured.
       if (response?.status === 403) {
         setNotEntitled(true);
-        setRows({ ok: true, data: [] });
         return;
       }
       if (error || !data) {
@@ -111,8 +76,35 @@ export default function Agents() {
     };
   }, [reload]);
 
-  // ⛔ ABSENCE, NOT A STYLED-AWAY CONTROL AND NOT AN UPSELL. The open edition simply does not have this
-  // screen; inventing a boundary the client draws is the S14.5 defect.
+  async function enrol() {
+    if (!orgId || !gw) return;
+    setBusy(true);
+    setErr(null);
+    // ⛔ THE DEVICE PATH, WITH kind: "agent". Same enrolment a laptop uses — the server generates the
+    // keypair and returns the config ONCE. What makes it an agent is the kind, which carries the cap
+    // exemption and makes it nameable as a policy source.
+    const { data, error } = await api.POST("/api/v1/organizations/{orgId}/devices", {
+      params: { path: { orgId } },
+      body: { name: name.trim(), node_id: gw, kind: "agent", platform: "agent" },
+    });
+    setBusy(false);
+    if (error || !data) {
+      setErr("Could not enrol the agent.");
+      return;
+    }
+    const cfg = (data as { config?: string }).config;
+    if (!cfg) {
+      // ⚠ LOUD, NOT SILENT. Without the config the operator has an agent that can never connect, and a
+      // quiet success would leave them looking for a command that was never shown.
+      setErr("The agent was created but no configuration was returned — it cannot connect. Remove it and retry.");
+      setReload((n) => n + 1);
+      return;
+    }
+    setConf(cfg);
+    setName("");
+    setReload((n) => n + 1);
+  }
+
   if (notEntitled) return null;
 
   return (
@@ -120,159 +112,102 @@ export default function Agents() {
       <div>
         <h1 className="text-[22px] font-semibold text-ink-heading">AI agents</h1>
         <p className="text-cell text-ink-tertiary">
-          Agents authenticate as themselves and are bounded by the same policy as any device — they reach
-          only what they are granted.
+          An agent connects to a gateway over the tunnel and reaches only what it is granted.
         </p>
       </div>
-      {/* ⛔ THE CREATION PATH. The screen listed agents and offered no way to make one — a capability the
-          product had and the operator could not reach, on the screen built to name that capability.
-          ⚠ It is the EXISTING ceremony, named for agents: same endpoint, same emitted command. What makes
-          it an agent is the marker on the token. */}
+
+      {/* ⛔ THE CREATION PATH. Pick the gateway the agent connects through, name it, and get the command to
+          run on the agent's own host. */}
       <Card>
         <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-[14rem] flex-1">
-            <Field label="Agent name (optional — pins the token to this name)">
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="mcp-agent-prod"
-              />
+          <div className="min-w-[12rem] flex-1">
+            <Field label="Agent name">
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="mcp-agent-prod" />
             </Field>
           </div>
-          <Button onClick={() => void enrol()} disabled={busy}>
-            {busy ? "Creating…" : "Enrol an agent"}
+          <div className="min-w-[12rem] flex-1">
+            <Field label="Connects through gateway">
+              <Select value={gw} onChange={(e) => setGw(e.target.value)}>
+                {gateways.map((n) => (
+                  <option key={n.id} value={n.id}>{n.name}</option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <Button onClick={() => void enrol()} disabled={busy || !name.trim() || !gw}>
+            {busy ? "Enrolling…" : "Enrol agent"}
           </Button>
         </div>
         {err && <p className="mt-2 text-xs text-danger">{err}</p>}
         <p className="mt-2 text-[11px] text-ink-secondary">
-          Enrolling mints a single-use token and records <strong>you</strong> as the person who authorised
-          this agent. Run the command it gives you on the host that will run the agent.
+          Enrolling records <strong>you</strong> as the person who authorised this agent, and gives you one
+          command to run on the agent's host. {AGENT_PREREQ}
         </p>
       </Card>
 
       <Card>
         <p className="text-xs text-slate-500">
-          Each agent is shown with the person who authorised it into this organization. What an agent may
-          reach is set by the grants on{" "}
-          <Link to="/access" className="text-slate-300 underline">
-            Access Policies
-          </Link>
-          . An agent with no grant reaches nothing.
+          What each agent may reach is set by the grants on{" "}
+          <Link to="/access" className="text-slate-300 underline">Access Policies</Link> — choose{" "}
+          <span className="font-mono text-[11px]">AI agent</span> as the source.{" "}
+          <strong>An agent with no grant reaches nothing.</strong>
         </p>
         {rows === null ? (
           <p className="mt-3 text-xs text-ink-secondary">Loading…</p>
         ) : !rows.ok ? (
-          // ⛔ A FAILED LOAD IS NOT "NO AGENTS". Keeping them apart is the whole reason this is a Loaded<T>.
           <p data-state="load-failed" className="mt-3 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-xs text-danger">
             {rows.error} <strong>This is not the same as having none.</strong>
           </p>
-        ) : rows.data.filter((a) => a.enrolment_kind === "agent").length === 0 &&
-          rows.data.length === 0 ? (
+        ) : rows.data.length === 0 ? (
           <p data-state="no-agents" className="mt-3 text-xs text-ink-secondary">{NO_AGENTS}</p>
         ) : (
-          <>
-            {(() => {
-              const declared = sortAgents(rows.data.filter((a) => a.enrolment_kind === "agent"));
-              const undetermined = rows.data.filter((a) => a.enrolment_kind === "undetermined");
+          <ul className="mt-3 space-y-1">
+            {sortAgents(rows.data).map((a) => {
+              const note = attributionNote(a);
               return (
-                <>
-                  {declared.length === 0 ? (
-                    <p data-state="no-agents" className="mt-3 text-xs text-ink-secondary">{NO_AGENTS}</p>
-                  ) : (
-                    <ul className="mt-3 space-y-1">
-                      {declared.map((a) => {
-                        const note = attributionNote(a);
-                        return (
-                          <li
-                            key={a.node_id}
-                            data-kind={enrolmentKind({ enrolled_kind: a.enrolment_kind })}
-                            data-unattributable={a.unattributable ? "yes" : "no"}
-                            className="flex items-center justify-between gap-3 rounded-md bg-white/5 px-3 py-2 text-sm"
-                          >
-                            <span className="min-w-0 text-slate-200">
-                              {a.name}
-                              <span className="ml-2 font-mono text-xs text-slate-500">
-                                {a.address ?? "no address"}
-                              </span>
-                              <span className="ml-2 text-xs text-ink-secondary">
-                                {a.owner_email
-                                  ? <>· authorised by <span className="text-slate-300">{a.owner_email}</span></>
-                                  : "· no owner recorded"}
-                              </span>
-                            </span>
-                            <span className="flex shrink-0 items-center gap-2">
-                              {note && (
-                                <span title={note.detail}>
-                                  <Badge tone="warn">{note.label}</Badge>
-                                </span>
-                              )}
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-
-                  {/* ⛔ UNDETERMINED IS GROUPED, NOT INTERLEAVED — AND THIS IS A JUDGEMENT, RECORDED.
-                      Every node enrolled before the marker is undetermined, so listing each one beside the
-                      declared agents would make the screen mostly legacy gateways AND would imply each is a
-                      candidate agent — a stronger claim than "we do not know".
-                      ⚠ It is still RENDERED, never hidden: the ruling was that it must not arrive as a
-                      blank, and a counted line in its ruled words is not a blank. Excluding them would
-                      assert they are not agents, which is the fact nobody has. */}
-                  {undetermined.length > 0 && (
-                    <p
-                      data-state="undetermined-group"
-                      className="mt-3 rounded-md border border-line bg-white/5 px-3 py-2 text-xs text-ink-secondary"
-                      title={UNDETERMINED_DETAIL}
-                    >
-                      <strong className="text-slate-300">
-                        {undetermined.length} {undetermined.length === 1 ? "node" : "nodes"}:{" "}
-                        {UNDETERMINED_LABEL}
-                      </strong>{" "}
-                      {UNDETERMINED_DETAIL}
-                    </p>
-                  )}
-                </>
+                <li
+                  key={a.device_id}
+                  data-unattributable={a.unattributable ? "yes" : "no"}
+                  className="flex items-center justify-between gap-3 rounded-md bg-white/5 px-3 py-2 text-sm"
+                >
+                  <span className="min-w-0 text-slate-200">
+                    {a.name}
+                    <span className="ml-2 font-mono text-xs text-slate-500">{a.address ?? "no address"}</span>
+                    <span className="ml-2 text-xs text-ink-secondary">
+                      · via {a.gateway_name}
+                      {a.owner_email
+                        ? <> · authorised by <span className="text-slate-300">{a.owner_email}</span></>
+                        : " · no owner recorded"}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    {note && (
+                      <span title={note.detail}><Badge tone="warn">{note.label}</Badge></span>
+                    )}
+                  </span>
+                </li>
               );
-            })()}
-          </>
+            })}
+          </ul>
         )}
       </Card>
-      {token && (
+
+      {conf && (
         <OneTimeSecretModal
-          title="Enrol your agent: run this once"
+          title="Connect your agent: run this on the agent's host"
           caption={
             <>
-              Paste this <span className="font-semibold">single command</span> on the host that will run
-              the agent. Shown <span className="font-semibold">exactly once</span>, single-use: copy it now.
+              Run this on the machine that runs your AI agent. It writes the tunnel config and brings the
+              interface up. Shown <span className="font-semibold">exactly once</span> — it contains the
+              agent's private key. {AGENT_PREREQ}
             </>
           }
-          // ⛔ THE SELF-CONTAINED `docker run`, NOT THE COMPOSE LINE. An agent runs on whatever host runs
-          // the AI workload — that host has no `tunnex.yml`, so a `docker compose -f tunnex.yml` command
-          // is uncopyable there. This is the same builder the remote-gateway ceremony uses, and its own
-          // note records why: a multi-line/compose form LOOKS copyable and was mis-pasted twice in the
-          // cross-cloud demo.
-          secret={remoteEnrollCommand({
-            token,
-            name: pinnedName,
-            endpoint: null,
-            apiURL: ep.ok ? ep.apiURL : "",
-            agentURL: ep.ok ? ep.agentURL : "",
-            serverName: ep.ok ? ep.serverName : "",
-            image:
-              meta?.node_agent_image && meta.node_agent_image.trim()
-                ? meta.node_agent_image.trim()
-                : GATEWAY_IMAGE,
-          })}
+          secret={agentConnectCommand(conf)}
           copyLabel="Copy command"
-          onDismiss={() => {
-            setToken(null);
-            setPinnedName(null);
-          }}
+          downloadFilename="tunnex-agent.sh"
+          onDismiss={() => setConf(null)}
         />
       )}
-      {orgId === null && <span className="sr-only">no organization</span>}
     </div>
   );
 }
