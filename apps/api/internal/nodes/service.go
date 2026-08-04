@@ -2227,7 +2227,6 @@ func spkiText(spki []byte) *string {
 	return &enc
 }
 
-
 // allocateAgentDevice gives an owned agent its /32 — the address D15 makes binding.
 //
 // ⛔ THE SAME ALLOCATION DEFINITION AS A HUMAN'S DEVICE, DELIBERATELY. `ListActiveDeviceAllocations` is the
@@ -2269,6 +2268,13 @@ func (s *Service) allocateAgentDevice(ctx context.Context, q *sqlc.Queries, orgI
 		OrgID: orgID, UserID: ownerID, NodeID: nodeID,
 		Name: nodeName, Platform: "agent", PublicKey: "pending-agent-" + nodeID.String(),
 		AssignedIp: &ip, Status: "active", Kind: "agent",
+		// ⛔ EXPLICIT, AND THE SECOND INSTANCE OF THIS CLASS IN ONE SLICE. `devices` has several
+		// CHECK-constrained text columns whose valid set does NOT include Go's zero value "" — `kind`,
+		// `status`, `transport`. A new caller of CreateDevice that names some and not others compiles
+		// cleanly and fails at INSERT time, which is exactly how this was found: on a FRESH database, not
+		// on the local one, because the local failures were masked by an unrelated environmental class.
+		// ⚠ An agent's own tunnel is WireGuard; it is never an OpenVPN client.
+		Transport: "wireguard",
 	})
 	return err
 }

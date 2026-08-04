@@ -192,7 +192,6 @@ func OrgFrom(ctx context.Context) (uuid.UUID, bool) {
 	return id, ok
 }
 
-
 // NewAgentPrincipal builds the principal for a data-plane agent (S15.2, D4 — RULED: a SECOND constructor).
 //
 // ⛔ THE SECOND CONSTRUCTOR RETIRES THE OLD CENSUS'S GUARANTEE, AND SAYS SO RATHER THAN INHERITING IT.

@@ -18,11 +18,11 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/accesslog"
 	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
-	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
-	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodes"
+	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
 // AgentChannel is the mTLS control channel the tunnex-node agent reconciles
