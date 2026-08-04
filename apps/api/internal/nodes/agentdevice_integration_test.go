@@ -56,7 +56,7 @@ func TestAgentDeviceRowsAreCapExempt(t *testing.T) {
 	mkDevice := func(kind, name string) {
 		t.Helper()
 		ex(`INSERT INTO devices (org_id, user_id, node_id, name, public_key, status, kind)
-		    VALUES ($1,$2,$3,$4,$5,'active',$6)`, org, owner, node, name, "pk-"+name, kind)
+		    VALUES ($1,$2,$3,$4,$5,'active',$6)`, org, owner, node, name, "wyUOtRkANy0utrYJb0R6aVOh5WJX375rarRrmwGBwW4="+name, kind)
 	}
 
 	if got := count(); got != 0 {
@@ -79,7 +79,7 @@ func TestAgentDeviceRowsAreCapExempt(t *testing.T) {
 	// a partial unique index — otherwise a re-enrolment loop exhausts the org pool through a door the cap
 	// now explicitly does not watch. That is the org-pool DoS the cap convention was written against.
 	_, e := pool.Exec(ctx, `INSERT INTO devices (org_id, user_id, node_id, name, public_key, status, kind)
-	    VALUES ($1,$2,$3,$4,$5,'active','agent')`, org, owner, node, "agent-dup", "pk-agent-dup")
+	    VALUES ($1,$2,$3,$4,$5,'active','agent')`, org, owner, node, "agent-dup", "E0+UqQyG5hBHoAo/AGNQaImKFk3LZUM7zBvHStspoIY=")
 	if e == nil {
 		t.Fatal("a SECOND agent device for the same node must be refused — a re-enrolment loop would " +
 			"otherwise exhaust the org pool, and the cap no longer watches this door")

@@ -64,7 +64,7 @@ func (f *restoreFixture) addDevice(t *testing.T, name, ip string) uuid.UUID {
 	if _, err := f.pool.Exec(f.ctx,
 		`INSERT INTO devices (id,org_id,user_id,node_id,name,platform,public_key,assigned_ip,status,transport)
 		 VALUES ($1,$2,$3,$4,$5,'linux',$6,$7,'active','wireguard')`,
-		id, f.org, f.owner, f.node, name, "pk-"+id.String(), ip); err != nil {
+		id, f.org, f.owner, f.node, name, "wyUOtRkANy0utrYJb0R6aVOh5WJX375rarRrmwGBwW4="+id.String(), ip); err != nil {
 		t.Fatalf("addDevice %s: %v", name, err)
 	}
 	return id

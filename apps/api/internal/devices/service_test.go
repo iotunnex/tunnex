@@ -288,7 +288,7 @@ func TestResizePoolShrinkRefusesOrphans(t *testing.T) {
 	svc, org, user, node := setup(t, tx, 10)
 
 	// Seed a device whose address is in /24 but outside /25 (0-127).
-	if _, err := tx.Exec(ctx, "INSERT INTO devices (org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,'d','k',$4)",
+	if _, err := tx.Exec(ctx, "INSERT INTO devices (org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1, $2, $3, 'd', '+DeSO+POkGDPyK451u3mgL1y719ZUGSdtncSL1FeQGI=', $4)",
 		org, user, node, "10.99.0.200"); err != nil {
 		t.Fatalf("seed device: %v", err)
 	}

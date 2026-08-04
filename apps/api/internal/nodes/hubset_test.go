@@ -235,11 +235,11 @@ func TestSiteLinkGraphHA(t *testing.T) {
 	fresh := time.Now()
 	awsSite := idAt(0xA)
 	azureSite := idAt(0xB)
-	awsGw := gw(1, "aws:51820", "KAWS", pri(1), &fresh) // primary (pin 1)
+	awsGw := gw(1, "aws:51820", "WJexHKl8fSOeqTI5Kb0ubME/F7jK9Zz8PFQ+dSFnIx0=", pri(1), &fresh) // primary (pin 1)
 	awsGw.SiteID = pgtype.UUID{Bytes: awsSite, Valid: true}
-	awsStandby := gw(2, "aws2:51820", "KAWS2", pri(2), &fresh) // standby (pin 2, SAME AWS site)
+	awsStandby := gw(2, "aws2:51820", "vdjc3/Z+eIcf/Yx3xCkD6Q0v8tK163PVqbEnbfnRIPM=", pri(2), &fresh) // standby (pin 2, SAME AWS site)
 	awsStandby.SiteID = pgtype.UUID{Bytes: awsSite, Valid: true}
-	azureGw := gw(3, "azure:51820", "KAZ", nil, &fresh) // UNPINNED leaf (endpoint-bearing — the trap)
+	azureGw := gw(3, "azure:51820", "n35dScrlS43upSjeakGVSQ/rjbN1YOix++yJxWLK3wo=", nil, &fresh) // UNPINNED leaf (endpoint-bearing — the trap)
 	azureGw.SiteID = pgtype.UUID{Bytes: azureSite, Valid: true}
 	topo := siteTopology{
 		gws:     []sqlc.ListSiteGatewaysForOrgRow{awsGw, awsStandby, azureGw},
@@ -261,10 +261,10 @@ func TestSiteLinkGraphHA(t *testing.T) {
 	// (1) The LEAF (azure, unpinned) compiles as a SPOKE — the primary carries the AWS subnets, the standby
 	// is keepalive-only (empty), and 172.31.0.0/16 appears in EXACTLY ONE peer's AllowedIPs (the bug's death).
 	azurePeers, _ := siteLinkGraphFrom(topo, nodeOf(azureGw))
-	if p := peerByKey(azurePeers, "KAWS"); p == nil || len(p.AllowedIPs) != 1 || p.AllowedIPs[0] != "172.31.0.0/16" {
+	if p := peerByKey(azurePeers, "WJexHKl8fSOeqTI5Kb0ubME/F7jK9Zz8PFQ+dSFnIx0="); p == nil || len(p.AllowedIPs) != 1 || p.AllowedIPs[0] != "172.31.0.0/16" {
 		t.Fatalf("azure's PRIMARY peer must carry the AWS subnets, got %+v", p)
 	}
-	if p := peerByKey(azurePeers, "KAWS2"); p == nil || len(p.AllowedIPs) != 0 {
+	if p := peerByKey(azurePeers, "vdjc3/Z+eIcf/Yx3xCkD6Q0v8tK163PVqbEnbfnRIPM="); p == nil || len(p.AllowedIPs) != 0 {
 		t.Fatalf("azure's STANDBY peer must be keepalive-only (empty AllowedIPs), got %+v", p)
 	}
 	if n := countWith(azurePeers, "172.31.0.0/16"); n != 1 {
@@ -274,10 +274,10 @@ func TestSiteLinkGraphHA(t *testing.T) {
 	// (2) The PRIMARY hub (aws-gw) peers with the azure leaf (azure subnets); NOT with the standby (same
 	// AWS site — same-site exclusion kills the spurious same-L2 link).
 	primaryPeers, primaryRoutes := siteLinkGraphFrom(topo, nodeOf(awsGw))
-	if p := peerByKey(primaryPeers, "KAZ"); p == nil || len(p.AllowedIPs) != 1 || p.AllowedIPs[0] != "10.0.0.0/16" {
+	if p := peerByKey(primaryPeers, "n35dScrlS43upSjeakGVSQ/rjbN1YOix++yJxWLK3wo="); p == nil || len(p.AllowedIPs) != 1 || p.AllowedIPs[0] != "10.0.0.0/16" {
 		t.Fatalf("primary must peer with azure carrying azure subnets, got %+v", p)
 	}
-	if peerByKey(primaryPeers, "KAWS2") != nil {
+	if peerByKey(primaryPeers, "vdjc3/Z+eIcf/Yx3xCkD6Q0v8tK163PVqbEnbfnRIPM=") != nil {
 		t.Fatal("primary must NOT peer with its same-site standby (same-site exclusion)")
 	}
 
@@ -285,10 +285,10 @@ func TestSiteLinkGraphHA(t *testing.T) {
 	// subnets, ready to forward), NOT with the same-site primary. Hub-symmetry: identical routes to the
 	// primary → promotion changes nothing hub-side.
 	standbyPeers, standbyRoutes := siteLinkGraphFrom(topo, nodeOf(awsStandby))
-	if p := peerByKey(standbyPeers, "KAZ"); p == nil || len(p.AllowedIPs) != 1 || p.AllowedIPs[0] != "10.0.0.0/16" {
+	if p := peerByKey(standbyPeers, "n35dScrlS43upSjeakGVSQ/rjbN1YOix++yJxWLK3wo="); p == nil || len(p.AllowedIPs) != 1 || p.AllowedIPs[0] != "10.0.0.0/16" {
 		t.Fatalf("standby must carry the full transit posture (peer azure w/ subnets), got %+v", p)
 	}
-	if peerByKey(standbyPeers, "KAWS") != nil {
+	if peerByKey(standbyPeers, "WJexHKl8fSOeqTI5Kb0ubME/F7jK9Zz8PFQ+dSFnIx0=") != nil {
 		t.Fatal("standby must NOT peer with its same-site primary (same-site exclusion)")
 	}
 	if len(primaryRoutes) != len(standbyRoutes) || (len(primaryRoutes) > 0 && primaryRoutes[0].DstCIDR != standbyRoutes[0].DstCIDR) {
@@ -299,12 +299,12 @@ func TestSiteLinkGraphHA(t *testing.T) {
 	// — the leaf peers with ONLY the single elected hub (lowest id = aws-gw), NO standby peer at all.
 	noPins := topo
 	noPins.gws = []sqlc.ListSiteGatewaysForOrgRow{
-		{ID: awsGw.ID, SiteID: awsGw.SiteID, WgPublicKey: "KAWS", Endpoint: "aws:51820"},
-		{ID: awsStandby.ID, SiteID: awsStandby.SiteID, WgPublicKey: "KAWS2", Endpoint: "aws2:51820"},
-		{ID: azureGw.ID, SiteID: azureGw.SiteID, WgPublicKey: "KAZ", Endpoint: "azure:51820"},
+		{ID: awsGw.ID, SiteID: awsGw.SiteID, WgPublicKey: "WJexHKl8fSOeqTI5Kb0ubME/F7jK9Zz8PFQ+dSFnIx0=", Endpoint: "aws:51820"},
+		{ID: awsStandby.ID, SiteID: awsStandby.SiteID, WgPublicKey: "vdjc3/Z+eIcf/Yx3xCkD6Q0v8tK163PVqbEnbfnRIPM=", Endpoint: "aws2:51820"},
+		{ID: azureGw.ID, SiteID: azureGw.SiteID, WgPublicKey: "n35dScrlS43upSjeakGVSQ/rjbN1YOix++yJxWLK3wo=", Endpoint: "azure:51820"},
 	}
 	azureNoPin, azureNoPinRoutes := siteLinkGraphFrom(noPins, nodeOf(azureGw))
-	if len(azureNoPin) != 1 || azureNoPin[0].PublicKey != "KAWS" {
+	if len(azureNoPin) != 1 || azureNoPin[0].PublicKey != "WJexHKl8fSOeqTI5Kb0ubME/F7jK9Zz8PFQ+dSFnIx0=" {
 		t.Fatalf("no-pins zero-config: the leaf peers with ONLY the single hub (aws-gw), got %d peers %+v", len(azureNoPin), azureNoPin)
 	}
 
@@ -732,7 +732,7 @@ func TestDevicePeerWidenedAcrossHubSet(t *testing.T) {
 		t.Fatalf("seed membership: %v", e)
 	}
 	// The device is assigned to g1 (node_id=g1). Its /32 is 10.99.0.2.
-	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,$4,'laptop','KDEV','10.99.0.2')",
+	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1, $2, $3, $4, 'laptop', 'b/eRpG2AcImXjRtZlbNUKdUzFDeN5yt3OnT3qq2OZKk=', '10.99.0.2')",
 		dev, org, usr, g1); e != nil {
 		t.Fatalf("seed device: %v", e)
 	}
@@ -744,7 +744,7 @@ func TestDevicePeerWidenedAcrossHubSet(t *testing.T) {
 
 	devPeer := func(ds DesiredState) (present bool, allowed []string) {
 		for _, p := range ds.Peers {
-			if p.PublicKey == "KDEV" {
+			if p.PublicKey == "b/eRpG2AcImXjRtZlbNUKdUzFDeN5yt3OnT3qq2OZKk=" {
 				return true, p.AllowedIPs
 			}
 		}
@@ -828,11 +828,11 @@ func TestOVPNDeviceNeverAWireGuardPeerAcrossHubSet(t *testing.T) {
 	// A WireGuard device (keyed) AND an OpenVPN device (keyless, public_key='', transport='openvpn'),
 	// BOTH homed to the active primary g1.
 	wgDev, ovDev := uuid.New(), uuid.New()
-	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,$4,'wg-laptop','KWG','10.99.0.2')",
+	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1, $2, $3, $4, 'wg-laptop', '8NSMqx2d2Xa7o7u83pq7bH4gdfMzIEpoXlzQulP8Ed0=', '10.99.0.2')",
 		wgDev, org, usr, g1); e != nil {
 		t.Fatalf("seed wg device: %v", e)
 	}
-	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip,transport) VALUES ($1,$2,$3,$4,'ovpn-mac','','10.99.0.6','openvpn')",
+	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip,transport) VALUES ($1, $2, $3, $4, 'ovpn-mac', '', '10.99.0.6', 'openvpn')",
 		ovDev, org, usr, g1); e != nil {
 		t.Fatalf("seed ovpn device: %v", e)
 	}
@@ -857,7 +857,7 @@ func TestOVPNDeviceNeverAWireGuardPeerAcrossHubSet(t *testing.T) {
 			if p.PublicKey == "" {
 				t.Fatalf("%s hosts an EMPTY-PublicKey peer — this bricks `wg syncconf` for the whole interface (WF-OVPN-10)", n.name)
 			}
-			if p.PublicKey == "KWG" {
+			if p.PublicKey == "8NSMqx2d2Xa7o7u83pq7bH4gdfMzIEpoXlzQulP8Ed0=" {
 				wgHosted = true
 			}
 		}
@@ -929,7 +929,7 @@ func TestDeviceDialAuthAndDerivation(t *testing.T) {
 		}
 	}
 	// The device is assigned to g2 (a standby member) but OWNED by `owner`.
-	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,$4,'laptop','KDEV','10.99.0.2')",
+	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1, $2, $3, $4, 'laptop', 'b/eRpG2AcImXjRtZlbNUKdUzFDeN5yt3OnT3qq2OZKk=', '10.99.0.2')",
 		dev, org, owner, g2); e != nil {
 		t.Fatalf("seed device: %v", e)
 	}
@@ -958,7 +958,7 @@ func TestDeviceDialAuthAndDerivation(t *testing.T) {
 	// PENDING (review #3): a not-yet-active device has no gateway peer — its dial is refused (no-oracle),
 	// so the API never contradicts the data-plane's "peers only when active" rule. Same device_not_found.
 	pend := uuid.New()
-	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip,status) VALUES ($1,$2,$3,$4,'pending-laptop','KPEND','10.99.0.3','pending')",
+	if _, e := pool.Exec(ctx, "INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip,status) VALUES ($1, $2, $3, $4, 'pending-laptop', 'QmlnJHSZOgd/KJmhdIsavEMbdDoh6QwB9P2wufHjoQI=', '10.99.0.3', 'pending')",
 		pend, org, owner, g2); e != nil {
 		t.Fatalf("seed pending device: %v", e)
 	}

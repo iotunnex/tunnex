@@ -150,8 +150,8 @@ func TestDeactivatePushesOrgWideNotJustUserNodes(t *testing.T) {
 		{"INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,'gw1',$3)", node1, org, "s1-" + node1.String()},
 		{"INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,'gw2',$3)", node2, org, "s2-" + node2.String()},
 		// target's device on node1; another member's device on node2 (target has NONE there).
-		{"INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,$4,'d1','p1','10.99.0.2')", dev1, org, target, node1},
-		{"INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,$4,'d2','p2','10.99.0.3')", dev2, org, other, node2},
+		{"INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1, $2, $3, $4, 'd1', 'HMMxVkG5cwpRWhIHl7OSfO6ydf63a9uWJ7Xpjhp53o8=', '10.99.0.2')", dev1, org, target, node1},
+		{"INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1, $2, $3, $4, 'd2', 'sb+LFfBl6cbN3we5ubB6GQ9XzjVRcXu+CVM9C6C2vSg=', '10.99.0.3')", dev2, org, other, node2},
 	}
 	for _, s := range stmts {
 		if _, err := tx.Exec(ctx, s[0].(string), s[1:]...); err != nil {

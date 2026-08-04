@@ -316,18 +316,18 @@ func TestLatestByPubKeySkipsNullHandshake(t *testing.T) {
 	fresh := time.Now()
 	// NULL-only pubkey → absent from latest (no verdict downstream, never "fresh").
 	nullOnly := latestByPubKey([]sqlc.NodePeerStatus{
-		{PublicKey: "KNULL", LastHandshakeAt: pgtype.Timestamptz{Valid: false}},
+		{PublicKey: "pEwPCiL77NmfLDAdN7hVniESJWlNS7o+qX/VK/j7PoU=", LastHandshakeAt: pgtype.Timestamptz{Valid: false}},
 	})
-	if _, ok := nullOnly["KNULL"]; ok {
+	if _, ok := nullOnly["pEwPCiL77NmfLDAdN7hVniESJWlNS7o+qX/VK/j7PoU="]; ok {
 		t.Fatal("a NULL-handshake row must NOT enter latest (never fresh)")
 	}
 	// A NULL row alongside a VALID one for the SAME pubkey must not clobber the valid handshake (no MAX poison).
 	mixed := latestByPubKey([]sqlc.NodePeerStatus{
-		{PublicKey: "K", LastHandshakeAt: pgtype.Timestamptz{Time: fresh, Valid: true}},
-		{PublicKey: "K", LastHandshakeAt: pgtype.Timestamptz{Valid: false}},
+		{PublicKey: "FFlooy1xLzxsNuXy/Kr6wjQ3Kx4QzbhvLW40dhZAlSU=", LastHandshakeAt: pgtype.Timestamptz{Time: fresh, Valid: true}},
+		{PublicKey: "FFlooy1xLzxsNuXy/Kr6wjQ3Kx4QzbhvLW40dhZAlSU=", LastHandshakeAt: pgtype.Timestamptz{Valid: false}},
 	})
-	if !mixed["K"].LastHandshakeAt.Equal(fresh) {
-		t.Fatalf("a NULL row must not poison the MAX over a valid observation, got %v", mixed["K"].LastHandshakeAt)
+	if !mixed["FFlooy1xLzxsNuXy/Kr6wjQ3Kx4QzbhvLW40dhZAlSU="].LastHandshakeAt.Equal(fresh) {
+		t.Fatalf("a NULL row must not poison the MAX over a valid observation, got %v", mixed["FFlooy1xLzxsNuXy/Kr6wjQ3Kx4QzbhvLW40dhZAlSU="].LastHandshakeAt)
 	}
 }
 
@@ -361,11 +361,11 @@ func TestFailoverRehydratesDemotionOnRestart(t *testing.T) {
 func TestDeriveMemberLivenessSharedTruth(t *testing.T) {
 	now := time.Now()
 	a, b, c := idAt(1), idAt(2), idAt(3)
-	pubkey := map[uuid.UUID]string{a: "KA", b: "KB", c: "KC"}
+	pubkey := map[uuid.UUID]string{a: "/RLJQov+0n5q0hNM2/ZkqzUO/GFUcoziClpzUvI+5j4=", b: "jeuLUCD31rxHRxXujNPrQUQpEDbjfIXK3zj68octp1k=", c: "thkXYrzUo/OqTV4WEB8Gl8iQBbOfep7c3K/D9kHFmUs="}
 	rows := []sqlc.NodePeerStatus{
-		{PublicKey: "KA", LastHandshakeAt: pgtype.Timestamptz{Time: now.Add(-10 * time.Second), Valid: true}},  // fresh
-		{PublicKey: "KB", LastHandshakeAt: pgtype.Timestamptz{Time: now.Add(-600 * time.Second), Valid: true}}, // stale (>240s)
-		{PublicKey: "KC", LastHandshakeAt: pgtype.Timestamptz{Valid: false}},                                   // NULL → no witness
+		{PublicKey: "/RLJQov+0n5q0hNM2/ZkqzUO/GFUcoziClpzUvI+5j4=", LastHandshakeAt: pgtype.Timestamptz{Time: now.Add(-10 * time.Second), Valid: true}},  // fresh
+		{PublicKey: "jeuLUCD31rxHRxXujNPrQUQpEDbjfIXK3zj68octp1k=", LastHandshakeAt: pgtype.Timestamptz{Time: now.Add(-600 * time.Second), Valid: true}}, // stale (>240s)
+		{PublicKey: "thkXYrzUo/OqTV4WEB8Gl8iQBbOfep7c3K/D9kHFmUs=", LastHandshakeAt: pgtype.Timestamptz{Valid: false}},                                   // NULL → no witness
 	}
 	live := deriveMemberLiveness([]uuid.UUID{a, b, c}, pubkey, rows, []uuid.UUID{b}, now)
 

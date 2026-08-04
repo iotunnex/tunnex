@@ -205,7 +205,7 @@ func mustDevice(t *testing.T, ctx context.Context, q *sqlc.Queries, orgID, userI
 	t.Helper()
 	d, err := q.CreateDevice(ctx, sqlc.CreateDeviceParams{
 		Kind:  "human", // explicit: the COALESCE default covers a forgetful caller, tests should still say what they mean
-		OrgID: orgID, UserID: userID, NodeID: nodeID, Name: "ovpn-dev", PublicKey: "k", Status: "active",
+		OrgID: orgID, UserID: userID, NodeID: nodeID, Name: "ovpn-dev", PublicKey: "+DeSO+POkGDPyK451u3mgL1y719ZUGSdtncSL1FeQGI=", Status: "active",
 		Transport: "openvpn",
 	})
 	if err != nil {

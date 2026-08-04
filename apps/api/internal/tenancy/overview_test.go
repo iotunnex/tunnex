@@ -75,13 +75,13 @@ func TestOverviewPopulated(t *testing.T) {
 		{"INSERT INTO nodes (id, org_id, name, status, cert_serial) VALUES ($1,$2,'n2','revoked',$3)", []any{nodeRevoked, orgA, "cs-" + nodeRevoked.String()}},
 		{"INSERT INTO nodes (id, org_id, name, status, cert_serial) VALUES ($1,$2,'nb','active',$3)", []any{nodeB, orgB, "cs-" + nodeB.String()}},
 		// devices (orgA).
-		{"INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, status) VALUES ($1,$2,$3,$4,'d-online',$5,'active')", []any{dOnline, orgA, uActive1, nodeActive, "pk-" + dOnline.String()}},
-		{"INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, status) VALUES ($1,$2,$3,$4,'d-stale',$5,'active')", []any{dStale, orgA, uActive1, nodeActive, "pk-" + dStale.String()}},
-		{"INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, status) VALUES ($1,$2,$3,$4,'d-revoked',$5,'revoked')", []any{dRevoked, orgA, uActive1, nodeActive, "pk-" + dRevoked.String()}},
-		{"INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, status, deleted_at) VALUES ($1,$2,$3,$4,'d-deleted',$5,'active',now())", []any{dDeleted, orgA, uActive2, nodeActive, "pk-" + dDeleted.String()}},
-		{"INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, status) VALUES ($1,$2,$3,$4,'d-deact',$5,'active')", []any{dDeactOwner, orgA, uDeact, nodeActive, "pk-" + dDeactOwner.String()}},
+		{"INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, status) VALUES ($1,$2,$3,$4,'d-online',$5,'active')", []any{dOnline, orgA, uActive1, nodeActive, "wyUOtRkANy0utrYJb0R6aVOh5WJX375rarRrmwGBwW4=" + dOnline.String()}},
+		{"INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, status) VALUES ($1,$2,$3,$4,'d-stale',$5,'active')", []any{dStale, orgA, uActive1, nodeActive, "wyUOtRkANy0utrYJb0R6aVOh5WJX375rarRrmwGBwW4=" + dStale.String()}},
+		{"INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, status) VALUES ($1,$2,$3,$4,'d-revoked',$5,'revoked')", []any{dRevoked, orgA, uActive1, nodeActive, "wyUOtRkANy0utrYJb0R6aVOh5WJX375rarRrmwGBwW4=" + dRevoked.String()}},
+		{"INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, status, deleted_at) VALUES ($1,$2,$3,$4,'d-deleted',$5,'active',now())", []any{dDeleted, orgA, uActive2, nodeActive, "wyUOtRkANy0utrYJb0R6aVOh5WJX375rarRrmwGBwW4=" + dDeleted.String()}},
+		{"INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, status) VALUES ($1,$2,$3,$4,'d-deact',$5,'active')", []any{dDeactOwner, orgA, uDeact, nodeActive, "wyUOtRkANy0utrYJb0R6aVOh5WJX375rarRrmwGBwW4=" + dDeactOwner.String()}},
 		// device (orgB) — must never appear in orgA's overview.
-		{"INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, status) VALUES ($1,$2,$3,$4,'d-b',$5,'active')", []any{dB, orgB, uB, nodeB, "pk-" + dB.String()}},
+		{"INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, status) VALUES ($1,$2,$3,$4,'d-b',$5,'active')", []any{dB, orgB, uB, nodeB, "wyUOtRkANy0utrYJb0R6aVOh5WJX375rarRrmwGBwW4=" + dB.String()}},
 		// device_status: online device has a recent handshake; the stale one is
 		// outside the window; the deactivated-owner device IS recent (proving the
 		// owner-active filter, not staleness, excludes it).

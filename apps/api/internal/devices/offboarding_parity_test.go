@@ -28,7 +28,7 @@ func TestOffboardingSeversPeerAndCompilerParity(t *testing.T) {
 	ex("INSERT INTO memberships (org_id,user_id,role) VALUES ($1,$2,'member')", org, user)
 	ex("INSERT INTO nodes (id,org_id,name,cert_serial,wg_public_key,endpoint) VALUES ($1,$2,'gw',$3,'k','e:51820')", node, org, "cs-"+node.String()[:8])
 	dev := uuid.New()
-	ex("INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,$4,'wg','wgkey','10.99.0.7')", dev, org, user, node)
+	ex("INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1, $2, $3, $4, 'wg', 'qz/uIHKyeTmf08TjUpwbMLlBr78PS+fKYl33OGdZU+M=', '10.99.0.7')", dev, org, user, node)
 
 	peerServed := func() bool {
 		rows, e := q.ListActiveWireGuardPeersForNode(ctx, node)

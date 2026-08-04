@@ -26,8 +26,8 @@ func TestPushedHashMatchesServedForRoutedGateway(t *testing.T) {
 	nodeA := uuid.New()
 	topo := siteTopology{
 		gws: []sqlc.ListSiteGatewaysForOrgRow{
-			{ID: nodeA, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "KA", Endpoint: "a:51820"},
-			{ID: uuid.New(), SiteID: pgtype.UUID{Bytes: siteB, Valid: true}, WgPublicKey: "KB"},
+			{ID: nodeA, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "/RLJQov+0n5q0hNM2/ZkqzUO/GFUcoziClpzUvI+5j4=", Endpoint: "a:51820"},
+			{ID: uuid.New(), SiteID: pgtype.UUID{Bytes: siteB, Valid: true}, WgPublicKey: "jeuLUCD31rxHRxXujNPrQUQpEDbjfIXK3zj68octp1k="},
 		},
 		subnets: map[uuid.UUID][]string{siteA: {"10.1.0.0/24"}, siteB: {"10.2.0.0/24"}},
 	}
@@ -57,8 +57,8 @@ func TestFinalizeAttachesDNSForwardsOutOfHash(t *testing.T) {
 	siteA, siteB, nodeA := uuid.New(), uuid.New(), uuid.New()
 	base := siteTopology{
 		gws: []sqlc.ListSiteGatewaysForOrgRow{
-			{ID: nodeA, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "KA", Endpoint: "a:51820"},
-			{ID: uuid.New(), SiteID: pgtype.UUID{Bytes: siteB, Valid: true}, WgPublicKey: "KB"},
+			{ID: nodeA, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "/RLJQov+0n5q0hNM2/ZkqzUO/GFUcoziClpzUvI+5j4=", Endpoint: "a:51820"},
+			{ID: uuid.New(), SiteID: pgtype.UUID{Bytes: siteB, Valid: true}, WgPublicKey: "jeuLUCD31rxHRxXujNPrQUQpEDbjfIXK3zj68octp1k="},
 		},
 		subnets: map[uuid.UUID][]string{siteA: {"10.1.0.0/24"}, siteB: {"10.2.0.0/24"}},
 	}
@@ -95,7 +95,7 @@ func TestElectSiteHubIsTheOneElection(t *testing.T) {
 	now := time.Now()
 	// Two endpoint-bearing gateways (with keys) → the lower id wins (no pins, equal health → id tie-break).
 	topo := siteTopology{gws: []sqlc.ListSiteGatewaysForOrgRow{
-		{ID: hi, Endpoint: "b:51820", WgPublicKey: "Khi"}, {ID: lo, Endpoint: "a:51820", WgPublicKey: "Klo"},
+		{ID: hi, Endpoint: "b:51820", WgPublicKey: "xFpkJr76SJwtMLvFYqpt8o835n5B3v1Nqsppcn2q0sk="}, {ID: lo, Endpoint: "a:51820", WgPublicKey: "rlEFum3hee1UCCt3w/kH64Adf2O9RuuCqIlMa/XBen0="},
 	}}
 	hub := electSiteHub(topo, now)
 	if hub == nil || hub.ID != lo {
@@ -105,12 +105,12 @@ func TestElectSiteHubIsTheOneElection(t *testing.T) {
 		t.Fatal("siteTopoHasHub must agree with electSiteHub (one election)")
 	}
 	// A NAT'd gateway (no endpoint) is never the hub even with a lower id.
-	topo.gws = []sqlc.ListSiteGatewaysForOrgRow{{ID: lo, WgPublicKey: "Klo"}, {ID: hi, Endpoint: "b:51820", WgPublicKey: "Khi"}}
+	topo.gws = []sqlc.ListSiteGatewaysForOrgRow{{ID: lo, WgPublicKey: "rlEFum3hee1UCCt3w/kH64Adf2O9RuuCqIlMa/XBen0="}, {ID: hi, Endpoint: "b:51820", WgPublicKey: "xFpkJr76SJwtMLvFYqpt8o835n5B3v1Nqsppcn2q0sk="}}
 	if h := electSiteHub(topo, now); h == nil || h.ID != hi {
 		t.Fatalf("a NAT'd gateway cannot be the hub; the endpoint-bearing one wins, got %+v", h)
 	}
 	// All NAT'd → no hub (B2 no-carrier), and siteTopoHasHub agrees.
-	topo.gws = []sqlc.ListSiteGatewaysForOrgRow{{ID: lo, WgPublicKey: "Klo"}, {ID: hi, WgPublicKey: "Khi"}}
+	topo.gws = []sqlc.ListSiteGatewaysForOrgRow{{ID: lo, WgPublicKey: "rlEFum3hee1UCCt3w/kH64Adf2O9RuuCqIlMa/XBen0="}, {ID: hi, WgPublicKey: "xFpkJr76SJwtMLvFYqpt8o835n5B3v1Nqsppcn2q0sk="}}
 	if electSiteHub(topo, now) != nil || siteTopoHasHub(topo) {
 		t.Fatal("all-NAT'd → no hub (both electSiteHub and siteTopoHasHub must say so)")
 	}
@@ -124,8 +124,8 @@ func TestSiteLinkNoHubNoRoutes(t *testing.T) {
 	nodeA := uuid.New()
 	topo := siteTopology{
 		gws: []sqlc.ListSiteGatewaysForOrgRow{
-			{ID: nodeA, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "KA"},      // no endpoint
-			{ID: uuid.New(), SiteID: pgtype.UUID{Bytes: siteB, Valid: true}, WgPublicKey: "KB"}, // no endpoint
+			{ID: nodeA, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "/RLJQov+0n5q0hNM2/ZkqzUO/GFUcoziClpzUvI+5j4="},      // no endpoint
+			{ID: uuid.New(), SiteID: pgtype.UUID{Bytes: siteB, Valid: true}, WgPublicKey: "jeuLUCD31rxHRxXujNPrQUQpEDbjfIXK3zj68octp1k="}, // no endpoint
 		},
 		subnets: map[uuid.UUID][]string{siteA: {"10.1.0.0/24"}, siteB: {"10.2.0.0/24"}},
 	}
@@ -280,9 +280,9 @@ func TestSiteLinkGraphHubSpokeAndFullSweep(t *testing.T) {
 func TestSpokePrimaryCarriesPoolStandbyEmpty(t *testing.T) {
 	siteA, siteB := uuid.New(), uuid.New()
 	hub1, hub2, spoke := uuid.New(), uuid.New(), uuid.New()
-	g1 := sqlc.ListSiteGatewaysForOrgRow{ID: hub1, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "KH1", Endpoint: "h1.example:51820"}
-	g2 := sqlc.ListSiteGatewaysForOrgRow{ID: hub2, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "KH2", Endpoint: "h2.example:51820"}
-	gs := sqlc.ListSiteGatewaysForOrgRow{ID: spoke, SiteID: pgtype.UUID{Bytes: siteB, Valid: true}, WgPublicKey: "KS"}
+	g1 := sqlc.ListSiteGatewaysForOrgRow{ID: hub1, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "Mpe5reh63f4n4Yf0FiABIDwOiFxUs0/OEyDNloUWz1w=", Endpoint: "h1.example:51820"}
+	g2 := sqlc.ListSiteGatewaysForOrgRow{ID: hub2, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "XgK1YHwlTcrURWnz/gLDpFt0ri/njQgHP9ycQpnmesk=", Endpoint: "h2.example:51820"}
+	gs := sqlc.ListSiteGatewaysForOrgRow{ID: spoke, SiteID: pgtype.UUID{Bytes: siteB, Valid: true}, WgPublicKey: "lmkAVY7h68xntjC83P/a+d1QgLujIvkLiXSfmi2dPsk="}
 	topo := siteTopology{
 		gws:        []sqlc.ListSiteGatewaysForOrgRow{g1, g2, gs},
 		subnets:    map[uuid.UUID][]string{siteA: {"10.1.0.0/24"}, siteB: {"10.2.0.0/24"}},
@@ -295,9 +295,9 @@ func TestSpokePrimaryCarriesPoolStandbyEmpty(t *testing.T) {
 	var prim, stand *Peer
 	for i := range peers {
 		switch peers[i].PublicKey {
-		case "KH1":
+		case "Mpe5reh63f4n4Yf0FiABIDwOiFxUs0/OEyDNloUWz1w=":
 			prim = &peers[i]
-		case "KH2":
+		case "XgK1YHwlTcrURWnz/gLDpFt0ri/njQgHP9ycQpnmesk=":
 			stand = &peers[i]
 		}
 	}
@@ -316,11 +316,11 @@ func TestSpokePrimaryCarriesPoolStandbyEmpty(t *testing.T) {
 	peers2, _ := siteLinkGraphFrom(topo, spokeNode)
 	for i := range peers2 {
 		switch peers2[i].PublicKey {
-		case "KH2":
+		case "XgK1YHwlTcrURWnz/gLDpFt0ri/njQgHP9ycQpnmesk=":
 			if !sliceHas(peers2[i].AllowedIPs, "10.99.0.0/24") {
 				t.Fatalf("promotion must move the pool onto the new primary, got %v", peers2[i].AllowedIPs)
 			}
-		case "KH1":
+		case "Mpe5reh63f4n4Yf0FiABIDwOiFxUs0/OEyDNloUWz1w=":
 			if len(peers2[i].AllowedIPs) != 0 {
 				t.Fatalf("the demoted member must drain to empty (pool included), got %v", peers2[i].AllowedIPs)
 			}
@@ -331,7 +331,7 @@ func TestSpokePrimaryCarriesPoolStandbyEmpty(t *testing.T) {
 	topo.poolCIDR = ""
 	peers3, _ := siteLinkGraphFrom(topo, spokeNode)
 	for i := range peers3 {
-		if peers3[i].PublicKey == "KH2" && sliceHas(peers3[i].AllowedIPs, "") {
+		if peers3[i].PublicKey == "XgK1YHwlTcrURWnz/gLDpFt0ri/njQgHP9ycQpnmesk=" && sliceHas(peers3[i].AllowedIPs, "") {
 			t.Fatalf("empty pool must not emit an empty AllowedIP, got %v", peers3[i].AllowedIPs)
 		}
 	}
@@ -345,8 +345,8 @@ func TestFinalizeAttachesPoolV6(t *testing.T) {
 	hub, spoke := uuid.New(), uuid.New()
 	topo := siteTopology{
 		gws: []sqlc.ListSiteGatewaysForOrgRow{
-			{ID: hub, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "KH", Endpoint: "h:51820"},
-			{ID: spoke, SiteID: pgtype.UUID{Bytes: siteB, Valid: true}, WgPublicKey: "KS"},
+			{ID: hub, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "+ZIM+AfT0udGzth0JB3oCtFlBiB/gSWrJZt9ZXnRXVU=", Endpoint: "h:51820"},
+			{ID: spoke, SiteID: pgtype.UUID{Bytes: siteB, Valid: true}, WgPublicKey: "lmkAVY7h68xntjC83P/a+d1QgLujIvkLiXSfmi2dPsk="},
 		},
 		subnets:  map[uuid.UUID][]string{siteA: {"10.1.0.0/24"}, siteB: {"10.2.0.0/24"}},
 		poolCIDR: "10.99.0.0/24",
@@ -363,7 +363,7 @@ func TestFinalizeAttachesPoolV6(t *testing.T) {
 
 	// single-site (no remote routes): unchanged — no pool, no v6 (the blast-radius guard).
 	soloTopo := siteTopology{
-		gws:      []sqlc.ListSiteGatewaysForOrgRow{{ID: hub, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "KH", Endpoint: "h:51820"}},
+		gws:      []sqlc.ListSiteGatewaysForOrgRow{{ID: hub, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}, WgPublicKey: "+ZIM+AfT0udGzth0JB3oCtFlBiB/gSWrJZt9ZXnRXVU=", Endpoint: "h:51820"}},
 		subnets:  map[uuid.UUID][]string{siteA: {"10.1.0.0/24"}},
 		poolCIDR: "10.99.0.0/24",
 	}
@@ -448,16 +448,16 @@ func TestActiveHubDialFromWF_A(t *testing.T) {
 	primary, standby, spoke := uuid.New(), uuid.New(), uuid.New()
 	// Active order: [primary, standby] (deriveActive's head is the active primary).
 	active := []sqlc.ListSiteGatewaysForOrgRow{
-		{ID: primary, Endpoint: "primary.example:51820", WgPublicKey: "KPRIM"},
-		{ID: standby, Endpoint: "standby.example:51820", WgPublicKey: "KSTBY"},
+		{ID: primary, Endpoint: "primary.example:51820", WgPublicKey: "mAmJLPTeOOw+Ux2g2W3edsBX0rE41ChqzbZmpKLlrbo="},
+		{ID: standby, Endpoint: "standby.example:51820", WgPublicKey: "psCRjpxV+pauI/rPviBz4BfnA5tgWNftVHyKBxcKLzo="},
 	}
 
 	// A device on the PRIMARY → dials the primary (itself).
-	if ep, pk, ok := activeHubDialFrom(primary, active); !ok || ep != "primary.example:51820" || pk != "KPRIM" {
+	if ep, pk, ok := activeHubDialFrom(primary, active); !ok || ep != "primary.example:51820" || pk != "mAmJLPTeOOw+Ux2g2W3edsBX0rE41ChqzbZmpKLlrbo=" {
 		t.Fatalf("device on primary must dial the primary, got (%q,%q,%v)", ep, pk, ok)
 	}
 	// A device on the STANDBY → STILL dials the ACTIVE PRIMARY (the re-home target), not the standby.
-	if ep, pk, ok := activeHubDialFrom(standby, active); !ok || ep != "primary.example:51820" || pk != "KPRIM" {
+	if ep, pk, ok := activeHubDialFrom(standby, active); !ok || ep != "primary.example:51820" || pk != "mAmJLPTeOOw+Ux2g2W3edsBX0rE41ChqzbZmpKLlrbo=" {
 		t.Fatalf("device on a hub member must dial the ACTIVE PRIMARY, got (%q,%q,%v)", ep, pk, ok)
 	}
 	// A device on a NON-member spoke → NOT derived (caller keeps the node's own endpoint).

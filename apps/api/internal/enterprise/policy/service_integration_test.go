@@ -47,8 +47,7 @@ func seed(t *testing.T, pool *pgxpool.Pool) fixture {
 	exec(`INSERT INTO users (id, email) VALUES ($1,$2)`, f.user, "owner-"+f.user.String()[:8]+"@ex.com")
 	exec(`INSERT INTO memberships (org_id, user_id, role) VALUES ($1,$2,'owner')`, f.org, f.user)
 	exec(`INSERT INTO nodes (id, org_id, name, cert_serial) VALUES ($1,$2,'gw',$3)`, f.node, f.org, "serial-"+f.node.String())
-	exec(`INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, assigned_ip, full_tunnel)
-	      VALUES ($1,$2,$3,$4,'laptop','pk','10.99.0.10',true)`, f.device, f.org, f.user, f.node)
+	exec(`INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, assigned_ip, full_tunnel) VALUES ($1, $2, $3, $4, 'laptop', 'ZzN444nzLsFjGeLNmSE9lzuvLAWI7mGMU2Z3fLroWnc=', '10.99.0.10', true)`, f.device, f.org, f.user, f.node)
 	// An authed owner principal so mutations pass their own membership checks.
 	f.ctx = authctx.WithOrg(authctx.WithPrincipal(ctx,
 		&authctx.Principal{UserID: f.user, EmailVerified: true, Roles: map[uuid.UUID]string{f.org: "owner"}}), f.org)
@@ -209,8 +208,7 @@ func TestPerUserGrantDropsOnMemberRemoval(t *testing.T) {
 	bob, bobDev := uuid.New(), uuid.New()
 	exec(`INSERT INTO users (id, email) VALUES ($1,$2)`, bob, "bob-"+bob.String()[:8]+"@ex.com")
 	exec(`INSERT INTO memberships (org_id, user_id, role) VALUES ($1,$2,'member')`, f.org, bob)
-	exec(`INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, assigned_ip)
-	      VALUES ($1,$2,$3,$4,'bob-laptop','pkbob','10.99.0.11')`, bobDev, f.org, bob, f.node)
+	exec(`INSERT INTO devices (id, org_id, user_id, node_id, name, public_key, assigned_ip) VALUES ($1, $2, $3, $4, 'bob-laptop', '+moqMY7wkFw8jxZ8s2v+Bw8lpvOFeEYCT9/LCKbJIA4=', '10.99.0.11')`, bobDev, f.org, bob, f.node)
 
 	s := policy.NewService(pool)
 	s.SetNotifier(&fakeNotifier{})
