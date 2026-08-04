@@ -283,23 +283,58 @@ rename removes the false claim; it does not make the state reviewable by a user.
 
 ---
 
-## ⚠ 5 — `users.deleted_at` IS READ EVERYWHERE AND WRITTEN NOWHERE
+## ⛔ 5 — `users.deleted_at`: **18 PRE-ARMED GUARDS** ON A COLUMN NOTHING WRITES, FIVE OF THEM DATA-PLANE
 
-**Status: OPEN. Found while measuring D26's reachability, 2026-08-04. Collected, not chased.**
+**Status: OPEN, MEASURED. Found while measuring D26's reachability, 2026-08-04. Filed with the count,
+deliberately not fixed.**
 
-`users.deleted_at` is filtered on by nearly every query touching the table — and **no query, and no Go
-code, ever sets it.** Deactivation is `users.status`; `RemoveMember` removes the *membership*.
+`users.deleted_at` is filtered on by **18 predicates across 18 queries** — and **no query, no Go code, and
+no migration ever sets it.** Deactivation is `users.status`; `RemoveMember` removes the *membership*.
 
-⛔ **SO EVERY `deleted_at IS NULL` PREDICATE ON `users` IS PRESENTLY A NO-OP.** Including the one that
-`lint:allow-deleted` reasons about on `ListMachineCredentialsForOrg` and `ListNodeOwnerEmails`: those
-annotations argue about *soft-deleted users*, and there are none, and there cannot be.
+> ## **THIS IS NOT A DORMANT COLUMN. IT IS A FLEET OF GUARDS THAT ALL CHANGE MEANING ON THE SAME DAY.**
+> ## Every one of the 18 is a no-op today and correct tomorrow, and the transition is a single commit
+> ## somewhere else entirely — the one that first writes the column.
 
-> ## **DORMANT MACHINERY THAT LOOKS LIKE A GUARD.** The predicate reads as protection and provides none.
-> ## Worse, its presence is what makes the annotation feel like a considered exception rather than a
-> ## statement about a state the product cannot reach.
+### The 18, and what each becomes the day something writes it
 
-⚠ **The annotations are still right** — they describe what *should* happen when soft-delete exists. But
-nobody reading them can tell the difference between "we thought about this" and "this is untested by
-construction", and that is exactly the gap this register exists for.
+| query | today | the day soft-delete exists |
+| --- | --- | --- |
+| ⛔ `devices.sql:ListActiveWireGuardPeersForNode` | no-op | **a soft-deleted user's peers leave the tunnel** |
+| ⛔ `devices.sql:ListActiveOVPNDevicesForNode` | no-op | **same, for OpenVPN** |
+| ⛔ `devices.sql:ListActiveFullTunnelDevices` | no-op | **full-tunnel egress set changes** |
+| ⛔ `policy.sql:ListActiveDevicesForOrg` | no-op | **the compiled artifact's device set changes** |
+| ⛔ `policy.sql:ListGroupMembers` | no-op | **policy subjects disappear from rules** |
+| `machine_credentials.sql` ×3 (list · assign · verification) | no-op | ownership + D21's verification gate |
+| `users.sql` ×5 (get-by-email · get-by-id · set-password · mark-verified · set-status) | no-op | auth and account paths |
+| `organizations.sql` ×2, `memberships.sql`, `invitations.sql`, `idpsync.sql` | no-op | rosters and counts |
 
-**Not fixed:** whether the column is wired up or removed is a product decision, not a slice's.
+⛔ **FIVE OF THE EIGHTEEN ARE DATA-PLANE.** They decide who is a WireGuard or OpenVPN peer and what the
+policy artifact contains. **The first write to `users.deleted_at` is therefore a tunnel-affecting change**,
+made by whoever implements soft-delete — who will be reading a column definition, not a peer list.
+
+⚠ **And the direction is fail-closed, which is why nobody will notice until it happens.** A soft-deleted
+user's tunnels *stop*. That is almost certainly the intent — but it will arrive as a side effect of a
+column, not as a decision about a data plane.
+
+### ⭐ AND AN ARMED GUARD IS ENFORCING IT — THE VACUITY CLASS, APPLIED TO THE GUARD INVENTORY
+
+`TestQueriesScopeDeletedAt` (`apps/api/db/querylint_test.go`) scopes four tables: `devices`,
+`k8s_services`, `organizations`, **`users`**. For `users` it is **an armed guard requiring a predicate that
+does nothing** — it refuses any new query that omits `deleted_at IS NULL`, protecting against a state the
+product cannot currently reach.
+
+> ## **A GUARD THAT ENFORCES A NO-OP CANNOT FAIL FOR THE REASON IT EXISTS.** *Could this check have failed?*
+> ## — for `users`, not today, and not by any input the product can produce. It is inventory that reads as
+> ## coverage.
+
+⚠ **The guard is still RIGHT, and that is what makes it hard to see.** It is pre-arming the fleet, which is
+exactly what you would want if soft-delete is coming. **But its greenness is evidence of nothing**, and the
+two `lint:allow-deleted` annotations written this epic (`ListMachineCredentialsForOrg`,
+`ListNodeOwnerEmails`) argue carefully about soft-deleted users — **a state that has never existed.** The
+reasoning is sound and untested by construction, and a reader cannot tell which.
+
+### Not fixed
+
+Whether the column is wired up or removed is a product decision. ⛔ **What this row buys is that the day
+someone writes it, the blast radius is already counted: 18 predicates, 5 of them on the data plane.**
+
