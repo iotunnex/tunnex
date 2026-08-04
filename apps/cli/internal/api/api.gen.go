@@ -1176,6 +1176,12 @@ type Node struct {
 	// OvpnHealth S9.1 (4d): the OpenVPN server's refuse-loudly kind, present ONLY when an OVPN-enabled gateway is not serving. ovpn_certs_absent / ovpn_binary_absent = missing material or binary; ovpn_transit_conflict (WF-OVPN-2) = the server tun's transit range overlaps the device pool or a pushed route on this gateway (a local disjointness guard). A DIFFERENT axis from policy health — surfaced so an operator sees WHY. Absent when healthy (resolves on its own once the material/binary/config is corrected).
 	OvpnHealth *NodeOvpnHealth `json:"ovpn_health,omitempty"`
 
+	// OwnerEmail Resolved server-side from owner_user_id by LEFT JOIN on users (S15.1/D22 — the roster cannot name an owner who has LEFT the org, and that is exactly the row an accountability screen exists for). NULL when unattributable.
+	OwnerEmail *string `json:"owner_email"`
+
+	// OwnerUserId S15.2/D14: the human this agent principal acts for — carried from the join token's ISSUER at enrolment. NULL means UNATTRIBUTABLE, never "nobody is responsible": it means the control plane cannot say who authorised this agent into the org, which is a different and weaker claim.
+	OwnerUserId *openapi_types.UUID `json:"owner_user_id"`
+
 	// PolicyDegraded Zero Trust (enterprise): a single CONSERVATIVE health signal for the gateway's policy enforcement. degraded = (apply error) OR (an enforcing apply is currently failing) OR (enforcing AND the policy in force differs from what the control plane would push now). The field errs toward OVER-reporting (a false "degraded" is an annoyance; a false "healthy" is the silent-blackhole class) — except in the provider can't-determine window, where the gateway is guaranteed on its last-good fail-closed policy (never open, never blackholing from this cause). The differentiated breakdown (which kind of degraded) + badge UX is S7.4, reading the same agent-reported JSONB.
 	PolicyDegraded *bool `json:"policy_degraded,omitempty"`
 
@@ -1191,6 +1197,9 @@ type Node struct {
 	// SiteLinkNotePeer WF-B: the SUBORDINATE site-link note — a DEMOTED hub member whose link is dead WHILE org transit rides the active primary (healthy). Names the demoted-dead peer for a distinct line item ("aws-gw-1 (demoted)"), INDEPENDENT of `policy_degraded_kind` (the headline stays its real state). NULL = no note. Never set alongside a `site_link_down` headline (a real transit failure gets no reassuring subordinate — the inverse-red guard). Derived from THE ONE liveness census.
 	SiteLinkNotePeer *string    `json:"site_link_note_peer"`
 	Status           NodeStatus `json:"status"`
+
+	// Unattributable S15.2/D25(C) — DEGRADE, DO NOT REFUSE. An agent with no owner KEEPS RUNNING and says so. An unattributable tunnel is a LOGGING failure, not an access-control one: the policy engine still enforces every rule, so refusing at use would take a tunnel down for an identity-management reason and buy nothing. Contrast the cold-start deny-until-first-fetch, which IS fail-closed because its alternative is a breach. This flag is what the operator sees instead.
+	Unattributable *bool `json:"unattributable,omitempty"`
 }
 
 // NodeOvpnHealth S9.1 (4d): the OpenVPN server's refuse-loudly kind, present ONLY when an OVPN-enabled gateway is not serving. ovpn_certs_absent / ovpn_binary_absent = missing material or binary; ovpn_transit_conflict (WF-OVPN-2) = the server tun's transit range overlaps the device pool or a pushed route on this gateway (a local disjointness guard). A DIFFERENT axis from policy health — surfaced so an operator sees WHY. Absent when healthy (resolves on its own once the material/binary/config is corrected).

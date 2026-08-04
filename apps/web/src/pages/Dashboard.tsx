@@ -38,7 +38,7 @@ import {
   Loading,
   Panel,
 } from "../components/ui";
-import { gatewayHealthRow, policyHealthBadge } from "../lib/healthview";
+import { attributionBadge, gatewayHealthRow, policyHealthBadge } from "../lib/healthview";
 import {
   isFreshOrg,
   sortGateways,
@@ -520,7 +520,15 @@ export default function Dashboard() {
                             // which is what put a green verdict on a revoked gateway. Deciding it here at
                             // all was the defect; gatewayHealthRow owns it now.
                             const v = gatewayHealthRow(n);
-                            return { id: n.id, name: n.name, label: v.label, tone: v.tone };
+                            // ⛔ A SECOND, INDEPENDENT BADGE — NOT A REPLACEMENT (S15.2, D25(C)). A gateway
+                            // can be perfectly healthy AND unattributable, so folding attribution into the
+                            // health verdict would force a choice between reporting an enforcement problem
+                            // and reporting an accountability one. Both, or neither.
+                            const a = attributionBadge(n);
+                            return {
+                              id: n.id, name: n.name, label: v.label, tone: v.tone,
+                              attribution: a ? a.label : null, attributionDetail: a ? a.detail : null,
+                            };
                           }),
                         ).map((g) => (
                           <ListItem key={g.id}>
@@ -528,7 +536,17 @@ export default function Dashboard() {
                               <span className="truncate font-mono text-mono text-ink-primary">
                                 {g.name}
                               </span>
-                              <Badge tone={g.tone}>{g.label}</Badge>
+                              <span className="flex shrink-0 items-center gap-1.5">
+                                {/* ⚠ The detail rides a wrapping <span title>, not the Badge — Badge takes
+                                    only tone+children, and widening a shared primitive to carry one
+                                    caller's tooltip is how a design system stops being one. */}
+                                {g.attribution && (
+                                  <span title={g.attributionDetail ?? undefined}>
+                                    <Badge tone="warn">{g.attribution}</Badge>
+                                  </span>
+                                )}
+                                <Badge tone={g.tone}>{g.label}</Badge>
+                              </span>
                             </span>
                           </ListItem>
                         ))}

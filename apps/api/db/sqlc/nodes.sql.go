@@ -634,6 +634,50 @@ func (q *Queries) ListFailoverOrgs(ctx context.Context) ([]uuid.UUID, error) {
 	return items, nil
 }
 
+const listNodeOwnerEmails = `-- name: ListNodeOwnerEmails :many
+SELECT n.id AS node_id, u.email AS owner_email
+FROM nodes n
+JOIN users u ON u.id = n.owner_user_id
+WHERE n.org_id = $1
+`
+
+type ListNodeOwnerEmailsRow struct {
+	NodeID     uuid.UUID `json:"node_id"`
+	OwnerEmail string    `json:"owner_email"`
+}
+
+// ⛔ A SEPARATE RESOLVER, NOT A WIDER ListNodes — and the reason is a measurement, not taste. Widening the
+// list row rippled into FOUR consumers (LoadSiteTopoBatch, PolicyHealthForNodes, NodeDisplayExtrasForNodes,
+// toAPINode), none of which know or care about ownership. A shared row type is a coupling; this keeps the
+// pure helpers' inputs narrow.
+//
+// ⛔ RESOLVED FROM `users`, NOT FROM THE MEMBER ROSTER (S15.1/D22, applied to agents). The roster cannot
+// name an owner who has LEFT the org, and that is exactly the row an accountability surface exists for.
+// `users` survives both membership deletion and deactivation.
+//
+// lint:allow-deleted — DELIBERATE, the same argument as ListMachineCredentialsForOrg: this does not ACT on
+// a user, it RESOLVES A RECORDED IDENTITY for display. Scoping deleted_at would blank the owner of an agent
+// whose owner was soft-deleted — the failure D22 was ruled to end, reached from another direction.
+func (q *Queries) ListNodeOwnerEmails(ctx context.Context, orgID uuid.UUID) ([]ListNodeOwnerEmailsRow, error) {
+	rows, err := q.db.Query(ctx, listNodeOwnerEmails, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNodeOwnerEmailsRow{}
+	for rows.Next() {
+		var i ListNodeOwnerEmailsRow
+		if err := rows.Scan(&i.NodeID, &i.OwnerEmail); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNodePeerStatusForOrg = `-- name: ListNodePeerStatusForOrg :many
 SELECT nps.node_id, nps.public_key, nps.last_handshake_at, nps.rx_bytes, nps.tx_bytes, nps.updated_at
 FROM node_peer_status nps

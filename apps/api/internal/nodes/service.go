@@ -2155,6 +2155,23 @@ func (s *Service) ListNodes(ctx context.Context, orgID uuid.UUID) ([]sqlc.Node, 
 	return s.q.ListNodes(ctx, orgID)
 }
 
+// OwnerEmails maps node id -> the owner's email, resolved from `users` (S15.2; D22 applied to agents).
+//
+// ⚠ A NODE MISSING FROM THIS MAP IS UNATTRIBUTABLE, and that is the ONLY thing absence means here — the
+// join is inner, so a node with no owner simply has no row. Callers must not read absence as "the lookup
+// failed": a failed lookup returns an error, and the two are different states.
+func (s *Service) OwnerEmails(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]string, error) {
+	rows, err := s.q.ListNodeOwnerEmails(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]string, len(rows))
+	for _, r := range rows {
+		out[r.NodeID] = r.OwnerEmail
+	}
+	return out, nil
+}
+
 func newToken() (raw string, hash []byte, err error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {

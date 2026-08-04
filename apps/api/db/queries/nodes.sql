@@ -78,6 +78,24 @@ SELECT * FROM nodes
 WHERE org_id = $1
 ORDER BY created_at;
 
+-- name: ListNodeOwnerEmails :many
+-- ⛔ A SEPARATE RESOLVER, NOT A WIDER ListNodes — and the reason is a measurement, not taste. Widening the
+-- list row rippled into FOUR consumers (LoadSiteTopoBatch, PolicyHealthForNodes, NodeDisplayExtrasForNodes,
+-- toAPINode), none of which know or care about ownership. A shared row type is a coupling; this keeps the
+-- pure helpers' inputs narrow.
+--
+-- ⛔ RESOLVED FROM `users`, NOT FROM THE MEMBER ROSTER (S15.1/D22, applied to agents). The roster cannot
+-- name an owner who has LEFT the org, and that is exactly the row an accountability surface exists for.
+-- `users` survives both membership deletion and deactivation.
+--
+-- lint:allow-deleted — DELIBERATE, the same argument as ListMachineCredentialsForOrg: this does not ACT on
+-- a user, it RESOLVES A RECORDED IDENTITY for display. Scoping deleted_at would blank the owner of an agent
+-- whose owner was soft-deleted — the failure D22 was ruled to end, reached from another direction.
+SELECT n.id AS node_id, u.email AS owner_email
+FROM nodes n
+JOIN users u ON u.id = n.owner_user_id
+WHERE n.org_id = $1;
+
 -- name: RenewNodeCert :exec
 -- lint:cross-org — keyed by node id after the caller authorized via the current
 -- cert; renewal rotates the serial and stamps activity/version.

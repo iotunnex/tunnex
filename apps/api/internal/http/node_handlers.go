@@ -57,9 +57,28 @@ func (s apiServer) ListNodes(ctx context.Context, req api.ListNodesRequestObject
 	health := s.nodes.PolicyHealthForNodes(ctx, req.OrgId, ns, batch)
 	// S8.3: the hub designation (projection of the ONE election) + the reported max policy version (CW).
 	extras := s.nodes.NodeDisplayExtrasForNodes(ctx, req.OrgId, ns, batch)
+	// ⛔ D25(C) — DEGRADE, DO NOT REFUSE. An agent with no owner KEEPS RUNNING and the surface says so.
+	// ⚠ AN ERROR HERE IS NOT "NOBODY IS ATTRIBUTABLE". If the resolver fails, every node would silently
+	// render as unattributable — a false alarm across the whole fleet, which is the reassuring-empty class
+	// inverted. Fail the request instead: the operator gets an error they can retry, not a fleet-wide lie.
+	owners, err := s.nodes.OwnerEmails(ctx, req.OrgId)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]api.Node, 0, len(ns))
 	for _, n := range ns {
 		an := toAPINode(n)
+		if n.OwnerUserID.Valid {
+			ow := uuid.UUID(n.OwnerUserID.Bytes)
+			an.OwnerUserId = &ow
+			if em, ok := owners[n.ID]; ok {
+				an.OwnerEmail = &em
+			}
+		}
+		// The flag is derived from the COLUMN, never from the email lookup — an owner who exists but cannot
+		// be resolved is still attributable, and saying otherwise would blame the join for the fact.
+		un := !n.OwnerUserID.Valid
+		an.Unattributable = &un
 		h := health[n.ID]
 		an.PolicyDegraded = &h.Degraded
 		k := api.NodePolicyDegradedKind(h.Kind)

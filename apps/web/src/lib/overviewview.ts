@@ -55,6 +55,14 @@ export interface GatewayRow {
   /** The badge label from the ONE health interpreter — never a second copy of the vocabulary. */
   label: string;
   tone: "ok" | "warn" | "danger" | "neutral";
+  /**
+   * S15.2 / D25(C) — the attribution badge, INDEPENDENT of the health verdict above.
+   *
+   * ⛔ A SEPARATE FIELD RATHER THAN ANOTHER TONE, because a gateway can be healthy AND unattributable.
+   * Merging them would make one of the two facts unreportable whenever the other was present.
+   */
+  attribution?: string | null;
+  attributionDetail?: string | null;
 }
 
 /**
@@ -87,6 +95,14 @@ export interface PeerSlice {
   label: string;
   value: number;
   tone: "ok" | "warn" | "danger" | "neutral";
+  /**
+   * S15.2 / D25(C) — the attribution badge, INDEPENDENT of the health verdict above.
+   *
+   * ⛔ A SEPARATE FIELD RATHER THAN ANOTHER TONE, because a gateway can be healthy AND unattributable.
+   * Merging them would make one of the two facts unreportable whenever the other was present.
+   */
+  attribution?: string | null;
+  attributionDetail?: string | null;
 }
 
 /**
