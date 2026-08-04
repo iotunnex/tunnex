@@ -204,7 +204,7 @@ func mustNode(t *testing.T, ctx context.Context, q *sqlc.Queries, orgID uuid.UUI
 func mustDevice(t *testing.T, ctx context.Context, q *sqlc.Queries, orgID, userID, nodeID uuid.UUID) uuid.UUID {
 	t.Helper()
 	d, err := q.CreateDevice(ctx, sqlc.CreateDeviceParams{
-		Kind: "human", // explicit: the COALESCE default covers a forgetful caller, tests should still say what they mean
+		Kind:  "human", // explicit: the COALESCE default covers a forgetful caller, tests should still say what they mean
 		OrgID: orgID, UserID: userID, NodeID: nodeID, Name: "ovpn-dev", PublicKey: "k", Status: "active",
 		Transport: "openvpn",
 	})
