@@ -44,6 +44,11 @@ var walkBodies = map[string]string{
 	"setmfaenforce":    `{"enforce":false}`,
 	// S10.2 machine credentials (machine:manage-gated; a valid body so the POST reaches auth, not the validator).
 	"mintmachinecredential": `{"name":"walk-op"}`,
+	// S15.1 owner assignment (machine:manage-gated). ⛔ WITHOUT THIS THE WALK CAUGHT A REAL NO-ORACLE
+	// DEFECT: the required body made the request validator answer 400 BEFORE auth ran, so a sessionless
+	// caller learned the endpoint exists and what it expects. A valid body pushes the request past the
+	// validator so the 401 is the AUTH layer's answer, which is the thing under test.
+	"assignmachinecredentialowner": `{"user_id":"11111111-1111-1111-1111-111111111111"}`,
 	// S7.1 Zero Trust policy gated ops (all enterprise; each still 401s sessionless).
 	"creategroup":          `{"name":"Walk"}`,
 	"updategroup":          `{"name":"Walk"}`,
