@@ -80,6 +80,12 @@ const (
 	DeviceHealthStateUnknown      DeviceHealthState = "unknown"
 )
 
+// Defines values for DeviceKind.
+const (
+	Agent DeviceKind = "agent"
+	Human DeviceKind = "human"
+)
+
 // Defines values for DeviceStatus.
 const (
 	DeviceStatusActive  DeviceStatus = "active"
@@ -611,8 +617,11 @@ type Device struct {
 	HealthReportedAt *time.Time         `json:"health_reported_at,omitempty"`
 	HealthState      *DeviceHealthState `json:"health_state,omitempty"`
 	Id               openapi_types.UUID `json:"id"`
-	LastHandshakeAt  *time.Time         `json:"last_handshake_at,omitempty"`
-	Name             string             `json:"name"`
+
+	// Kind S15.2/S15.3 — what KIND of principal this device belongs to. 'agent' is a data-plane agent's own row: it is cap-EXEMPT (a fleet of gateways must not spend one admin's laptop allowance), unique per node, and address-bearing so the agent is attributable. 'human' is everything else. ⛔ STRUCTURAL, not descriptive — code branches on this. Contrast Resource.label, which carries nothing and is an operator's free-text note.
+	Kind            *DeviceKind `json:"kind,omitempty"`
+	LastHandshakeAt *time.Time  `json:"last_handshake_at,omitempty"`
+	Name            string      `json:"name"`
 
 	// NeedsReexport True when the config this device was ISSUED no longer matches reality, so the user must re-import it. Three causes: (1) its baked site ROUTES no longer match the org's current routed ranges — STATIC exports only, since a managed device polls routes; (2) its baked tunnel ADDRESS is not the device's current address — EVERY mode, including managed, because every issued config embeds an interface address; (3) its baked GATEWAY is not the device's current gateway — STATIC exports only, because a static export is a file that never polls and cannot be re-pointed, whereas a managed device re-homes itself through the dial channel (residual: only when its node is a hub-set member). Reported for all provisioning modes; false when nothing was recorded at issuance (rows predating the address snapshot), because unknown must not be reported as stale. Advisory, never enforcement.
 	NeedsReexport *bool              `json:"needs_reexport,omitempty"`
@@ -634,6 +643,9 @@ type DeviceHealthFailedChecksMode string
 
 // DeviceHealthState defines model for Device.HealthState.
 type DeviceHealthState string
+
+// DeviceKind S15.2/S15.3 — what KIND of principal this device belongs to. 'agent' is a data-plane agent's own row: it is cap-EXEMPT (a fleet of gateways must not spend one admin's laptop allowance), unique per node, and address-bearing so the agent is attributable. 'human' is everything else. ⛔ STRUCTURAL, not descriptive — code branches on this. Contrast Resource.label, which carries nothing and is an operator's free-text note.
+type DeviceKind string
 
 // DeviceStatus defines model for Device.Status.
 type DeviceStatus string
@@ -1377,6 +1389,9 @@ type Resource struct {
 	Cidr      string             `json:"cidr"`
 	CreatedAt time.Time          `json:"created_at"`
 	Id        openapi_types.UUID `json:"id"`
+
+	// Label S15.3 — a free-text note describing what this destination IS (e.g. "MCP server"). ⛔ AN OPERATOR'S ASSERTION, NEVER AN INFERENCE: the product cannot detect that something speaks MCP, and a field implying it could would claim a capability the system does not have. ⛔ It NEVER reaches the compiled artifact — the compiler reads cidr, protocol and the port bounds from this table and nothing else — so it cannot desync an artifact or bump RequiredVersion.
+	Label     *string            `json:"label"`
 	Name      string             `json:"name"`
 	OrgId     openapi_types.UUID `json:"org_id"`
 	PortHigh  *int               `json:"port_high"`
@@ -1390,7 +1405,10 @@ type ResourceProtocol string
 
 // ResourceRequest defines model for ResourceRequest.
 type ResourceRequest struct {
-	Cidr     string                  `json:"cidr"`
+	Cidr string `json:"cidr"`
+
+	// Label Free-text note describing what this destination IS. Operator-asserted; never inferred.
+	Label    *string                 `json:"label"`
 	Name     string                  `json:"name"`
 	PortHigh *int                    `json:"port_high"`
 	PortLow  *int                    `json:"port_low"`

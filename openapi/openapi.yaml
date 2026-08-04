@@ -2700,6 +2700,15 @@ components:
         protocol: { type: string, enum: [any, tcp, udp] }
         port_low: { type: integer, nullable: true, minimum: 1, maximum: 65535 }
         port_high: { type: integer, nullable: true, minimum: 1, maximum: 65535 }
+        label:
+          type: string
+          nullable: true
+          description: >-
+            S15.3 — a free-text note describing what this destination IS (e.g. "MCP server"). ⛔ AN
+            OPERATOR'S ASSERTION, NEVER AN INFERENCE: the product cannot detect that something speaks MCP,
+            and a field implying it could would claim a capability the system does not have. ⛔ It NEVER
+            reaches the compiled artifact — the compiler reads cidr, protocol and the port bounds from this
+            table and nothing else — so it cannot desync an artifact or bump RequiredVersion.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -2713,6 +2722,7 @@ components:
         protocol: { type: string, enum: [any, tcp, udp] }
         port_low: { type: integer, nullable: true, minimum: 1, maximum: 65535 }
         port_high: { type: integer, nullable: true, minimum: 1, maximum: 65535 }
+        label: { type: string, nullable: true, maxLength: 60, description: "Free-text note describing what this destination IS. Operator-asserted; never inferred." }
 
     PolicyRule:
       type: object
@@ -3484,6 +3494,15 @@ components:
         node_id: { type: string, format: uuid }
         name: { type: string }
         platform: { type: string }
+        kind:
+          type: string
+          enum: [human, agent]
+          description: >-
+            S15.2/S15.3 — what KIND of principal this device belongs to. 'agent' is a data-plane agent's own
+            row: it is cap-EXEMPT (a fleet of gateways must not spend one admin's laptop allowance), unique
+            per node, and address-bearing so the agent is attributable. 'human' is everything else.
+            ⛔ STRUCTURAL, not descriptive — code branches on this. Contrast Resource.label, which carries
+            nothing and is an operator's free-text note.
         public_key: { type: string }
         assigned_ip: { type: string }
         needs_reexport:

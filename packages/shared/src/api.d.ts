@@ -2105,6 +2105,8 @@ export interface components {
             protocol: "any" | "tcp" | "udp";
             port_low?: number | null;
             port_high?: number | null;
+            /** @description S15.3 — a free-text note describing what this destination IS (e.g. "MCP server"). ⛔ AN OPERATOR'S ASSERTION, NEVER AN INFERENCE: the product cannot detect that something speaks MCP, and a field implying it could would claim a capability the system does not have. ⛔ It NEVER reaches the compiled artifact — the compiler reads cidr, protocol and the port bounds from this table and nothing else — so it cannot desync an artifact or bump RequiredVersion. */
+            label?: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -2117,6 +2119,8 @@ export interface components {
             protocol: "any" | "tcp" | "udp";
             port_low?: number | null;
             port_high?: number | null;
+            /** @description Free-text note describing what this destination IS. Operator-asserted; never inferred. */
+            label?: string | null;
         };
         PolicyRule: {
             managed_by_operator: boolean;
@@ -2645,6 +2649,11 @@ export interface components {
             node_id: string;
             name: string;
             platform?: string;
+            /**
+             * @description S15.2/S15.3 — what KIND of principal this device belongs to. 'agent' is a data-plane agent's own row: it is cap-EXEMPT (a fleet of gateways must not spend one admin's laptop allowance), unique per node, and address-bearing so the agent is attributable. 'human' is everything else. ⛔ STRUCTURAL, not descriptive — code branches on this. Contrast Resource.label, which carries nothing and is an operator's free-text note.
+             * @enum {string}
+             */
+            kind?: "human" | "agent";
             public_key: string;
             assigned_ip?: string;
             /** @description True when the config this device was ISSUED no longer matches reality, so the user must re-import it. Three causes: (1) its baked site ROUTES no longer match the org's current routed ranges — STATIC exports only, since a managed device polls routes; (2) its baked tunnel ADDRESS is not the device's current address — EVERY mode, including managed, because every issued config embeds an interface address; (3) its baked GATEWAY is not the device's current gateway — STATIC exports only, because a static export is a file that never polls and cannot be re-pointed, whereas a managed device re-homes itself through the dial channel (residual: only when its node is a hub-set member). Reported for all provisioning modes; false when nothing was recorded at issuance (rows predating the address snapshot), because unknown must not be reported as stale. Advisory, never enforcement. */

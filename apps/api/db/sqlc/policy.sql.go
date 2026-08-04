@@ -102,9 +102,9 @@ func (q *Queries) CreatePolicyRule(ctx context.Context, arg CreatePolicyRulePara
 }
 
 const createResource = `-- name: CreateResource :one
-INSERT INTO resources (org_id, name, cidr, protocol, port_low, port_high)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, org_id, name, cidr, protocol, port_low, port_high, created_at, updated_at
+INSERT INTO resources (org_id, name, cidr, protocol, port_low, port_high, label)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, org_id, name, cidr, protocol, port_low, port_high, created_at, updated_at, label
 `
 
 type CreateResourceParams struct {
@@ -114,9 +114,12 @@ type CreateResourceParams struct {
 	Protocol string    `json:"protocol"`
 	PortLow  *int32    `json:"port_low"`
 	PortHigh *int32    `json:"port_high"`
+	Label    *string   `json:"label"`
 }
 
 // ── resources (static destinations) ─────────────────────────────────────────────
+// ⚠ `label` is a free-text OPERATOR NOTE (S15.3). It is NOT read by the compiler — CanonicalHash sees
+// cidr, protocol and the port bounds only — so it cannot desync an artifact or bump RequiredVersion.
 func (q *Queries) CreateResource(ctx context.Context, arg CreateResourceParams) (Resource, error) {
 	row := q.db.QueryRow(ctx, createResource,
 		arg.OrgID,
@@ -125,6 +128,7 @@ func (q *Queries) CreateResource(ctx context.Context, arg CreateResourceParams) 
 		arg.Protocol,
 		arg.PortLow,
 		arg.PortHigh,
+		arg.Label,
 	)
 	var i Resource
 	err := row.Scan(
@@ -137,6 +141,7 @@ func (q *Queries) CreateResource(ctx context.Context, arg CreateResourceParams) 
 		&i.PortHigh,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Label,
 	)
 	return i, err
 }
@@ -384,7 +389,7 @@ func (q *Queries) GetPolicyRuleForUpdate(ctx context.Context, arg GetPolicyRuleF
 }
 
 const getResource = `-- name: GetResource :one
-SELECT id, org_id, name, cidr, protocol, port_low, port_high, created_at, updated_at FROM resources
+SELECT id, org_id, name, cidr, protocol, port_low, port_high, created_at, updated_at, label FROM resources
 WHERE id = $1 AND org_id = $2
 `
 
@@ -406,6 +411,7 @@ func (q *Queries) GetResource(ctx context.Context, arg GetResourceParams) (Resou
 		&i.PortHigh,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Label,
 	)
 	return i, err
 }
@@ -656,7 +662,7 @@ func (q *Queries) ListPolicyRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]
 }
 
 const listResourcesByOrg = `-- name: ListResourcesByOrg :many
-SELECT id, org_id, name, cidr, protocol, port_low, port_high, created_at, updated_at FROM resources
+SELECT id, org_id, name, cidr, protocol, port_low, port_high, created_at, updated_at, label FROM resources
 WHERE org_id = $1
 ORDER BY name
 `
@@ -680,6 +686,7 @@ func (q *Queries) ListResourcesByOrg(ctx context.Context, orgID uuid.UUID) ([]Re
 			&i.PortHigh,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Label,
 		); err != nil {
 			return nil, err
 		}
@@ -819,9 +826,9 @@ func (q *Queries) SetPolicyRuleEnabled(ctx context.Context, arg SetPolicyRuleEna
 
 const updateResource = `-- name: UpdateResource :one
 UPDATE resources
-SET name = $3, cidr = $4, protocol = $5, port_low = $6, port_high = $7
+SET name = $3, cidr = $4, protocol = $5, port_low = $6, port_high = $7, label = $8
 WHERE id = $1 AND org_id = $2
-RETURNING id, org_id, name, cidr, protocol, port_low, port_high, created_at, updated_at
+RETURNING id, org_id, name, cidr, protocol, port_low, port_high, created_at, updated_at, label
 `
 
 type UpdateResourceParams struct {
@@ -832,6 +839,7 @@ type UpdateResourceParams struct {
 	Protocol string    `json:"protocol"`
 	PortLow  *int32    `json:"port_low"`
 	PortHigh *int32    `json:"port_high"`
+	Label    *string   `json:"label"`
 }
 
 func (q *Queries) UpdateResource(ctx context.Context, arg UpdateResourceParams) (Resource, error) {
@@ -843,6 +851,7 @@ func (q *Queries) UpdateResource(ctx context.Context, arg UpdateResourceParams) 
 		arg.Protocol,
 		arg.PortLow,
 		arg.PortHigh,
+		arg.Label,
 	)
 	var i Resource
 	err := row.Scan(
@@ -855,6 +864,7 @@ func (q *Queries) UpdateResource(ctx context.Context, arg UpdateResourceParams) 
 		&i.PortHigh,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Label,
 	)
 	return i, err
 }
