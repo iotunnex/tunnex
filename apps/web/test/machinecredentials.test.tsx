@@ -88,6 +88,16 @@ describe("⛔ the three empty states are distinguishable", () => {
     const banner = container.querySelector('[data-state="all-owned"]')!;
     const list = container.querySelector("ul")!;
     expect(banner.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // ⛔ IT IS A CLAIM ABOUT OWNERSHIP, NOT ABOUT HEALTH. It knows one predicate — nothing is refused
+    // for want of an owner. It cannot know the fleet is well: a credential may be revoked, dead at the
+    // far end, or owned by someone who has left. The first version said "the migration is complete for
+    // this organization", which reads as "everything is fine" AND is false on its own terms — step 4,
+    // the NOT NULL contract, has not run.
+    expect(banner.textContent).toMatch(/none is being refused/i);
+    for (const overclaim of [/migration is complete/i, /everything/i, /all (good|well|fine)/i, /healthy/i]) {
+      expect(banner.textContent).not.toMatch(overclaim);
+    }
   });
 
   it("a MIXED fleet is not 'all owned' — the banner must be earned per-row", async () => {

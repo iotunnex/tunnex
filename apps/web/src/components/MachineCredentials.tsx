@@ -174,9 +174,21 @@ export function MachineCredentials({
         <>
           {/* ⚠ ABOVE THE ROWS, DELIBERATELY. A qualifier under a list is read after the list is already
               believed. */}
+          {/* ⛔ A CLAIM ABOUT OWNERSHIP, NOT ABOUT HEALTH — AND THE FIRST VERSION SAID
+              "the migration is complete for this organization", WHICH IS BOTH.
+
+              It reads as "everything is fine here", and this banner cannot know that. It knows one
+              predicate: no credential is being refused FOR WANT OF AN OWNER. A credential can still be
+              revoked, expired at the far end, pointed at a dead operator, or owned by someone who left.
+              ⚠ AND "the migration is complete" IS FALSE ON ITS OWN TERMS: this is the expand half of an
+              expand/contract migration, and step 4 — the NOT NULL contract — has not run. An org can
+              reach every-row-owned and still have the column nullable beneath it.
+
+              > It is the exact mirror of the refusal banner: that one names what is failing, this one
+              > names what is NOT. Neither says anything about whether the fleet is well. */}
           {creds.data.every((c) => c.owner_user_id) && (
             <p data-state="all-owned" className="mt-3 rounded-md border border-ok/40 bg-ok/5 px-3 py-2 text-xs text-ok">
-              Every machine credential has an owner. The migration is complete for this organization.
+              Every machine credential has an owner — none is being refused for want of one.
             </p>
           )}
           {/* ⛔ UNASSIGNED IS AN OUTAGE, NOT UNTIDINESS — AND THE FIRST VERSION OF THIS SCREEN SAID SO
