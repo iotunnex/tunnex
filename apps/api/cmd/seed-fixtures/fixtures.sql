@@ -752,3 +752,66 @@ FROM (VALUES
   ('01900000-0000-7000-8000-0000000000b2'::uuid, 'backup-eu',  'fp-backup-eu',  interval '12 days', NULL)
 ) AS v(id, name, fp, age, seen)
 ON CONFLICT (id) DO NOTHING;
+
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+-- S15.3 — THE AI-AGENT SURFACE. **WRITTEN BY HAND, PER STATE, WITH THE ABSENCES FIRST-CLASS.**
+--
+-- ⛔ THE STATES THAT MATTER MOST ON THIS SCREEN ARE ABSENCES: an agent with NO OWNER (unattributable), an
+-- agent with NO ADDRESS, an agent with NO REACHABLE DESTINATIONS. A generator that filled every field would
+-- erase exactly the states the screen exists to show — which is the keyless-OVPN-device regression again,
+-- one story later, and the reason these rows are typed out rather than looped.
+--
+-- ⚠ AND "REACHABLE" MEANS REACHABLE IN THE PRODUCT. S15.1 seeded a state into an org with no switcher and
+-- the coverage count said 5 of 5 while four were visible. Every row below is in the DEMO org, which the
+-- reviewer lands on by default.
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+-- Two agent gateways. Both are real `nodes` rows so the surface's node-half resolves.
+INSERT INTO nodes (id, org_id, name, cert_serial, agent_version, owner_user_id)
+VALUES
+  -- STATE 1 — the healthy case: owned, addressed, attributable.
+  ('01900000-0000-7000-8000-00000000a001', '01900000-0000-7000-8000-000000000001',
+   'mcp-agent-prod', 'fixture-serial-ag001', '1.4.0',
+   (SELECT id FROM users WHERE email = 'owner@demo.tunnex.local')),
+  -- ⛔ STATE 2 — UNATTRIBUTABLE. No owner: enrolled with a token minted before the issuer column existed.
+  -- It RUNS and policy still applies to it; what is lost is the audit trail. This is the screen's most
+  -- important row and the one an operator can learn nowhere else.
+  ('01900000-0000-7000-8000-00000000a002', '01900000-0000-7000-8000-000000000001',
+   'mcp-agent-legacy', 'fixture-serial-ag002', '1.2.0', NULL)
+ON CONFLICT (id) DO NOTHING;
+
+-- The agent device rows — `kind='agent'`, which is what makes the surface recognise them.
+--
+-- ⚠ THE KEYS ARE THE PLACEHOLDER SHAPE ON PURPOSE. An agent's device row is an ATTRIBUTION identity, not a
+-- WireGuard peer: the agent IS the gateway and does not peer with itself. The peer-set query excludes these
+-- by format (S15.2 walk Leg 4), and that exclusion is correct — seeding a real key here would make the
+-- fixture claim something the product does not do.
+INSERT INTO devices (id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, kind, transport)
+VALUES
+  ('01900000-0000-7000-8000-00000000d001', '01900000-0000-7000-8000-000000000001',
+   (SELECT id FROM users WHERE email = 'owner@demo.tunnex.local'),
+   '01900000-0000-7000-8000-00000000a001', 'mcp-agent-prod', 'agent',
+   'pending-agent-01900000-0000-7000-8000-00000000a001', '10.99.0.31', 'active', 'agent', 'wireguard'),
+  -- ⛔ STATE 3 — NO ADDRESS. An agent that never received a /32 cannot be named in a flow event at all.
+  -- The screen must render "no address" rather than hiding the row or inventing one.
+  ('01900000-0000-7000-8000-00000000d002', '01900000-0000-7000-8000-000000000001',
+   (SELECT id FROM users WHERE email = 'owner@demo.tunnex.local'),
+   '01900000-0000-7000-8000-00000000a002', 'mcp-agent-legacy', 'agent',
+   'pending-agent-01900000-0000-7000-8000-00000000a002', NULL, 'active', 'agent', 'wireguard')
+ON CONFLICT (id) DO NOTHING;
+
+-- ⛔ STATE 4 — A LABELLED DESTINATION, AND STATE 5 — AN UNLABELLED ONE.
+-- The label is an OPERATOR'S ASSERTION, never an inference: the product cannot detect that something speaks
+-- MCP. Seeding one labelled and one bare is what makes that visible — a screen where every resource carried
+-- a label could not show that the field is optional and human-supplied.
+INSERT INTO resources (id, org_id, name, cidr, protocol, port_low, port_high, label)
+VALUES
+  ('01900000-0000-7000-8000-00000000c001', '01900000-0000-7000-8000-000000000001',
+   'internal-mcp', '10.20.7.10/32', 'tcp', 8931, 8931, 'MCP server'),
+  ('01900000-0000-7000-8000-00000000c002', '01900000-0000-7000-8000-000000000001',
+   'metrics-scrape', '10.20.7.11/32', 'tcp', 9090, 9090, NULL)
+ON CONFLICT (id) DO NOTHING;
+
+-- ⚠ STATE 6 — AN AGENT WITH NO REACHABLE DESTINATIONS is `mcp-agent-legacy`: NO grant references it, and
+-- that absence is deliberate. It is not a gap in the fixture; it is the state an operator most needs to
+-- recognise — an agent that exists, runs, and can reach nothing.
