@@ -7,7 +7,7 @@ import {
   type MachineCredential,
   type Member,
 } from "../lib/api";
-import { relativeAge } from "../lib/format";
+import { endSentence, relativeAge } from "../lib/format";
 import { Button, Card, ErrorText, Field, Input } from "./ui";
 import { OneTimeSecretModal } from "./OneTimeSecret";
 
@@ -162,7 +162,7 @@ export function MachineCredentials({
           data-state="load-failed"
           className="mt-3 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-xs text-danger"
         >
-          Could not load machine credentials — {creds.error}.{" "}
+          Could not load machine credentials — {endSentence(creds.error)}{" "}
           <strong>This is not the same as having none.</strong> Retry before concluding anything about
           ownership.
         </p>

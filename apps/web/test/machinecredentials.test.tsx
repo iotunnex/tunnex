@@ -73,6 +73,13 @@ describe("⛔ the three empty states are distinguishable", () => {
     // The failure must NOT be readable as absence, and must say so in words.
     expect(screen.queryByText(/no machine credentials exist/i)).toBeNull();
     expect(screen.getByText(/not the same as having none/i)).toBeTruthy();
+
+    // ⚠ SHIPPING COPY: the message is concatenated from two sources with different punctuation
+    // conventions — the client's own fallbacks are written as sentences ("Could not reach the API."),
+    // while apiErrorMessage returns the SERVER's message, whose punctuation is not ours to assume.
+    // Appending "." unconditionally shipped "Could not reach the API..".
+    const failed = document.querySelector('[data-state="load-failed"]')!;
+    expect(failed.textContent).not.toMatch(/\.\./);
   });
 
   it("ALL OWNED — earned, and rendered ABOVE the rows", async () => {
