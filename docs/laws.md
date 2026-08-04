@@ -4477,3 +4477,45 @@ re-enrolled under the same hostname.
   has not added a case.
 - **A fixture whose names carry semantics is testing the reader, not the renderer.** Name rows for what they
   ARE (`edge-gw`), never for what they are FOR (`gw-revoked`).
+
+---
+
+# ⛔ WE RULED ON A DELETE WITHOUT ASKING WHAT CASCADES
+
+**2026-08-04, rig cleanup.** A delete of three `nodes` rows was proposed and approved. `devices.node_id` is
+**`ON DELETE CASCADE`**, so the statement would have removed **10 devices** it does not mention. It was caught
+only because the FK graph was read before writing the SQL.
+
+## THE RULE THAT CAUGHT IT IS ONE WE WROTE FOR THE PRODUCT AND DID NOT APPLY TO OURSELVES
+
+S14.12's second absence question, verbatim: *"What happens after each destructive verb, and is the operator
+told? Read the FK actions and the handler's response body."* It found `ON DELETE CASCADE` on three columns —
+deleting a group silently deleted every rule referencing it, and the 204 said nothing.
+
+> ## **WE APPLIED THAT QUESTION TO OUR HANDLERS AND NOT TO OUR OWN `psql` SESSION.** A rule filed as a
+> ## product standard is not a personal habit until it is exercised where WE are the operator.
+
+**Two further things the incident produced, both of which nearly went unasked:**
+
+⛔ **THE DELETE LIST QUIETLY GREW TO MATCH A SENTENCE.** "The three from 07-30/07-31" described two rows; a
+third was from 07-23 and got swept in to make the count work. Corrected to two. **A destructive set that
+expands to fit a description is the wrong shape** — the description should be corrected, not the set.
+⚠ And removing that row changed the cascade by **zero**: it had no devices. A change made for tidiness
+altered nothing about the blast radius, which is worth knowing before assuming a smaller list is a safer one.
+
+⛔ **THERE WAS NO BACKUP.** No dump files, no cron, no systemd timer — the only `backup` unit on the host was
+Debian's `dpkg-db-backup`, which is the package database. **The rig held walk evidence that exists nowhere
+else, with no backup**, while its rows were being cited as "the only surviving evidence" in an argument for
+keeping them.
+
+**MECHANICAL:**
+- **Before any destructive statement, query the FK graph** — `information_schema.referential_constraints`
+  joined to the referencing tables — and **enumerate the rows each cascade takes**, not just the count.
+- **Back up first, and VERIFY THE BACKUP BY RESTORING IT.** `pg_restore -l` proves the dump lists a table; it
+  does not prove the table has rows. Restore to a scratch database and compare counts against live.
+  (Here: 7 nodes / 43 devices in both.)
+- **A backup that lives only on the box it protects survives a bad `DELETE` and not a lost host.** Say which
+  of the two you have.
+- **Wrap it in a transaction, verify before `COMMIT`.** Add a predicate that makes the catastrophic case
+  impossible rather than unlikely — `status = 'revoked'` alongside the id list, so a mistyped id cannot reach
+  a live gateway.
