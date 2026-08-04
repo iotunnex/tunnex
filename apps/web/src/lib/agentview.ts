@@ -100,3 +100,39 @@ export function attributionNote(
  */
 export const NO_AGENTS =
   "No AI agents are enrolled in this organization. An agent is enrolled with a join token, the same way a gateway is — it then appears here with the person who authorised it.";
+
+
+/**
+ * ⛔ THE UNDETERMINED STATE — ITS WORDS ARE RULED, AND THEY ARE PINNED LIKE THE RENDER FLOOR.
+ *
+ * A node enrolled before the marker existed (`enrolled_kind IS NULL`) is **neither an agent nor
+ * not-an-agent**. The fact was never recorded, the join token that would have carried it is consumed, and
+ * its intent was never asked for — so it **cannot be recovered**.
+ *
+ * > **NOT "not an agent"** — that asserts a fact nobody has.
+ * > **NOT "agent"** — that repeats the defect the marker was built to fix.
+ *
+ * ⚠ AND IT MUST NOT READ AS A FAULT. These nodes are working correctly. **The gap is in our record, not in
+ * them**, and copy that implies otherwise sends an operator to debug a healthy gateway.
+ *
+ * ⛔ THE PHRASE MUST NOT DRIFT INTO A VERDICT. "Unknown" softening into "none" is exactly how it would —
+ * one is an absence of knowledge, the other is a claim about the world. The test enforces the difference.
+ */
+export const UNDETERMINED_LABEL = "enrolment kind not recorded";
+
+export const UNDETERMINED_DETAIL =
+  "We do not know what this was enrolled as. This node was enrolled before Tunnex recorded that choice, so the answer was never captured and cannot be recovered. The node is working normally — this is a gap in our record, not a problem with it.";
+
+/**
+ * Which of the three states a node is in.
+ *
+ * ⚠ THREE, NOT TWO. A boolean here would force undetermined into one of the other two, which is the exact
+ * failure the ruling exists to prevent.
+ */
+export type EnrolmentKind = "agent" | "gateway" | "undetermined";
+
+export function enrolmentKind(n: { enrolled_kind?: string | null }): EnrolmentKind {
+  if (n.enrolled_kind === "agent") return "agent";
+  if (n.enrolled_kind === "gateway") return "gateway";
+  return "undetermined";
+}

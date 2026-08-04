@@ -461,3 +461,49 @@ a comment whose meaning was changed **by a tool**, with no human in the loop at 
 
 **Practice:** keep raw `''`, `""` and paired backticks out of Go doc comments when they are technical
 content — write the meaning in words, or put the snippet in code.
+
+---
+
+## ⛔ 10 — STALE `kind='agent'` DEVICE ROWS ARE **PERMANENTLY AMBIGUOUS**, NOT MERELY UNFIXED
+
+**Status: OPEN, and it cannot be closed by a script. Registered at S15.3, 2026-08-04.**
+
+Before the enrolment marker (`0069`), `allocateAgentDevice` ran on `tok.IssuedBy.Valid` alone — so **every**
+gateway enrolled with an issuer-carrying token acquired a `kind='agent'` device row **and a `/32` from the
+org pool**.
+
+**The node's kind is now answerable: `nodes.enrolled_kind IS NULL` = UNDETERMINED (ruled, §11.2).** ⛔ **The
+device rows are not.**
+
+### Why this is not a cleanup job
+
+| fact | consequence |
+| --- | --- |
+| the row is **wrong** for a gateway | it should not exist |
+| the **address is real** | a running node may be using it; removing it is an outage |
+| ⛔ **nothing distinguishes the two cases** | a gateway that got the row by accident and an agent that has it correctly are **identical rows** |
+
+> ## **THE FACT THAT WOULD TELL THEM APART IS THE ONE THAT WAS NEVER RECORDED.** The join token carried the
+> ## operator's intent and did not store it; the token is consumed. **There is no predicate to write.**
+
+⚠ **THE NEXT PERSON WILL REACH FOR A CLEANUP SCRIPT.** This row exists to say: *there is nothing to select
+on.* Any `WHERE` clause that appears to separate them is separating on something else — creation time,
+naming convention, current traffic — none of which is the fact in question, and each of which will be wrong
+for some node.
+
+### What is NOT ambiguous
+
+- **Nodes enrolled after `0069`** carry `enrolled_kind` and are unambiguous in both directions.
+- **The ambiguity does not grow.** It is a fixed, closed set: nodes enrolled between S15.2 and `0069`.
+
+### Shapes, none picked and none cheap
+
+1. **leave them** — the `/32`s stay allocated to rows that may mean nothing. Pool pressure with no signal.
+2. **ask the operator per node** — the only way to recover a fact nobody stored. ⚠ Requires a surface, and
+   an answer the operator may not have either.
+3. **reconcile from behaviour** — infer from whether the node acts like an agent. ⛔ **Inference, which this
+   epic has refused everywhere else**: the label is operator-asserted precisely because the product cannot
+   detect what something is.
+
+⛔ **Not folded into the UNDETERMINED ruling.** That ruling describes the **node** and costs nothing. This is
+about **rows and addresses**, and every option here has a price.
