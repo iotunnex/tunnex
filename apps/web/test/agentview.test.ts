@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { agentRows, attributionNote, NO_AGENTS } from "../src/lib/agentview";
+import {
+  agentRows, attributionNote, enrolmentKind, NO_AGENTS,
+  UNDETERMINED_DETAIL, UNDETERMINED_LABEL,
+} from "../src/lib/agentview";
 
 const node = (o: Partial<Record<string, unknown>> = {}) => ({
   id: String(o.id ?? "n1"),
@@ -83,6 +86,42 @@ describe("the agent surface — S15.3", () => {
       /\btool\b/i, /\bper-tool\b/i, /\bsecure\b/i, /\bprotected\b/i,
     ]) {
       expect(copy).not.toMatch(forbidden);
+    }
+  });
+});
+
+// ⛔ THE UNDETERMINED STATE'S WORDS ARE PINNED THE WAY THE RENDER FLOOR IS PINNED.
+//
+// The ruling: undetermined means *we do not know what this was enrolled as, because the fact was not
+// recorded at the time and cannot be recovered*. It is NOT "not an agent" (a fact nobody has), NOT "agent"
+// (the defect the marker fixed), and NOT a fault (these nodes work correctly).
+//
+// > **"UNKNOWN" SOFTENING INTO "NONE" IS EXACTLY HOW THE PHRASE WOULD DRIFT INTO A VERDICT** — one is an
+// > absence of knowledge, the other is a claim about the world.
+describe("the UNDETERMINED state — S15.3, ruled before the surface", () => {
+  it("⛔ THREE STATES, NOT TWO — a boolean would force undetermined into one of the others", () => {
+    expect(enrolmentKind({ enrolled_kind: "agent" })).toBe("agent");
+    expect(enrolmentKind({ enrolled_kind: "gateway" })).toBe("gateway");
+    // NULL and absent both mean undetermined — a pre-marker node, and a payload that omits the field.
+    expect(enrolmentKind({ enrolled_kind: null })).toBe("undetermined");
+    expect(enrolmentKind({})).toBe("undetermined");
+  });
+
+  it("⛔ THE COPY SAYS WE DO NOT KNOW — never that there is nothing", () => {
+    const copy = `${UNDETERMINED_LABEL} ${UNDETERMINED_DETAIL}`;
+    expect(copy).toMatch(/do not know/i);
+    expect(copy).toMatch(/cannot be recovered/i);
+    // ⛔ NOT A VERDICT. These are the words it must never drift into.
+    for (const verdict of [/\bnone\b/i, /\bnot an agent\b/i, /\bno agent\b/i, /\bis a gateway\b/i]) {
+      expect(copy).not.toMatch(verdict);
+    }
+  });
+
+  it("⚠ AND IT MUST NOT READ AS A FAULT — the gap is in our record, not in the node", () => {
+    expect(UNDETERMINED_DETAIL).toMatch(/working normally/i);
+    expect(UNDETERMINED_DETAIL).toMatch(/gap in our record/i);
+    for (const fault of [/\berror\b/i, /\bfailed?\b/i, /\bbroken\b/i, /\bmisconfigur/i, /\bproblem with (this|the) node\b/i]) {
+      expect(UNDETERMINED_DETAIL).not.toMatch(fault);
     }
   });
 });
