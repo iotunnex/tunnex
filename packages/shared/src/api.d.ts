@@ -2658,6 +2658,8 @@ export interface components {
             owner_user_id?: string | null;
             /** @description Resolved server-side from owner_user_id by LEFT JOIN on users (S15.1/D22 — the roster cannot name an owner who has LEFT the org, and that is exactly the row an accountability screen exists for). NULL when unattributable. */
             owner_email?: string | null;
+            /** @description The public host:port peers dial to reach this gateway. ⛔ EMPTY MEANS NO PEER CAN CONNECT: a config issued for such a gateway carries `Endpoint = ` and wg-quick refuses it. Surfaced so a client can refuse to issue an unusable config rather than emitting one. */
+            endpoint?: string | null;
             /** @description S15.2/D25(C) — DEGRADE, DO NOT REFUSE. An agent with no owner KEEPS RUNNING and says so. An unattributable tunnel is a LOGGING failure, not an access-control one: the policy engine still enforces every rule, so refusing at use would take a tunnel down for an identity-management reason and buy nothing. Contrast the cold-start deny-until-first-fetch, which IS fail-closed because its alternative is a breach. This flag is what the operator sees instead. */
             unattributable?: boolean;
             /**

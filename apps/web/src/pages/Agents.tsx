@@ -8,7 +8,7 @@ import {
 import { Badge, Button, Card, Field, Input, Select } from "../components/ui";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
 
-type Node = { id: string; name: string; status: string };
+type Node = { id: string; name: string; status: string; endpoint?: string | null; last_seen_at?: string };
 
 /**
  * AI agents — S15.3. A top-level destination in NETWORK, beside Kubernetes.
@@ -48,7 +48,13 @@ export default function Agents() {
         api.GET("/api/v1/organizations/{orgId}/nodes", { params: { path: { orgId: id } } }),
       );
       if (!cancelled && n.ok) {
-        const live = n.data.filter((x) => x.status === "active");
+        // ⛔ A GATEWAY WITH NO ENDPOINT CANNOT SERVE A PEER. Issuing a config for one emits
+        // `Endpoint = ` and wg-quick refuses it — so the operator would be handed a command that can
+        // never work. Excluded here rather than surfaced as a choice: a control that can only fail is
+        // worse than a control that is absent.
+        const live = n.data.filter(
+          (x) => x.status === "active" && !!(x.endpoint && x.endpoint.trim()),
+        );
         setGateways(live);
         setGw((g) => g || live[0]?.id || "");
       }
@@ -128,8 +134,13 @@ export default function Agents() {
           <div className="min-w-[12rem] flex-1">
             <Field label="Connects through gateway">
               <Select value={gw} onChange={(e) => setGw(e.target.value)}>
+                {/* ⚠ THE ENDPOINT IS SHOWN, NOT JUST THE NAME. The agent will dial this address from its
+                    own host — an operator choosing between gateways by name alone cannot tell a reachable
+                    one from a demo fixture, and the command only fails later, on someone else's machine. */}
                 {gateways.map((n) => (
-                  <option key={n.id} value={n.id}>{n.name}</option>
+                  <option key={n.id} value={n.id}>
+                    {n.name} — {n.endpoint}
+                  </option>
                 ))}
               </Select>
             </Field>
@@ -138,6 +149,14 @@ export default function Agents() {
             {busy ? "Enrolling…" : "Enrol agent"}
           </Button>
         </div>
+        {/* ⚠ SAID PLAINLY RATHER THAN DISCOVERED ON THE AGENT HOST. If no gateway can serve a peer, the
+            reason is a missing endpoint — not a missing gateway — and the operator needs to know which. */}
+        {gateways.length === 0 && (
+          <p className="mt-2 text-xs text-warn">
+            No gateway can accept a peer yet: a gateway needs a reachable public endpoint before an agent
+            can connect to it. Set one on the gateway, then enrol.
+          </p>
+        )}
         {err && <p className="mt-2 text-xs text-danger">{err}</p>}
         <p className="mt-2 text-[11px] text-ink-secondary">
           Enrolling records <strong>you</strong> as the person who authorised this agent, and gives you one

@@ -337,7 +337,8 @@ func (q *Queries) ListSiteDNSForwardsForOrg(ctx context.Context, orgID uuid.UUID
 
 const listSiteGatewaysForOrg = `-- name: ListSiteGatewaysForOrg :many
 SELECT id, site_id, wg_public_key, endpoint, last_seen_at, hub_priority FROM nodes
-WHERE org_id = $1 AND site_id IS NOT NULL AND wg_public_key <> '' AND status = 'active'
+WHERE org_id = $1 AND site_id IS NOT NULL AND status = 'active'
+  AND wg_public_key ~ '^[A-Za-z0-9+/]{43}=$'
 `
 
 type ListSiteGatewaysForOrgRow struct {
@@ -359,6 +360,14 @@ type ListSiteGatewaysForOrgRow struct {
 // the product's loudest promise at the topology tier). Revoking a gateway drops it here → the derive-then-
 // filter drops it from the active order (no blackhole) and RevokeNode's ReconcileHubSet trigger makes the
 // configured drop durable + audited.
+// ⛔ FORMAT, NOT PRESENCE (S15.3) — THE SAME GUARD THE DEVICE PEER PATH GOT, IN THE PATH THAT WAS MISSED.
+// A site-link peer's key goes to `wg syncconf` exactly as a device peer's does, and syncconf is
+// ALL-OR-NOTHING: one malformed key rejects the ENTIRE interface config, so a single bad site peer takes
+// down every peer on that gateway, including every human device.
+//
+// ⚠ `<> ”` ANSWERS "IS THERE A KEY"; THE PARSER ASKS "IS THIS A KEY". The S15.2 census scoped itself to
+// queries returning a DEVICE public_key and stopped there — but the hazard is any key reaching syncconf,
+// and node keys reach it through here.
 func (q *Queries) ListSiteGatewaysForOrg(ctx context.Context, orgID uuid.UUID) ([]ListSiteGatewaysForOrgRow, error) {
 	rows, err := q.db.Query(ctx, listSiteGatewaysForOrg, orgID)
 	if err != nil {
