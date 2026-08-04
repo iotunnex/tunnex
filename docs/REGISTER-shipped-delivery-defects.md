@@ -1,8 +1,11 @@
-# REGISTER — defects in HOW THE PRODUCT REACHES THE USER, not in what it does
+# REGISTER — THE SERVER IS RIGHT AND THE USER STILL GETS THE WRONG THING
 
 **Against the CURRENT shipped product. None of these belong to the epic that found them.**
 
 A defect in this register is one where **the server is correct and the user still gets the wrong thing.**
+The correct value exists, is computed, is served — and the person in front of the screen does not receive
+it. The cause is never in the logic under review, which is why these are invisible to every test that
+exercises the logic.
 That is why it needs its own file: every other register here asks *is this in scope*, *when does this
 happen*, or *what can this principal do*. This one asks **does the correct answer actually arrive**, and
 nothing about the code under review can answer it.
@@ -119,3 +122,91 @@ thing that can verify it is the header.
   at all. Whether it has the equivalent problem is **unmeasured** — registered here, not answered.
 - **No release-notes or version-mismatch surface.** The app cannot tell a user that it is running an older
   build than the API it is talking to. Separate gap, not opened here.
+
+---
+
+## ⛔ 2 — THERE IS NO ORG SWITCHER, SO A USER IN TWO ORGS CAN ONLY EVER REACH THE OLDEST ONE
+
+**Status: OPEN. Measured at the S15.1 review, not fixed there — this is product scope, not a slice fold.**
+
+### Measured, not inferred
+
+- Every page selects its org the same way: **`orgs?.[0]`** — `Settings.tsx:91`, and the same shape in
+  `Dashboard`, `Access`, `Sites`, `Kubernetes`, `AccessEvents`.
+- **No switcher exists anywhere in `apps/web/src`.** The sidebar has none; the top bar carries the user
+  and *Log out*.
+- The list is ordered **`ORDER BY o.created_at`** (`ListOrganizationsForUser`), so "which org you get" is
+  "whichever you joined first" — stable, arbitrary, and unexplained on screen.
+- ⚠ **It is not in the deferral register either**, so it has been carried as folklore rather than as a
+  registered gap.
+
+### Blast radius
+
+`GET /api/v1/organizations` returns **every** org the user belongs to. The UI reads index zero and
+discards the rest. A user in two organizations cannot reach the second one **at all** — not by
+navigation, not by URL, not by any control on any screen. There is no error, no empty state, no
+indication that another org exists. The product silently behaves as single-org.
+
+> ## **THIS IS THE FIRST ABSENCE QUESTION, ANSWERED THE HARD WAY.** *"What can an operator NOT do on this
+> ## screen that the API allows?"* The API allows selecting among N orgs. The screen allows one, chosen for
+> ## them, unnamed. A wireframe diff could never have found it — the design depicts one org, and the design
+> ## cannot be wrong about what it omits.
+
+### How it was found — a fixture that proved the wrong thing
+
+A second org (`demo-migrated`) was seeded so the **all-owned banner** would have a reachable state, since
+one unassigned row anywhere in an org suppresses it. The seeding was correct and verified by count in
+both databases. **The state was still unreviewable, because no reviewer can navigate to that org.**
+
+> ## **A SEEDED STATE IS NOT A REACHABLE STATE, AND A COVERAGE COUNT CANNOT TELL THEM APART.** The fixture
+> ## reported 5 of 5 states seeded. Five were seeded; four were reachable. *Seeded and invisible is worse
+> ## than absent* — absent is counted as missing, invisible is counted as done.
+
+⚠ **And the failure was in the APPROACH, not the seed.** No amount of fixture work can make a screen
+reviewable when the product has no path to it. The check to run before seeding a state is *can a human get
+here*, and it was never asked.
+
+### Review workaround — a procedure, NOT a surface
+
+Ordering is by `created_at`, so which org is `orgs[0]` can be chosen:
+
+```sql
+-- show the all-owned org
+UPDATE organizations SET created_at = now() - interval '10 years' WHERE slug = 'demo-migrated';
+-- put the four per-row states back
+UPDATE organizations SET created_at = now() - interval '1 hour'   WHERE slug = 'demo-migrated';
+```
+
+⛔ **This is a review procedure and must never be read as the state being reachable in the product.** It
+requires database access, and no user or operator has that path.
+
+### Not decided here
+
+Whether the fix is a switcher, an org-scoped route (`/orgs/{slug}/…`), or an explicit single-org product
+decision with the API narrowed to match. **Registered, not designed** — it is founder scope.
+
+---
+
+## ⚠ 3 — THE REVIEW FIXTURE CARRIES A REAL-LOOKING FAULT A REVIEWER CANNOT DISTINGUISH FROM A REAL ONE
+
+**Status: OPEN, review-environment only. Registered at founder instruction; deliberately NOT fixed during
+the S15.1 review.**
+
+**Directory sync — Microsoft Entra** renders **ESCALATED** with `credential: decrypt failed` on the demo
+stack. Same class as the agent-CA failure earlier in this session: a row sealed under one
+`TUNNEX_SECRET_KEY`, read back after the postgres volume was reset and a new key generated. The ciphertext
+is intact and unreadable, which is the correct behaviour — the fault is that the fixture ships it.
+
+⛔ **THE DEFECT IS THE AMBIGUITY, NOT THE ERROR.** A reviewer looking at a demo stack cannot tell a seeded
+fault from a live one, so every genuine escalation on that screen is discounted, and a real one would be
+too. A review environment that cries wolf trains the reviewer to ignore the alarm — the same failure mode
+as the reassuring-empty class, inverted.
+
+⚠ **And it is a second instance of one cause**: the volume reset invalidated every sealed row, not just the
+CA. Nothing enumerates what was sealed, so each one surfaces separately, as a surprise, wearing the costume
+of a product bug. **What is missing is a named key-mismatch message** — already carried as an open
+follow-up — and, beneath it, an inventory of sealed columns so a key change reports its blast radius once
+instead of N times.
+
+**Not fixed here** by instruction, and correctly: it is not S15.1's, and fixing it silently would have
+removed the evidence for this row.
