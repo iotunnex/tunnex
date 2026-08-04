@@ -80,7 +80,27 @@ column cannot tell them apart. **The screen shows `last seen`, labelled `last se
 threshold. *A number that cannot carry that weight must not be dressed as one.* **Machine credentials have no
 liveness signal — registered, not built.**
 
-**CUT AS TWO, proposed not decided:** **S15.1a the guard** (nullable `user_id` · ⭐ **the constructor, taken now
+⛔ **RULED: TWO SLICES, 1a THEN 1b — AND THE ORDERING ARGUMENT WAS TOO GENEROUS TO 1a.** *"Guard-first means
+the nullable column is never a grandfather clause"* is true and **hides the cost**: after 1a lands, **EVERY
+existing machine credential is refused at use, because every one has a NULL owner.** Correct, ruled, and
+**breaking**. Two windows, not one virtue — **guard-first: credentials DOWN until assigned · surface-first: the
+grandfather clause LIVE while the screen fills. Both are costs; only one is a SECURITY cost, and D14 ruled
+which way that goes.**
+
+⛔⛔ **D20 OPENED AND HELD — 1a BREAKS EVERY RUNNING GITOPS OPERATOR AT MERGE.** The `operator` machine
+principal is what the K8s operator authenticates with; refusing NULL owners **stops it reconciling**. **That is
+the exact class D19 rejected re-mint over — the S13.1 class. We did not avoid it; we MOVED it from re-mint to
+the guard**, and inheriting that silently is how S13.1 happened.
+**Three shapes, one recommended, none picked:** (A) one merge — ⛔ *the surface ships untested, first exercised
+in production on a migration screen* · (B) refusal behind an org flag, default off — ⛔ **FAILS THE LAW**: *a
+refusal that can be switched off is the grandfather clause with a switch*, off in every deployment that never
+flips it · (C) **accept and SCHEDULE the window**. ⚠ A fourth recorded and NOT recommended: 1b first without
+the refusal — no outage, no untested surface, **and it reverses a ruling, which is the founder's to do.**
+**Recommendation HELD: C, window sized before announced.** ⚠ **The unknown that must close first: how many
+machine credentials exist per deployment, and can one admin assign them in a sitting? Nobody has measured a
+real deployment — the window's length IS that number.**
+
+**CUT AS TWO, RULED:** **S15.1a the guard** (nullable `user_id` · ⭐ **the constructor, taken now
 because the field does not exist yet and the moment does not return** · the seam refusal · **both reds — NULL
 refused AND owned still accepted**) · **S15.1b the surface** (owner-gated, three empty states, no suggested
 owner). ⛔ **Ordering is not arbitrary: guard first means the nullable column is NEVER a grandfather clause**,
