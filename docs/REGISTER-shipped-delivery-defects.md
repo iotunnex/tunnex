@@ -398,3 +398,66 @@ arriving through a principal kind rather than a screen. Same shape as row 2's `o
 
 **Not fixed in the walk.** The obvious repair (resolve from `Roles` when `UserID` is nil) is a handler
 change with its own blast radius across every principal kind, and this walk changes no code.
+
+---
+
+## ⛔ 8 — FLOW LOGGING IS OFF BY DEFAULT, AND THE SCREEN CANNOT SAY SO
+
+**Status: OPEN. Found at EPIC 15 walk Leg 3, 2026-08-04. Not EPIC 15's — S7.5.1's surface, measured here.**
+
+**Two halves, and the second is the defect:**
+
+| half | measured |
+| --- | --- |
+| **the default** | `TUNNEX_FLOWLOG_GROUP` defaults to **0 = OFF** (`apps/node/cmd/agent/main.go:213`). Flow logging is opt-in per gateway. **Unset on both gateways on this rig — including the compose stack's `node-agent`** |
+| ⛔ **the absent signal** | Access Events renders an **empty page**, and **nothing anywhere says the gateway is not reporting** |
+
+> ## **AN OPERATOR READING AN EMPTY ACCESS EVENTS PAGE CONCLUDES "NO ACCESS EVENTS". THE TRUE STATEMENT IS
+> ## "THIS GATEWAY HAS NEVER REPORTED ONE."** Those are opposite claims about a security surface, and the
+> ## screen renders them identically.
+
+⛔ **THE DEFAULT CAN BE ARGUED; THE MISSING SIGNAL CANNOT.** Opt-in is defensible — nflog has a cost, and
+S7.5.1 made it per-gateway deliberately. **What is not defensible is a screen that cannot distinguish
+"nothing happened" from "nobody is watching."** This is the reassuring-empty class applied to the exact
+surface that exists to answer *who reached what*.
+
+⚠ **AND IT IS WORSE THAN AN EMPTY LIST**, because the page is *correct*. A load failure would at least be an
+error. A disabled collector produces a page that is accurate, reassuring, and answers a question the operator
+did not ask.
+
+### How it was found — and why the deck's ordering mattered
+
+Leg 3's **step 1 was an instrument check ranked above attribution**, and it **failed first**: zero events for
+the walk's own traffic, despite an ALLOW whose kernel counter read `packets 1` and three DENYs.
+
+> ## **AN EMPTY LOG READS IDENTICALLY TO A QUIET NETWORK *AND* TO A DISABLED COLLECTOR.** Three states, one
+> ## appearance. Without instrument-first, the walk would have reported *"attribution does not work"* about a
+> ## subsystem that was never switched on — a confident, specific, wrong finding.
+
+**Not fixed.** The shape of a fix is a per-gateway *reporting* state on the screen ("this gateway is not
+reporting flows") — which is a health signal, not a log entry, and belongs to whoever owns that surface.
+
+---
+
+## ⚠ 9 — gofmt REWRITES DOC-COMMENT CONTENT AND MADE A COMMENT FALSE
+
+**Status: FIXED in place; filed because the seam is general. EPIC 15 walk, 2026-08-04.**
+
+A comment explaining the peer-key guard described the old predicate as ``public_key <> ''``. **Go's
+doc-comment reflow converted the two single quotes into a typographic `”`**, so a comment *about SQL* came to
+read `public_key <> ”` — which is not a thing.
+
+> ## **A FORMATTER THAT REFLOWS PROSE IS EDITING CONTENT, NOT LAYOUT.** `gofmt -w` is safe to apply blind
+> ## because it moves whitespace — except in doc comments, where it also normalises quotes and backticks. So
+> ## *"just run gofmt"* can silently change what a comment CLAIMS.
+
+⛔ **AND CI CANNOT CATCH IT** — the file is *correctly formatted* afterwards. The only signal is reading the
+diff, and the instinct after a `gofmt` red is to run `gofmt -w` and move on. That is what happened the first
+time; the second time the diff was read.
+
+⚠ **This is the comment-becomes-code seam crossed a third way.** The first two were a comment that *claimed*
+a guarantee the code did not have, and a comment that named a hazard the predicate did not cover. This one is
+a comment whose meaning was changed **by a tool**, with no human in the loop at all.
+
+**Practice:** keep raw `''`, `""` and paired backticks out of Go doc comments when they are technical
+content — write the meaning in words, or put the snippet in code.
