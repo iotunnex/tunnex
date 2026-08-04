@@ -680,3 +680,39 @@ VALUES
 ON CONFLICT (id) DO UPDATE
   SET expires_at = EXCLUDED.expires_at, accepted_at = EXCLUDED.accepted_at,
       revoked_at = EXCLUDED.revoked_at, invited_by_user_id = EXCLUDED.invited_by_user_id;
+
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────
+-- S15.1 — MACHINE CREDENTIAL OWNERSHIP. The states the assignment screen can render.
+--
+-- ⛔ WITHOUT THESE THE REVIEW IS BLIND. The screen was counted by this seeder and never seeded by it,
+-- so a founder opening Settings saw an empty panel and learned nothing about the migration surface.
+-- Per the Human Gate Limit Law, a screen review is only valid over what the data makes visible.
+--
+-- FOUR SEEDABLE STATES, deliberately in ONE org so the fleet is MIXED — which is itself a state: the
+-- "all owned" banner must NOT render while any credential is unassigned.
+--
+--   1. unassigned + never seen      -> picker shown, "never seen"
+--   2. unassigned + last seen       -> picker shown, "last seen <age>"   (the two renders differ, and
+--                                      only the populated one had ever been looked at)
+--   3. assigned  + last seen        -> owner rendered, NO picker
+--   4. assigned  + never seen       -> owner rendered, NO picker, "never seen"
+--
+-- ⚠ token_hash is random and belongs to no issued token: these are DISPLAY fixtures. They can never
+-- authenticate, which is correct — a seeded credential that worked would be a seeded backdoor.
+INSERT INTO machine_credentials (id, org_id, name, role, token_hash, fingerprint, created_at, last_used_at, user_id)
+VALUES
+  ('019fd000-0000-7000-8000-00000000f001', '01900000-0000-7000-8000-000000000001',
+   'gitops-prod',    'operator', gen_random_bytes(32), 'fp-gitops-prod',
+   now() - interval '21 days', NULL, NULL),
+  ('019fd000-0000-7000-8000-00000000f002', '01900000-0000-7000-8000-000000000001',
+   'gitops-staging', 'operator', gen_random_bytes(32), 'fp-gitops-stag',
+   now() - interval '9 days',  now() - interval '2 hours', NULL),
+  ('019fd000-0000-7000-8000-00000000f003', '01900000-0000-7000-8000-000000000001',
+   'ci-runner',      'operator', gen_random_bytes(32), 'fp-ci-runner',
+   now() - interval '5 days',  now() - interval '11 minutes',
+   (SELECT id FROM users WHERE email = 'owner@demo.tunnex.local')),
+  ('019fd000-0000-7000-8000-00000000f004', '01900000-0000-7000-8000-000000000001',
+   'backup-agent',   'operator', gen_random_bytes(32), 'fp-backup-agt',
+   now() - interval '2 days',  NULL,
+   (SELECT id FROM users WHERE email = 'owner@demo.tunnex.local'))
+ON CONFLICT (id) DO NOTHING;
