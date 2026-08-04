@@ -645,6 +645,19 @@ type Querier interface {
 	// user's peers change (create/revoke/deactivate). Not org-scoped: a user's
 	// devices may span orgs and all affected nodes must be nudged to reconcile.
 	ListNodeIDsForUserActiveDevices(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
+	// ⛔ A SEPARATE RESOLVER, NOT A WIDER ListNodes — and the reason is a measurement, not taste. Widening the
+	// list row rippled into FOUR consumers (LoadSiteTopoBatch, PolicyHealthForNodes, NodeDisplayExtrasForNodes,
+	// toAPINode), none of which know or care about ownership. A shared row type is a coupling; this keeps the
+	// pure helpers' inputs narrow.
+	//
+	// ⛔ RESOLVED FROM `users`, NOT FROM THE MEMBER ROSTER (S15.1/D22, applied to agents). The roster cannot
+	// name an owner who has LEFT the org, and that is exactly the row an accountability surface exists for.
+	// `users` survives both membership deletion and deactivation.
+	//
+	// lint:allow-deleted — DELIBERATE, the same argument as ListMachineCredentialsForOrg: this does not ACT on
+	// a user, it RESOLVES A RECORDED IDENTITY for display. Scoping deleted_at would blank the owner of an agent
+	// whose owner was soft-deleted — the failure D22 was ruled to end, reached from another direction.
+	ListNodeOwnerEmails(ctx context.Context, orgID uuid.UUID) ([]ListNodeOwnerEmailsRow, error)
 	// lint:cross-org — org-scoped via the reporting node's org. Every gateway's node-peer telemetry for the
 	// org: the input to D3's per-hub freshness clock + the S8.5 L1 site-link card metrics (read path defined
 	// with the storage, consumed by S8.6 Slice 4 + Slice 6).

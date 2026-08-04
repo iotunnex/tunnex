@@ -2599,6 +2599,15 @@ export interface components {
             policy_degraded?: boolean;
             /**
              * Format: uuid
+             * @description S15.2/D14: the human this agent principal acts for — carried from the join token's ISSUER at enrolment. NULL means UNATTRIBUTABLE, never "nobody is responsible": it means the control plane cannot say who authorised this agent into the org, which is a different and weaker claim.
+             */
+            owner_user_id?: string | null;
+            /** @description Resolved server-side from owner_user_id by LEFT JOIN on users (S15.1/D22 — the roster cannot name an owner who has LEFT the org, and that is exactly the row an accountability screen exists for). NULL when unattributable. */
+            owner_email?: string | null;
+            /** @description S15.2/D25(C) — DEGRADE, DO NOT REFUSE. An agent with no owner KEEPS RUNNING and says so. An unattributable tunnel is a LOGGING failure, not an access-control one: the policy engine still enforces every rule, so refusing at use would take a tunnel down for an identity-management reason and buy nothing. Contrast the cold-start deny-until-first-fetch, which IS fail-closed because its alternative is a breach. This flag is what the operator sees instead. */
+            unattributable?: boolean;
+            /**
+             * Format: uuid
              * @description S8.3 (D2/CH): the site this gateway is bound to (null = not a site gateway). The topology view joins nodes to sites by this field — a site's gateways are the nodes with this site_id, rendered as a LIST (many nodes → one site scales to future HA; the UI never assumes one-gateway-per-site).
              */
             site_id?: string | null;

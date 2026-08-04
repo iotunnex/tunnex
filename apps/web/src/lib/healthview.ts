@@ -189,3 +189,29 @@ export function gatewayHealthRow(
   if (!b) return { label: "healthy", tone: "ok" };
   return { label: b.label, tone: b.tone === "unknown" ? "neutral" : b.tone };
 }
+
+/**
+ * The attribution badge — S15.2 / D25(C): **degrade, do not refuse.**
+ *
+ * ⛔ SEPARATE FROM `gatewayHealthRow`, AND NOT FOLDED INTO IT. Policy health answers *is this gateway
+ * enforcing what the control plane believes it is enforcing*. Attribution answers *can we say who
+ * authorised it into the org*. **A gateway can be perfectly healthy and unattributable at the same time**,
+ * and collapsing the two into one badge would force a choice between reporting an enforcement problem and
+ * reporting an accountability one.
+ *
+ * ⚠ TONE IS `warn`, NOT `danger`, AND THE DISTINCTION IS THE RULING. An unattributable tunnel is a LOGGING
+ * failure, not an access-control one — the policy engine still enforces every rule. Painting it red would
+ * claim a security failure that has not occurred, and this repo has already paid for a badge that alarmed
+ * less than the bool beside it; alarming MORE than the truth is the same defect facing the other way.
+ */
+export function attributionBadge(
+  node: Pick<Node, "unattributable">,
+): { label: string; tone: "warn"; detail: string } | null {
+  if (!node.unattributable) return null;
+  return {
+    label: "unattributable",
+    tone: "warn",
+    detail:
+      "No owner is recorded for this gateway, so its activity cannot be attributed to a person. It keeps running and enforcing policy — this is a gap in the audit trail, not in access control.",
+  };
+}
