@@ -50,8 +50,6 @@ import {
   type GatewayRow,
   type StatState,
 } from "../lib/overviewview";
-import { TunnelControl } from "../components/TunnelControl";
-import { desktop } from "../lib/desktop";
 
 export default function Dashboard() {
   const [orgName, setOrgName] = useState("");
@@ -59,7 +57,6 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   // WF-2 (Deck D Leg 10): bump to refetch the overview. The CP count is correct the moment a device is
   // revoked (CountActiveDevicesByOrg excludes it) — the stale number was THIS view's mount-once fetch.
-  const [refresh, setRefresh] = useState(0);
   // S14.4: the six stat cards come from THREE endpoints and RESOLVE INDEPENDENTLY.
   //
   // `/overview` supplies four (members, devices, nodes, online). Sites and Pending approvals are not in that
@@ -197,21 +194,19 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [refresh]);
-
-  // WF-2: desktop only — the refetch rides the RevocationMonitor's EXISTING signal (the same status
-  // event that flips TunnelControl's banner). On the transition EDGE into "revoked", re-pull the
-  // overview so the first number an admin sees stops counting the device the server just swept.
-  // Browser build: desktop() is null → no subscription, zero web-tier change.
-  useEffect(() => {
-    const d = desktop();
-    if (!d) return;
-    let prev = "";
-    return d.tunnel.onStatusChanged((s) => {
-      if (s.state === "revoked" && prev !== "revoked") setRefresh((r) => r + 1);
-      prev = s.state;
-    });
+  // ⛔ THE `refresh` COUNTER WENT WITH THE DESKTOP EFFECT. Its only writer was WF-2's revocation
+  // subscription; with that gone it was a state variable that could never change, and a dependency
+  // array naming a constant is a dependency array that says nothing. Removed rather than left as a
+  // permanent 0 — an inert knob reads as a live one to the next person.
   }, []);
+
+  // ⛔ WF-2's DESKTOP REFETCH IS GONE (S14.20 step 4). It re-pulled the overview when the client's
+  // RevocationMonitor saw this device revoked — a subscription that only existed because the client
+  // used to mount this dashboard. It never mounts it now, so the effect could not fire.
+  //
+  // ⚠ WF-2's CLAIM IS NOT ABANDONED, it moved: the client shows revocation on its OWN surface
+  // (`revoked` is a first-class state with a loud banner and a notification). What is gone is a
+  // browser dashboard reacting to a tunnel it cannot see.
 
 
   // Empty until the roster arrives (or if it failed). The third argument tells resolveActor that
@@ -237,7 +232,6 @@ export default function Dashboard() {
       <ErrorText>{error}</ErrorText>
 
       {/* Desktop only: the VPN connect surface (no-op/hidden in the browser). */}
-      <TunnelControl />
 
       {data && (
         <>

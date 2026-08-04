@@ -54,7 +54,6 @@ import {
 } from "../lib/poolview";
 import { useAuth } from "../lib/auth";
 import { Button, Card, ErrorText, Field, Input } from "../components/ui";
-import { DesktopSettings } from "../components/DesktopSettings";
 import { MfaSettings } from "../components/MfaSettings";
 import { MachineCredentials } from "../components/MachineCredentials";
 
@@ -126,7 +125,6 @@ export default function Settings() {
       {/* Desktop-only: server connection + sign-out for THIS client (renders nothing
           in the browser build). Above the org sections — it's a device concern, not
           an org-admin one, so it shows regardless of role. */}
-      <DesktopSettings />
 
       {/* Self-service 2FA is per-USER (OPEN, every edition), so it shows for every signed-in user
           regardless of org role — unlike the org-level enforce toggle below (enterprise, admin). */}

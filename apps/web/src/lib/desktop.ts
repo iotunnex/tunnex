@@ -84,6 +84,7 @@ export function desktop(): TunnexBridge | null {
   return typeof window !== "undefined" && window.tunnex ? window.tunnex : null;
 }
 
-export function isDesktop(): boolean {
-  return desktop() !== null;
-}
+// ⛔ `isDesktop()` REMOVED (S14.20 step 4). Its callers were the six branches that made one bundle
+// serve two products; the last of them went with this change, and the only surviving mention is a
+// comment in `client.tsx` describing what used to be. `desktop()` stays — the client's own surface
+// asks the bridge for real things.

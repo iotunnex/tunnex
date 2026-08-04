@@ -153,9 +153,13 @@ app.whenReady().then(() => {
   protocol.handle("app", (request) => {
     const csp = cspFor(config.getServerUrl());
     const htmlHeaders = { "content-type": "text/html; charset=utf-8", "content-security-policy": csp };
+    // ⛔ THE FALLBACK IS THE CLIENT ENTRY, NOT index.html (S14.20 step 4). It served the DASHBOARD's
+    // entry for any extension-less path — which was right while the client loaded that dashboard and
+    // is now both wrong and impossible: `index.html` is no longer packaged. An extension-less path
+    // in this app can only be "/", and "/" means the client.
     const serveIndex = () => {
-      const index = resolveBundlePath(bundleDir(), "/index.html");
-      if (index && fs.existsSync(index)) return new Response(fs.readFileSync(index), { headers: htmlHeaders });
+      const entry = resolveBundlePath(bundleDir(), "/" + CLIENT_ENTRY.split("/").pop());
+      if (entry && fs.existsSync(entry)) return new Response(fs.readFileSync(entry), { headers: htmlHeaders });
       return new Response("not found", { status: 404 });
     };
 

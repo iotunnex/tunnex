@@ -1,12 +1,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { setApiOrigin } from "@tunnex/shared";
 // Self-hosted brand fonts (bundled by Vite — no CDN, works fully offline/on-prem).
 import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
 import App from "./App";
-import { desktop } from "./lib/desktop";
 import { LayoutCapabilityProvider } from "./components/ComposeGate";
 import { MotionProvider } from "./components/MotionProvider";
 import { ToastProvider } from "./components/Toasts";
@@ -16,20 +14,14 @@ import { ToastProvider } from "./components/Toasts";
 import "../../../packages/shared/generated/tokens.css";
 import "./index.css";
 
-// Desktop transport bootstrap (S6.2): before ANY request (the first is
-// /auth/me), point the API client at the configured server origin. The web
-// build skips this (no bridge) and stays same-origin. Rendering waits so no
-// request can fire same-origin first.
-async function boot() {
-  const bridge = desktop();
-  if (bridge) {
-    try {
-      const origin = await bridge.config.getServerUrl();
-      if (origin) setApiOrigin(origin);
-    } catch {
-      /* no server configured yet — the setup screen handles it in main */
-    }
-  }
+// ⛔ THE DESKTOP TRANSPORT BOOTSTRAP IS GONE (S14.20 step 4). It read the configured server origin
+// off the bridge before the first request, because this entry used to be what the Electron client
+// loaded. It loads `client.html` now, so this file only ever runs in a BROWSER — where `desktop()`
+// is null and the whole block was a no-op that still cost an `await` before first paint.
+//
+// ⚠ The client needs no origin at all: `ClientApp` talks to the bridge and imports no HTTP client,
+// so there is nothing to point anywhere. Verified before this was removed, not assumed.
+function boot() {
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <BrowserRouter>
