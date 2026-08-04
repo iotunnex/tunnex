@@ -14,6 +14,9 @@
     "policy:view",
     "site:manage"
   ],
+  "agent": [
+    "org:view"
+  ],
   "member": [
     "member:list",
     "org:view"

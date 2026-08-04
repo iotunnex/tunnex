@@ -80,7 +80,7 @@ func (q *Queries) CountDevicesForUserCap(ctx context.Context, arg CountDevicesFo
 
 const createDevice = `-- name: CreateDevice :one
 INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel, status, transport, kind)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE(NULLIF($11::text, ''), 'human'))
 RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause, provisioned_ip, revoked_prev_status, provisioned_node_id, kind
 `
 
@@ -103,6 +103,14 @@ type CreateDeviceParams struct {
 // status='active' reader EXCEPT the allocator, which counts its IP as in-flight).
 // ⚠ `kind` (S15.2 slice 3) distinguishes an AGENT's row from a human's. It carries the cap exemption and
 // the one-per-node uniqueness; it is NOT a permission and grants nothing.
+//
+// ⛔ COALESCE(NULLIF(...)), BECAUSE A FORGOTTEN PARAMETER MUST NOT BE A RUNTIME CRASH. Go's zero value for a
+// string is "", which the CHECK rejects — so adding this column made every existing caller that did not
+// name it fail at INSERT time rather than at compile time. One did (`ovpn/service_test.go`), and the next
+// one would too.
+// ⚠ AND THE DEFAULT DIRECTION IS THE CONSERVATIVE ONE: an unspecified row is a HUMAN, so it COUNTS toward
+// the cap. A row that silently defaulted to 'agent' would be cap-exempt by accident — the failure would be
+// a quota that stopped working, discovered by nobody.
 func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Device, error) {
 	row := q.db.QueryRow(ctx, createDevice,
 		arg.OrgID,

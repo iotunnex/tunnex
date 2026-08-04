@@ -82,6 +82,18 @@ const (
 	// management, no org delete, no MFA/site/machine administration). A machine principal's Roles map is
 	// {orgID: "operator"}.
 	RoleOperator = "operator"
+	// RoleAgent (S15.2, D4) — the fixed role a DATA-PLANE AGENT holds. NOT user-assignable, and NOT the
+	// same principal kind as RoleOperator.
+	//
+	// ⛔ THE SPLIT IS THE POINT, AND IT IS WHY THIS COULD NOT SHIP BEFORE THE AGENT PRINCIPAL EXISTED.
+	// `RoleOperator` holds PermPolicyManage — correct for a GitOps operator, whose entire job is reconciling
+	// TunnexGrant CRs into policy rules, and INVERTED for an agent. An agent is a principal that can be
+	// talked into a request; one that could then WRITE THE RULE PERMITTING IT is a compromised principal
+	// granting itself what it was denied.
+	//
+	// ⚠ The fix was never "remove PermPolicyManage" — that breaks the operator. It was "stop having one role
+	// for two principal kinds", and that requires the second kind. This is it.
+	RoleAgent = "agent"
 )
 
 // rolePermissions is the role -> permission grant table. This map IS the policy.
@@ -144,6 +156,16 @@ var rolePermissions = map[string]map[Permission]bool{
 		// The role was first scoped from the intended verbs, before the subject-resolution path existed;
 		// enumerate a principal's role from the CALL GRAPH it traverses, not the feature description.
 		PermMemberList: true,
+	},
+	// RoleAgent (S15.2, D4) — a data-plane agent. ⛔ NO PermPolicyManage: an agent READS the policy it is
+	// told to enforce and never authors it. NO machine:manage, no member/org administration, no device
+	// verbs. It is the narrowest non-human role in the table, and deliberately so.
+	//
+	// ⚠ PermOrgView ONLY, and even that is under review by whoever next needs an agent to read something:
+	// the honest default for a principal that acts unattended is that every permission is argued for
+	// individually, not inherited from a sibling role that happened to exist first.
+	RoleAgent: {
+		PermOrgView: true,
 	},
 }
 

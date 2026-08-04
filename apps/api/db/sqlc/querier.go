@@ -171,6 +171,14 @@ type Querier interface {
 	// status='active' reader EXCEPT the allocator, which counts its IP as in-flight).
 	// ⚠ `kind` (S15.2 slice 3) distinguishes an AGENT's row from a human's. It carries the cap exemption and
 	// the one-per-node uniqueness; it is NOT a permission and grants nothing.
+	//
+	// ⛔ COALESCE(NULLIF(...)), BECAUSE A FORGOTTEN PARAMETER MUST NOT BE A RUNTIME CRASH. Go's zero value for a
+	// string is "", which the CHECK rejects — so adding this column made every existing caller that did not
+	// name it fail at INSERT time rather than at compile time. One did (`ovpn/service_test.go`), and the next
+	// one would too.
+	// ⚠ AND THE DEFAULT DIRECTION IS THE CONSERVATIVE ONE: an unspecified row is a HUMAN, so it COUNTS toward
+	// the cap. A row that silently defaulted to 'agent' would be cap-exempt by accident — the failure would be
+	// a quota that stopped working, discovered by nobody.
 	CreateDevice(ctx context.Context, arg CreateDeviceParams) (Device, error)
 	CreateDomainClaim(ctx context.Context, arg CreateDomainClaimParams) (DomainClaim, error)
 	// ── group mapping (create / bind / unbind) ───────────────────────────────────────
