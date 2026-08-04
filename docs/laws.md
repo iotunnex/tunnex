@@ -4393,3 +4393,87 @@ host, where a later reader and a later rebuild both find the same answer.
   have caught it — read the property back out of the running system.
 - **Ask of any deploy: what is true about this host that is written down nowhere?** The answer is
   usually short, and usually the thing that breaks.
+
+---
+
+# ⛔ A GUARD MADE THE CALLER'S RESPONSIBILITY IS INHERITED BY EVERY NEW CALLER
+
+**2026-08-04, found on the first deployed dashboard.** A revoked gateway was rendering the literal word
+**"healthy"**, in green, on the Dashboard's Gateway Health panel. `revoked` IS the state; a health verdict
+beside it describes a machine that is no longer meant to work.
+
+**This is the THIRD time the same defect has been fixed** — `Gateways.tsx` at EPIC 11, `sitesview.ts` at
+S13.1 — and S13.1's own comment explains why it recurred: *"that fix was component-local, which is why this
+one lives in the view-model."* That reasoning was right and **still landed in a view-model that turned out to
+be one of several.**
+
+## The census is the finding, not the instance
+
+Seven places form a health verdict about a gateway. **Four guard `revoked`. Three do not.**
+
+| guarded | site |
+|---|---|
+| ✅ | `components/Gateways.tsx` — `n.status !== "revoked" &&` |
+| ✅ | `lib/sitesview.ts` — `n.status === "revoked" ? null : policyHealthBadge(n)` |
+| ✅ | `lib/gatewaysview.ts` — **the same line, copy-pasted** |
+| ❌ | `pages/Dashboard.tsx` Gateway Health — renders "healthy" for a revoked node |
+| ❌ | `pages/Dashboard.tsx` Needs Attention — a revoked node can be listed as needing attention |
+| ❌ | `pages/Dashboard.tsx` the degraded COUNT — a revoked node inflates it |
+| ❌ | `pages/Kubernetes.tsx` — filters on `policy_degraded_kind`, no status check |
+
+> ## **THE THREE CORRECT SITES CARRY THE SAME LINE COPY-PASTED. THAT IS THE TELL.**
+> ## **A rule that must be RESTATED at each site is not enforced — it is remembered.**
+
+And two of the three broken sites **never call the badge function at all**; they read `policy_degraded`
+directly. **So fixing the function would have been the fourth instance of the same mistake and would not
+have reached them.**
+
+## The type made the omission not merely possible but MANDATORY
+
+```ts
+policyHealthBadge(node: Pick<Node, "policy_degraded" | "policy_degraded_kind">)
+```
+
+This does not fail to check `status` — it makes checking **impossible**. A caller cannot pass status; the
+compiler is satisfied by an object that does not have one. **The function is structurally forbidden from
+forming the verdict it is named for**, which is precisely why the guard ended up outside it.
+
+**MECHANICAL — the difference between FIXED and IMPOSSIBLE:**
+- **Widen the parameter so a caller that forgets does not compile.** Requiring the whole `Node` moves the
+  guard inside, once, where the verdict is formed; the copy-pasted guards become redundant.
+- **When a guard appears verbatim at more than one call site, that is a defect report about the callee**,
+  not a sign of diligence at the callers.
+- **Census by the INPUT, not by the function name.** Two of the three broken sites were invisible to a
+  search for callers, and visible immediately to a search for `policy_degraded`.
+- ⚠ **A raw field read can bypass any function.** The degraded COUNT is
+  `.filter(n => n.policy_degraded).length`; a widened signature ENABLES correct sourcing but cannot FORCE
+  it. Say so rather than reporting the class closed.
+
+---
+
+# ⛔ A FIXTURE THAT ENCODES THE ANSWER IN THE NAME MAKES DISAMBIGUATION UNNECESSARY
+
+**2026-08-04, from the first look at real data.** The deployed dashboard listed `aws-gw-1` **three times** and
+`aws-gw-2` **twice** — same names, different ids, contradictory states. Nothing in the panel distinguished
+them.
+
+The panel is served `id · name · status · agent_version · enrolled_at · last_seen_at · policy_degraded ·
+site_id · max_policy_version · ovpn_health · is_site_hub · policy_degraded_kind`. **It renders `name` and a
+badge.** `id` is used as a React key and then discarded; `status` and `enrolled_at` are received and dropped.
+
+Our fixtures name gateways **`gw-active`** and **`gw-revoked`**.
+
+> ## **THE FIXTURE DOES NOT MERELY AVOID THE AMBIGUOUS CASE — IT MAKES DISAMBIGUATION UNNECESSARY.**
+> ## The name alone tells you the state, so a panel that renders ONLY the name looks complete.
+
+Every screen reviewed in EPIC 14 was reviewed against data of that shape. **No screen has ever been shown two
+rows sharing a name.** Real deployments produce them routinely: a gateway is decommissioned and the host is
+re-enrolled under the same hostname.
+
+**MECHANICAL:**
+- **The corrected fixture is two rows, ONE name, different states** — e.g. two `edge-gw` rows, one `active`
+  and one `revoked`, differing `enrolled_at`, one with a `site_id` and one without.
+- **Expect it to turn several reviewed screens red.** That is the point: a fixture change that breaks nothing
+  has not added a case.
+- **A fixture whose names carry semantics is testing the reader, not the renderer.** Name rows for what they
+  ARE (`edge-gw`), never for what they are FOR (`gw-revoked`).
