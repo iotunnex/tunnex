@@ -64,6 +64,40 @@ expected to be rewritten before merge.
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
 **CURRENT (2026-07-31): EPIC 13 = GATEWAY RECOVERY — BUILD COMPLETE INCLUDING SLICE 7 on `story/S13.1-gateway-recovery` (tip `7c1a127`; Slice 7 = `120ff0c`, since then docs-only), NOT MERGED. Slice 7 (operator-initiated restore, `POST /nodes/{nodeId}/restore-devices`, new perm `device:restore`, re-homes onto a named LIVE gateway because a revoked node never returns) closed the reachability defect and is RED-PROVEN REACHABLE + UI-exposed. **REVIEW STATE POINTER = `docs/S13.1-review-state.md`** (pass 1 COMPLETE — 20 findings + F3, HELD, nothing folded, `docs/S13.1-review-pass1-findings.md`; pass 3 launched before pass 2 by ruling; pass 2 not started and must cover Slice 7). Earlier note: pass 1 was once interrupted — (run `wf_642e5fe8-1ed`: 8/8 finders done, 127/144 verifiers returned, Critic and Synthesize never ran — resumable from cache). The review remains a merge precondition. Next session = REVIEW → WALK → merge word, nothing in between.** The epic exists for one observed event: an AWS gateway went offline past its 48h cert lifetime and could not come back — `/agent/renew` lives behind the mTLS channel its expired cert can no longer authenticate to. Commit-one `docs/S13.1-decisions.md` (six walls, D1–D10 ruled). **SHIPPED:** agent precedence (`identity.Decide`, no network argument — a failed handshake structurally cannot trigger re-key; `Recover` ranked above `UseToken`) · **PoP re-key** on the public listener (RSA over `nonce ‖ CSR DER`; gate BEFORE crypto so timing is not a liveness oracle; **D3 amended: expiry authorizes, revocation REFUSES** — expiry is an absence of action, revocation is the presence of a decision) · its own path-scoped throttle + body cap (registered before `middleware.RealIP` — review #1 was exactly that) · **cascade restore** (`revoked_cause`, reclaim-first via the canonical oracle) · **Slice 6 `provisioned_ip`** (`needs_reexport` gains the ADDRESS cause for EVERY mode; ranges stay static-only; both contract rewrites + the label the census under-scoped) · **D10 second identifier** (key fingerprint: a LOST RESPONSE no longer bricks a gateway; ambiguity refuses; three implementations of one digest pinned to a golden vector; agent persists its pending key before submitting and reuses it so retries CONVERGE; migration guard forced expand/contract with both shim halves). Retroactive review pass 1 (leader election) folded — *leadership was a boolean that lies*; `ConfirmLeader` now matches `pg_locks`. **OWED BEFORE MERGE, IN ORDER: (1) the epic-end review pass — three passes by surface family (unauthenticated re-key surface · identity/cascade data path + migrations 0054–0061 · agent recovery loop), ~4.5–6M tokens, a merge precondition alongside CI and the walk, and a truncated pass is worse than none; (2) the walk per `docs/S13-boxwalk.md` — seven legs, TWO GATEWAYS MUST BE OFFLINE 48h+ BEFORE the session (`agentca.CertTTL` is a constant; the clock is the only way to make a cert expire); (3) the merge word.** **RULED — cascade-restore reachability: SLICE 7 (operator-initiated restore), built AFTER the review pass and BEFORE the walk; two conditions — authorized as a deliberate operator act (same class as minting a join token) and RED-PROVEN REACHABLE, not merely correct. Un-revoke PERMANENTLY REFUSED (it is the attack chain D3 exists to prevent); removing the mechanism refused (re-opens Wall 6). Walk Leg 4 stays a falsification attempt. The defect:** `RestoreCascadeRevokedDevices` has one caller (`Rekey`), devices are cascade-revoked in one place (`Revoke`), and `Rekey` refuses a revoked node — so the trigger may put the node into the one state that can never reach the restorer (dormant-machinery law). Four faces in the paper; walk Leg 4 is written as a falsification attempt. Retroactive **pass 2 (backup/restore)** still attaches to the next natural merge boundary. Registered: the 0061 contract migration (trigger = the release after this one) · no general rate limiting · body caps only on the two re-key routes · failover hysteresis persistence (beta-blocking, owned by the failover story).
+**S15.1 MERGED (2026-08-04) — PR #86, content tip `35a1042e` (pre-merge). THE OWNED MACHINE PRINCIPAL SHIPS.**
+`machine_credentials` had no `user_id`, so every machine principal that ever authenticated did so OWNERLESS —
+the audit trail recorded *a machine*, never *whose*. Shipped: the column (`0065`, `ON DELETE RESTRICT`, NOT the
+S14.12 cascade class) · `NewMachinePrincipal` at the ONE authenticating seam · the refusal (`MachineAuth`
+returns `nil, nil` on a NULL owner) · the assignment surface with three distinguishable empty states.
+
+⛔ **OPERATIONAL FACT, NOT A FOOTNOTE: THIS MERGE REFUSES EVERY EXISTING MACHINE CREDENTIAL UNTIL AN OWNER IS
+ASSIGNED THROUGH THE NEW SCREEN.** That is D14 taking effect, scheduled by the founder — not a side effect.
+
+**D21 RULED NO** — an unverified account cannot be named an accountable owner. Three layers, ONE authoritative:
+the picker omits (presentation) · the handler returns 422 `owner_must_be_verified` (a legible refusal) · **the
+UPDATE requires `email_verified_at IS NOT NULL`** (the decision, unraceable). Both reds, and the second is why
+the first means anything — a guard that refuses everyone passes the exclusion half.
+
+**D22 RULED POPULATE** — `owner_email` resolved server-side by LEFT JOIN on **`users`**, and the client's roster
+lookup REMOVED rather than kept alongside. The roster cannot name an owner who LEFT THE ORG, and that is exactly
+the row an accountability screen exists for. Red: a departed owner still renders their identity; mutation
+re-pointing the join at `memberships` FAILS it. Without that red, D22 is a refactor.
+
+⛔ **OPEN AND HELD — DO NOT RE-DERIVE:** **Step 4** (contract to NOT NULL — after every row is assigned; an
+OPERATOR act, not code) · **D4** agent role, ruled not built · **D15** address-bearing enrolment, ruled not built ·
+**D23** the deactivated-owner FAIL-OPEN, registered §14, already live on `main` and NOT introduced by this slice —
+`MachineAuth` checks only `RevokedAt` and `UserID.Valid`, and enforcing it means an offboarding kills that
+person's GitOps operators, an outage with a human cause needing an operational answer · **the org question**,
+registered, recommendation **B**.
+
+⚠ **`docs/REGISTER-shipped-delivery-defects.md` IS NEW AND IS NOT EPIC 15's.** Four rows, all found because a
+review needed something the product could not give it: the `index.html` cache defect (FIXED — a correct deploy
+could not reach a returning user) · **`orgs[0]`: `GET /organizations` returns every org and the UI reads index
+zero, so a user in two orgs cannot reach the second by ANY means** · the Entra stale-seal ambiguity · a fixture
+that put on screen the exact phrase the banner is barred from saying.
+
+NEXT: the full product walk, then the beta-bundle call.
+
 **S15.1 COMMIT-ONE (2026-08-04) — PR #84, content tip `43f5604` pre-merge. PAPER ONLY; NO PRODUCT CODE.**
 The owned machine principal, D14/D19 steps 1–3. `docs/S15.0-decisions.md` §8.
 
