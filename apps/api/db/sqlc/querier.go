@@ -36,6 +36,13 @@ type Querier interface {
 	// lint:cross-org — the subnet is org-checked via GetSiteSubnetForOrg before approval. Idempotent-ish:
 	// approving an already-approved subnet is a no-op UPDATE.
 	ApproveSiteSubnet(ctx context.Context, id uuid.UUID) (SiteSubnet, error)
+	// S15.1 (D14/D19 step 2) — an admin NAMES the owner. There is no created_by on this table, so the minting
+	// user is not recoverable from the row: the admin is CHOOSING, not confirming, and nothing here guesses.
+	//
+	// ⛔ THE OWNER MUST BE IN THE CREDENTIAL'S ORG, ENFORCED IN THE STATEMENT. A cross-org owner would attribute a
+	// machine principal to someone who cannot see it. The EXISTS is org-scoped both ways — credential and user —
+	// so a mismatched pair updates zero rows rather than succeeding quietly.
+	AssignMachineCredentialOwner(ctx context.Context, arg AssignMachineCredentialOwnerParams) (int64, error)
 	// Flip an EXISTING manual group to idp_sync. The WHERE origin='manual' clause makes a re-bind of
 	// an already-synced group a no-row (the app layer maps that + the not-empty check to a 409). The
 	// disjointness (D1) and the not-empty rule are enforced above this; this only flips a clean group.

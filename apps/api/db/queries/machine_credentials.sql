@@ -27,3 +27,25 @@ ORDER BY created_at DESC;
 -- (the auth path re-reads the row every time — no session cache).
 UPDATE machine_credentials SET revoked_at = now()
 WHERE id = $1 AND org_id = $2 AND revoked_at IS NULL;
+
+-- name: AssignMachineCredentialOwner :execrows
+-- S15.1 (D14/D19 step 2) — an admin NAMES the owner. There is no created_by on this table, so the minting
+-- user is not recoverable from the row: the admin is CHOOSING, not confirming, and nothing here guesses.
+--
+-- ⛔ THE OWNER MUST BE IN THE CREDENTIAL'S ORG, ENFORCED IN THE STATEMENT. A cross-org owner would attribute a
+-- machine principal to someone who cannot see it. The EXISTS is org-scoped both ways — credential and user —
+-- so a mismatched pair updates zero rows rather than succeeding quietly.
+UPDATE machine_credentials mc
+SET user_id = $3
+WHERE mc.id = $1
+  AND mc.org_id = $2
+  AND mc.revoked_at IS NULL
+  -- ⚠ MEMBERSHIP IS RELATIONAL — `users` has NO org_id (measured, not assumed; the first draft of this
+  -- statement joined a column that does not exist and would have matched nothing). Org scoping goes through
+  -- `memberships`, and the user must still be live.
+  AND EXISTS (
+      SELECT 1 FROM memberships m
+      JOIN users u ON u.id = m.user_id
+      WHERE m.user_id = $3 AND m.org_id = $2
+        AND u.deleted_at IS NULL AND u.status = 'active'
+  );

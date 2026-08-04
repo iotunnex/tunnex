@@ -227,6 +227,7 @@ type MachineCredential struct {
 	CreatedAt   time.Time          `json:"created_at"`
 	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
 	RevokedAt   pgtype.Timestamptz `json:"revoked_at"`
+	UserID      pgtype.UUID        `json:"user_id"`
 }
 
 type Membership struct {

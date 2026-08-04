@@ -9,13 +9,51 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const assignMachineCredentialOwner = `-- name: AssignMachineCredentialOwner :execrows
+UPDATE machine_credentials mc
+SET user_id = $3
+WHERE mc.id = $1
+  AND mc.org_id = $2
+  AND mc.revoked_at IS NULL
+  -- ⚠ MEMBERSHIP IS RELATIONAL — ` + "`" + `users` + "`" + ` has NO org_id (measured, not assumed; the first draft of this
+  -- statement joined a column that does not exist and would have matched nothing). Org scoping goes through
+  -- ` + "`" + `memberships` + "`" + `, and the user must still be live.
+  AND EXISTS (
+      SELECT 1 FROM memberships m
+      JOIN users u ON u.id = m.user_id
+      WHERE m.user_id = $3 AND m.org_id = $2
+        AND u.deleted_at IS NULL AND u.status = 'active'
+  )
+`
+
+type AssignMachineCredentialOwnerParams struct {
+	ID     uuid.UUID   `json:"id"`
+	OrgID  uuid.UUID   `json:"org_id"`
+	UserID pgtype.UUID `json:"user_id"`
+}
+
+// S15.1 (D14/D19 step 2) — an admin NAMES the owner. There is no created_by on this table, so the minting
+// user is not recoverable from the row: the admin is CHOOSING, not confirming, and nothing here guesses.
+//
+// ⛔ THE OWNER MUST BE IN THE CREDENTIAL'S ORG, ENFORCED IN THE STATEMENT. A cross-org owner would attribute a
+// machine principal to someone who cannot see it. The EXISTS is org-scoped both ways — credential and user —
+// so a mismatched pair updates zero rows rather than succeeding quietly.
+func (q *Queries) AssignMachineCredentialOwner(ctx context.Context, arg AssignMachineCredentialOwnerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, assignMachineCredentialOwner, arg.ID, arg.OrgID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
 
 const createMachineCredential = `-- name: CreateMachineCredential :one
 
 INSERT INTO machine_credentials (org_id, name, role, token_hash, fingerprint)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, org_id, name, role, token_hash, fingerprint, created_at, last_used_at, revoked_at
+RETURNING id, org_id, name, role, token_hash, fingerprint, created_at, last_used_at, revoked_at, user_id
 `
 
 type CreateMachineCredentialParams struct {
@@ -48,12 +86,13 @@ func (q *Queries) CreateMachineCredential(ctx context.Context, arg CreateMachine
 		&i.CreatedAt,
 		&i.LastUsedAt,
 		&i.RevokedAt,
+		&i.UserID,
 	)
 	return i, err
 }
 
 const getMachineCredentialByHash = `-- name: GetMachineCredentialByHash :one
-SELECT id, org_id, name, role, token_hash, fingerprint, created_at, last_used_at, revoked_at FROM machine_credentials WHERE token_hash = $1
+SELECT id, org_id, name, role, token_hash, fingerprint, created_at, last_used_at, revoked_at, user_id FROM machine_credentials WHERE token_hash = $1
 `
 
 // lint:cross-org — an auth lookup by the secret HASH; the row resolves the org (the hash IS the credential).
@@ -72,12 +111,13 @@ func (q *Queries) GetMachineCredentialByHash(ctx context.Context, tokenHash []by
 		&i.CreatedAt,
 		&i.LastUsedAt,
 		&i.RevokedAt,
+		&i.UserID,
 	)
 	return i, err
 }
 
 const listMachineCredentialsForOrg = `-- name: ListMachineCredentialsForOrg :many
-SELECT id, org_id, name, role, token_hash, fingerprint, created_at, last_used_at, revoked_at FROM machine_credentials
+SELECT id, org_id, name, role, token_hash, fingerprint, created_at, last_used_at, revoked_at, user_id FROM machine_credentials
 WHERE org_id = $1 AND revoked_at IS NULL
 ORDER BY created_at DESC
 `
@@ -101,6 +141,7 @@ func (q *Queries) ListMachineCredentialsForOrg(ctx context.Context, orgID uuid.U
 			&i.CreatedAt,
 			&i.LastUsedAt,
 			&i.RevokedAt,
+			&i.UserID,
 		); err != nil {
 			return nil, err
 		}
