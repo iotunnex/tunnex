@@ -7,6 +7,7 @@ package sqlc
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -21,11 +22,15 @@ WHERE mc.id = $1
   -- ⚠ MEMBERSHIP IS RELATIONAL — ` + "`" + `users` + "`" + ` has NO org_id (measured, not assumed; the first draft of this
   -- statement joined a column that does not exist and would have matched nothing). Org scoping goes through
   -- ` + "`" + `memberships` + "`" + `, and the user must still be live.
+  -- ⛔ AND VERIFIED (D21). Enforced IN THE STATEMENT, not only in the handler's pre-check: a client-side
+  -- filter is a presentation decision, and the pre-check can be raced by a verification being revoked
+  -- between read and write. This is the authorization decision, so it lives where the write happens.
   AND EXISTS (
       SELECT 1 FROM memberships m
       JOIN users u ON u.id = m.user_id
       WHERE m.user_id = $3 AND m.org_id = $2
         AND u.deleted_at IS NULL AND u.status = 'active'
+        AND u.email_verified_at IS NOT NULL
   )
 `
 
@@ -116,21 +121,85 @@ func (q *Queries) GetMachineCredentialByHash(ctx context.Context, tokenHash []by
 	return i, err
 }
 
-const listMachineCredentialsForOrg = `-- name: ListMachineCredentialsForOrg :many
-SELECT id, org_id, name, role, token_hash, fingerprint, created_at, last_used_at, revoked_at, user_id FROM machine_credentials
-WHERE org_id = $1 AND revoked_at IS NULL
-ORDER BY created_at DESC
+const getOrgMemberVerification = `-- name: GetOrgMemberVerification :one
+SELECT (u.email_verified_at IS NOT NULL)::boolean AS email_verified
+FROM memberships m
+JOIN users u ON u.id = m.user_id
+WHERE m.org_id = $1 AND m.user_id = $2
+  AND u.deleted_at IS NULL AND u.status = 'active'
 `
 
-func (q *Queries) ListMachineCredentialsForOrg(ctx context.Context, orgID uuid.UUID) ([]MachineCredential, error) {
+type GetOrgMemberVerificationParams struct {
+	OrgID  uuid.UUID `json:"org_id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+// S15.1 / D21 — is this user eligible to be named as an accountable owner?
+//
+// ⛔ RULED NO FOR UNVERIFIED ACCOUNTS. Ownership is an ACCOUNTABILITY CLAIM, and an account that cannot
+// perform org mutations (requireVerifiedUser gates those) cannot be held accountable for what a credential
+// does. Nameable-but-unable-to-act is a contradiction the screen would render as fact.
+//
+// ⚠ THIS EXISTS FOR THE MESSAGE, NOT FOR THE TRUTH. The refusal is enforced in the UPDATE statement itself,
+// which cannot be raced; this read only lets the handler say WHICH precondition failed instead of returning
+// an undifferentiated not-found. No oracle is created: the caller holds machine:manage and can already read
+// every member's email_verified from the roster.
+//
+// No row = not a live member of this org (already the AssignOwner failure mode).
+func (q *Queries) GetOrgMemberVerification(ctx context.Context, arg GetOrgMemberVerificationParams) (bool, error) {
+	row := q.db.QueryRow(ctx, getOrgMemberVerification, arg.OrgID, arg.UserID)
+	var email_verified bool
+	err := row.Scan(&email_verified)
+	return email_verified, err
+}
+
+const listMachineCredentialsForOrg = `-- name: ListMachineCredentialsForOrg :many
+SELECT mc.id, mc.org_id, mc.name, mc.role, mc.token_hash, mc.fingerprint, mc.created_at, mc.last_used_at, mc.revoked_at, mc.user_id, u.email AS owner_email
+FROM machine_credentials mc
+LEFT JOIN users u ON u.id = mc.user_id
+WHERE mc.org_id = $1 AND mc.revoked_at IS NULL
+ORDER BY mc.created_at DESC
+`
+
+type ListMachineCredentialsForOrgRow struct {
+	ID          uuid.UUID          `json:"id"`
+	OrgID       uuid.UUID          `json:"org_id"`
+	Name        string             `json:"name"`
+	Role        string             `json:"role"`
+	TokenHash   []byte             `json:"token_hash"`
+	Fingerprint string             `json:"fingerprint"`
+	CreatedAt   time.Time          `json:"created_at"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+	RevokedAt   pgtype.Timestamptz `json:"revoked_at"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	OwnerEmail  *string            `json:"owner_email"`
+}
+
+// ⛔ owner_email IS RESOLVED HERE, FROM `users` AND NOT FROM `memberships` (S15.1, D22 ruled).
+//
+// The field was on the DTO, documented as "resolved from owner_user_id for display", and NEVER POPULATED —
+// the web resolved it from the member roster it already fetches. That is correct until the owner LEAVES THE
+// ORG, at which point the roster cannot name them and the accountability screen goes blank on precisely the
+// row accountability exists for.
+//
+// ⚠ LEFT JOIN ON `users`, WHICH SURVIVES BOTH LOSSES THE ROSTER DOES NOT: membership deletion (nothing pins
+// it) and deactivation. The FK is ON DELETE RESTRICT, so an assigned credential cannot outlive its user row —
+// the recorded identity is always recoverable, and the LEFT JOIN is for the NULL owner, not for a missing user.
+// lint:allow-deleted — DELIBERATE, AND IT IS THE RULING (D22), NOT A BYPASS.
+// The lint's default is right for every query that ACTS on a user. This one does not act; it RESOLVES A
+// RECORDED IDENTITY for display. Filtering `u.deleted_at IS NULL` here would blank the owner of a credential
+// whose owner was soft-deleted — the exact failure D22 was ruled to end, arrived at from a different
+// direction: the roster could not name a departed member, and `deleted_at` scoping cannot name a deleted one.
+// ⚠ A screen whose purpose is accountability must not lose the name at the moment accountability matters.
+func (q *Queries) ListMachineCredentialsForOrg(ctx context.Context, orgID uuid.UUID) ([]ListMachineCredentialsForOrgRow, error) {
 	rows, err := q.db.Query(ctx, listMachineCredentialsForOrg, orgID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []MachineCredential{}
+	items := []ListMachineCredentialsForOrgRow{}
 	for rows.Next() {
-		var i MachineCredential
+		var i ListMachineCredentialsForOrgRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.OrgID,
@@ -142,6 +211,7 @@ func (q *Queries) ListMachineCredentialsForOrg(ctx context.Context, orgID uuid.U
 			&i.LastUsedAt,
 			&i.RevokedAt,
 			&i.UserID,
+			&i.OwnerEmail,
 		); err != nil {
 			return nil, err
 		}

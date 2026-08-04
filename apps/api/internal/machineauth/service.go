@@ -19,8 +19,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -116,9 +118,30 @@ func (s *Service) Revoke(ctx context.Context, orgID, actor, credID uuid.UUID) (b
 	return revoked, err
 }
 
-// List returns the org's ACTIVE machine credentials — metadata only (fingerprint, never the secret).
-func (s *Service) List(ctx context.Context, orgID uuid.UUID) ([]sqlc.MachineCredential, error) {
+// List returns the org's ACTIVE machine credentials — metadata only (fingerprint, never the secret),
+// each carrying its owner's email resolved from `users` (D22).
+func (s *Service) List(ctx context.Context, orgID uuid.UUID) ([]sqlc.ListMachineCredentialsForOrgRow, error) {
 	return s.q.ListMachineCredentialsForOrg(ctx, orgID)
+}
+
+// OwnerEligible reports whether a user may be NAMED as a machine credential's accountable owner.
+//
+// ⛔ D21 RULED NO FOR UNVERIFIED ACCOUNTS, and this read exists ONLY so the refusal can say which
+// precondition failed. The refusal itself is in the UPDATE statement, which cannot be raced by a
+// verification revoked between this read and that write.
+//
+// Returns (false, nil) for an unverified member and (false, ErrNoRows-wrapped) for a non-member — the
+// handler collapses the second back into the existing undifferentiated not-found so no membership oracle
+// is created.
+func (s *Service) OwnerEligible(ctx context.Context, orgID, userID uuid.UUID) (verified bool, isMember bool, err error) {
+	v, e := s.q.GetOrgMemberVerification(ctx, sqlc.GetOrgMemberVerificationParams{OrgID: orgID, UserID: userID})
+	if errors.Is(e, pgx.ErrNoRows) {
+		return false, false, nil
+	}
+	if e != nil {
+		return false, false, e
+	}
+	return v, true, nil
 }
 
 // AssignOwner names the HUMAN a machine credential acts for (S15.1, D14/D19 step 2).

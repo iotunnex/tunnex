@@ -241,21 +241,21 @@ export function MachineCredentials({
                   {/* ⛔ THE MOMENT A CREDENTIAL ACQUIRED AN OWNER, THAT FACT BECAME INVISIBLE. On a
                       screen whose entire purpose is accountability, the assigned state was the one
                       state that said nothing at all.
-                      ⛔ AND IT IS RESOLVED FROM THE MEMBER ROSTER, NOT FROM `owner_email`. The DTO
-                      carries that field and the handler DELIBERATELY LEAVES IT NULL — the roster is
-                      already fetched for the picker, and resolving server-side too would be a second
-                      source of truth for one fact. Reading `c.owner_email` here would have rendered
-                      "unknown" on every owned row.
-                      ⚠ A MEMBER CAN GO MISSING FOR A REAL REASON: the FK is ON DELETE RESTRICT on
-                      `users`, but nothing pins the MEMBERSHIP, so an owner who left the org keeps the
-                      credential and drops off the roster. That row must say the owner is unresolvable —
-                      never render blank, which is indistinguishable from unowned. */}
+                      ⛔ AND IT READS `owner_email`, THE SERVER'S RESOLUTION, NOT THE MEMBER ROSTER (D22
+                      ruled). The roster lookup that was here is REMOVED rather than kept alongside: two
+                      resolvers for one fact is the one-truth violation in its plainest form, and the
+                      client's copy is the one that CANNOT SEE A DEPARTED MEMBER.
+                      ⚠ AND THAT IS THE ROW THIS SCREEN EXISTS FOR. Nothing pins a membership, so an owner
+                      who leaves the org keeps the credential and drops off the roster — the roster-based
+                      render went blank at exactly the moment accountability mattered. The server resolves
+                      from `users`, which survives both leaving and deactivation.
+                      The fallback is for a genuinely unrecoverable identity only; ON DELETE RESTRICT means
+                      an assigned credential cannot outlive its user row, so it should be unreachable. */}
                   {c.owner_user_id ? (
                     <span className="ml-2 text-xs text-ink-secondary">
                       · owner{" "}
                       <span className="text-slate-300">
-                        {members.find((m) => m.user_id === c.owner_user_id)?.email ??
-                          "not a member of this organization"}
+                        {c.owner_email ?? "no longer a known account"}
                       </span>
                     </span>
                   ) : (
@@ -285,11 +285,20 @@ export function MachineCredentials({
                         className="rounded border border-line bg-surface-inset px-2 py-1 text-xs"
                       >
                         <option value="">Choose an owner…</option>
-                        {members.map((m) => (
-                          <option key={m.user_id} value={m.user_id}>
-                            {m.email}
-                          </option>
-                        ))}
+                        {/* ⛔ UNVERIFIED ACCOUNTS ARE NOT OFFERED (D21 ruled). Ownership is an
+                            accountability claim, and an account that cannot perform org mutations —
+                            requireVerifiedUser gates those — cannot be held accountable for what a
+                            credential does.
+                            ⚠ THIS FILTER IS PRESENTATION, NOT ENFORCEMENT. The server refuses an
+                            unverified owner at the handler AND inside the UPDATE statement; removing
+                            this line would change what is offered, not what is permitted. */}
+                        {members
+                          .filter((m) => m.email_verified)
+                          .map((m) => (
+                            <option key={m.user_id} value={m.user_id}>
+                              {m.email}
+                            </option>
+                          ))}
                       </select>
                       <Button
                         variant="ghost"
