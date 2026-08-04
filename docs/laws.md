@@ -4742,3 +4742,38 @@ signal is reading the diff, and the temptation after a `gofmt` red is to run `go
 **Practice:** avoid raw `''`, `""` and paired backticks inside Go doc comments when they are *technical
 content*; write the meaning in words ("an is-not-empty check") or move the snippet into code. ⛔ And after any
 `gofmt -w` on a commented file, **read the diff** — it is the only place the change is visible.
+
+---
+
+## ⛔ A GUARD CAN BE ARMED AND STILL NOT BE REACHED — CITE THE CALLER, NOT THE DEFINITION
+
+**S15.2 / EPIC 15, 2026-08-04. The epic's last law, and its most transferable finding.**
+
+The enrolment refusal was **written, tested in both directions, mutation-proven, and shipped unarmed on
+purpose** so that arming it later would be a boolean flip over a known-good implementation. When the D14
+restore proof was discharged, the constant was flipped —
+
+> ## **AND NOTHING CHANGED, BECAUSE `RefuseUnownedEnrolment` HAD ZERO CALL SITES.**
+
+The rule was correct. The tests were green. The mutation evidence was real. **The enrolment path never
+consulted it.**
+
+⚠ **THE WHO-READS-THIS PROBE WAS MINTED FOR SERVED FIELDS AND CHANNEL VALUES. THIS IS ITS FIRST INSTANCE ON
+A GUARD** — and guards are where it hides best, because a guard's test suite *looks* like proof of
+enforcement while proving only that the predicate computes.
+
+### ⛔ AND THE ARMING COMMIT IS EXACTLY WHERE IT HIDES
+
+An arming commit is small, deliberate, and reviewed for **whether the guard should be on** — never for
+**whether the guard is wired**. Everyone reads the constant and the tests; nobody greps for the call. The
+smaller and more careful the commit, the more completely the question goes unasked.
+
+> ## **THE CHECK, NAMED: FOR EVERY GUARD, CITE THE LINE THAT CALLS IT — NOT THE LINE THAT DEFINES IT.**
+
+**And make it executable where it matters.** `enrolment_refusal_test.go` now reads the enrolment path's
+source and fails if the call disappears — including a check that it is **inside `Enroll`**, since a call on
+an unrelated path would satisfy a naive grep.
+
+⚠ **Related but distinct from the too-narrow-predicate law.** That one is *a guard that runs and does not
+catch enough*. This one is *a guard that never runs at all* — and the second is invisible to every test the
+first would fail.
