@@ -17,11 +17,11 @@ import (
 // one broken peer — it makes WireGuard reject the ENTIRE interface configuration, so a gateway ends up with
 // **zero** peers and every human device on it stops working.
 //
-// The guard for this already existed (`public_key <> ''`, S9.1/WF-OVPN-10) and was **one predicate too
-// narrow**: emptiness is a special case of malformedness, and an agent device's `pending-agent-<uuid>`
+// The guard for this already existed (an is-not-empty check on public_key, S9.1/WF-OVPN-10) and was one
+// predicate too narrow: emptiness is a special case of malformedness, and an agent device's `pending-agent-<uuid>`
 // placeholder is non-empty. It sailed through the guard written to stop exactly this.
 //
-// > **A GUARD WRITTEN FOR A HAZARD IS NOT A GUARD AGAINST THE HAZARD.** `<> ''` answers *is there a key*;
+// > A GUARD WRITTEN FOR A HAZARD IS NOT A GUARD AGAINST THE HAZARD. An is-not-empty test asks IS THERE A KEY;
 // > the parser asks *is this a key*, and only the second question is the one `wg` will ask.
 func TestMalformedPeerKeyExcludesThePeerNotTheInterface(t *testing.T) {
 	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")

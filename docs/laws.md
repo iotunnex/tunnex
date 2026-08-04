@@ -4721,3 +4721,24 @@ placeholder.
 
 ⛔ **Not fixed here** — measured and filed, per the founder's instruction. Checked and found to have **no**
 presence-only guards: `cidr`, `pool_cidr`, `vip_range`, `endpoint`, `cert_serial`, `cert_public_key`.
+
+---
+
+## ⚠ gofmt REWRITES DOC-COMMENT CONTENT, AND IT CAN MAKE A TRUE COMMENT FALSE
+
+**S15.2 / EPIC 15 walk, 2026-08-04 — caught by CI, then by reading the diff rather than re-running the tool.**
+
+A comment explaining the peer-key guard said the old predicate was ``public_key <> ''``. **gofmt's doc-comment
+reflow (Go 1.19+) converted the two single quotes into a typographic `”`** — so a comment *about SQL* came to
+read `public_key <> ”`, which is not a thing.
+
+> ## **A FORMATTER THAT REFLOWS PROSE IS EDITING CONTENT, NOT LAYOUT.** `gofmt -w` is normally safe to apply
+> ## blind because it moves whitespace. In doc comments it also normalises quotes and backticks — so
+> ## "just run gofmt" can silently change what a comment CLAIMS.
+
+⚠ **And CI cannot catch the resulting falsehood** — the file is *correctly formatted* afterwards. The only
+signal is reading the diff, and the temptation after a `gofmt` red is to run `gofmt -w` and move on.
+
+**Practice:** avoid raw `''`, `""` and paired backticks inside Go doc comments when they are *technical
+content*; write the meaning in words ("an is-not-empty check") or move the snippet into code. ⛔ And after any
+`gofmt -w` on a commented file, **read the diff** — it is the only place the change is visible.
