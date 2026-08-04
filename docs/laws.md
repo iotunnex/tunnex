@@ -4777,3 +4777,46 @@ an unrelated path would satisfy a naive grep.
 ⚠ **Related but distinct from the too-narrow-predicate law.** That one is *a guard that runs and does not
 catch enough*. This one is *a guard that never runs at all* — and the second is invisible to every test the
 first would fail.
+
+---
+
+## ⛔ A LOCAL COMMAND THAT RAN IS NOT A LOCAL COMMAND THAT CHECKED — TWO INSTANCES, ONE SESSION
+
+**2026-08-04. Both times a command ran, produced output, and the output did not mean what it appeared to
+mean.** The class is more useful than either instance.
+
+### Instance 1 — `ok` from four SKIPS
+
+`go test ./internal/agentca/` printed **`ok`** while **skipping four tests** for want of
+`TUNNEX_TEST_DATABASE_URL`. That `ok` was then compared against a `test-editions` run that *supplied* the
+variable and actually executed them — **a pass and a skip, read as two comparable results.**
+
+### Instance 2 — `build-editions` standing in for `test-editions`
+
+`make build-editions` passed, `go build ./...` passed, and an untagged fresh-DB suite passed — while **four
+stale call sites sat in an enterprise-tagged TEST file.**
+
+| check | why it could not see them |
+| --- | --- |
+| `make build-editions` | compiles **packages, not test files** |
+| `go build ./...` | never compiles **enterprise-tagged** test files |
+| an untagged `go test ./...` | never compiles them either |
+
+⚠ **A signature change is precisely the break that lives only in test files** — and every local gate was
+blind to it in a different way.
+
+### ⛔ THE RULE, STATED SO IT BINDS
+
+> ## **`build-editions` DOES NOT IMPLY `test-editions`, AND NEITHER IMPLIES THE OTHER.**
+> ## **REPORT EVERY LEG BY NAME AND VALUE. DO NOT LET ONE STAND IN FOR ANOTHER.**
+
+**And run the gate as CI runs it** — already law here; this is its next instance. The composite is composite
+*because* the legs answer different questions, and treating the cheap one as evidence for the expensive one
+is how a green local turns into a red CI.
+
+⚠ **The tell both times was available and unremarkable:** `ok` on a package with a skip count, and a build
+gate that never mentions tests. **Neither looked like a problem, which is the whole difficulty** — an output
+that is *wrong* gets read; an output that is merely *narrower than assumed* gets counted.
+
+**The check:** before treating a local result as evidence, ask **what would this command have to see in order
+to fail?** ⛔ If the answer excludes the thing you changed, the command is not evidence about it.
