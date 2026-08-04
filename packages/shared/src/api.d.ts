@@ -2163,9 +2163,9 @@ export interface components {
             src_cidr?: string | null;
             /**
              * Format: uuid
-             * @description S15.3 — set when src_kind=agent: the agent whose /32 is the source.
+             * @description S15.3 — set when src_kind=agent: the agent device whose /32 is the source.
              */
-            src_node_id?: string | null;
+            src_device_id?: string | null;
             cidr_outside_org_ranges: boolean;
             /** @enum {string} */
             dst_kind: "resource" | "group" | "site" | "k8s_service";
@@ -2208,9 +2208,9 @@ export interface components {
             src_cidr?: string | null;
             /**
              * Format: uuid
-             * @description Required when src_kind=agent (S15.3): the agent whose own /32 is the source. Resolves exactly as a user-source resolves to that user's device — an agent IS a device, and this names which one.
+             * @description Required when src_kind=agent (S15.3): the agent DEVICE whose /32 is the source. An agent is a peer, so a grant names exactly one device — never a node, which would grant every device behind that gateway.
              */
-            src_node_id?: string | null;
+            src_device_id?: string | null;
             /** @enum {string} */
             dst_kind: "resource" | "group" | "site" | "k8s_service";
             /**
@@ -2622,19 +2622,20 @@ export interface components {
         };
         Agent: {
             /** Format: uuid */
-            node_id: string;
+            device_id: string;
             name: string;
-            /**
-             * @description S15.3 — what the operator DECLARED at enrolment. ⛔ THREE-VALUED, NOT A BOOLEAN. 'undetermined' means the node was enrolled before Tunnex recorded that choice, so the answer was never captured and CANNOT BE RECOVERED — it is neither 'agent' (which would repeat a defect) nor 'gateway' (which would assert a fact nobody has).
-             * @enum {string}
-             */
-            enrolment_kind: "agent" | "gateway" | "undetermined";
-            /** @description The human who authorised this agent into the org — the join token's issuer, resolved from `users` so it survives them leaving. */
+            /** @description The human who enrolled this agent. Resolved from `users`, so it survives them leaving the org. */
             owner_email?: string | null;
+            /** @description The agent's own /32 on the tunnel — what a grant matches on, and what a flow event is attributed by. */
+            address?: string | null;
+            /** @description The gateway this agent connects THROUGH. Its traffic is forwarded there, which is why the policy chain sees it. */
+            gateway_name: string;
+            /** Format: uuid */
+            node_id?: string;
             /** @description No owner is recorded, so activity cannot be tied to a person. ⛔ A statement about the AUDIT TRAIL, never about permission — an unattributable agent is not less authorized. */
             unattributable: boolean;
-            /** @description The agent's own /32, which is what makes it nameable in a flow event. */
-            address?: string | null;
+            /** @description The agent has a WireGuard key registered, i.e. its config was issued and it can connect. ⚠ NOT a liveness claim — it does not mean traffic is flowing now. */
+            connected?: boolean;
             status: string;
         };
         Node: {
@@ -2751,6 +2752,11 @@ export interface components {
             /** Format: uuid */
             user_id?: string;
             full_tunnel?: boolean;
+            /**
+             * @description S15.3 — 'agent' enrols an AI agent as a PEER homed on the chosen gateway. ⛔ An agent is a CLIENT, not a gateway: it holds its own /32, its traffic is FORWARDED through the gateway, and the policy chain therefore sees it. Default 'human'.
+             * @enum {string}
+             */
+            kind?: "human" | "agent";
             /** @enum {string} */
             provisioning?: "managed" | "static";
         };

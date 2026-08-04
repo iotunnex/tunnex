@@ -533,7 +533,7 @@ export interface RuleBodyInput {
   srcUser: string;
   srcSite: string;
   srcCidr: string; // S8.7: literal source CIDR (src_kind='cidr')
-  srcAgent: string; // S15.3: the agent node id (src_kind='agent')
+  srcAgent: string; // S15.3: the agent DEVICE id (src_kind='agent')
   dstGroup: string;
   dstResource: string;
   dstSite: string;
@@ -553,7 +553,7 @@ export function ruleBody(i: RuleBodyInput): CreatePolicyRuleRequest {
           : // S15.3: ONE agent's own /32. Not the node — the agent's device on it, resolved by the
             // compiler, so a grant to an agent never becomes a grant to every device behind its gateway.
             i.srcKind === "agent"
-            ? { src_kind: "agent" as const, src_node_id: i.srcAgent }
+            ? { src_kind: "agent" as const, src_device_id: i.srcAgent }
             : { src_kind: "group" as const, src_group_id: i.src };
   const dstPart =
     i.dstKind === "group"

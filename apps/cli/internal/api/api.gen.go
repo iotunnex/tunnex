@@ -32,18 +32,17 @@ const (
 	Terminated    AccessEventDecision = "terminated"
 )
 
-// Defines values for AgentEnrolmentKind.
-const (
-	AgentEnrolmentKindAgent        AgentEnrolmentKind = "agent"
-	AgentEnrolmentKindGateway      AgentEnrolmentKind = "gateway"
-	AgentEnrolmentKindUndetermined AgentEnrolmentKind = "undetermined"
-)
-
 // Defines values for ChangeRoleRequestRole.
 const (
 	ChangeRoleRequestRoleAdmin  ChangeRoleRequestRole = "admin"
 	ChangeRoleRequestRoleMember ChangeRoleRequestRole = "member"
 	ChangeRoleRequestRoleOwner  ChangeRoleRequestRole = "owner"
+)
+
+// Defines values for CreateDeviceRequestKind.
+const (
+	CreateDeviceRequestKindAgent CreateDeviceRequestKind = "agent"
+	CreateDeviceRequestKindHuman CreateDeviceRequestKind = "human"
 )
 
 // Defines values for CreateDeviceRequestProvisioning.
@@ -424,24 +423,25 @@ type AffectedDevice struct {
 
 // Agent defines model for Agent.
 type Agent struct {
-	// Address The agent's own /32, which is what makes it nameable in a flow event.
+	// Address The agent's own /32 on the tunnel — what a grant matches on, and what a flow event is attributed by.
 	Address *string `json:"address"`
 
-	// EnrolmentKind S15.3 — what the operator DECLARED at enrolment. ⛔ THREE-VALUED, NOT A BOOLEAN. 'undetermined' means the node was enrolled before Tunnex recorded that choice, so the answer was never captured and CANNOT BE RECOVERED — it is neither 'agent' (which would repeat a defect) nor 'gateway' (which would assert a fact nobody has).
-	EnrolmentKind AgentEnrolmentKind `json:"enrolment_kind"`
-	Name          string             `json:"name"`
-	NodeId        openapi_types.UUID `json:"node_id"`
+	// Connected The agent has a WireGuard key registered, i.e. its config was issued and it can connect. ⚠ NOT a liveness claim — it does not mean traffic is flowing now.
+	Connected *bool              `json:"connected,omitempty"`
+	DeviceId  openapi_types.UUID `json:"device_id"`
 
-	// OwnerEmail The human who authorised this agent into the org — the join token's issuer, resolved from `users` so it survives them leaving.
+	// GatewayName The gateway this agent connects THROUGH. Its traffic is forwarded there, which is why the policy chain sees it.
+	GatewayName string              `json:"gateway_name"`
+	Name        string              `json:"name"`
+	NodeId      *openapi_types.UUID `json:"node_id,omitempty"`
+
+	// OwnerEmail The human who enrolled this agent. Resolved from `users`, so it survives them leaving the org.
 	OwnerEmail *string `json:"owner_email"`
 	Status     string  `json:"status"`
 
 	// Unattributable No owner is recorded, so activity cannot be tied to a person. ⛔ A statement about the AUDIT TRAIL, never about permission — an unattributable agent is not less authorized.
 	Unattributable bool `json:"unattributable"`
 }
-
-// AgentEnrolmentKind S15.3 — what the operator DECLARED at enrolment. ⛔ THREE-VALUED, NOT A BOOLEAN. 'undetermined' means the node was enrolled before Tunnex recorded that choice, so the answer was never captured and CANNOT BE RECOVERED — it is neither 'agent' (which would repeat a defect) nor 'gateway' (which would assert a fact nobody has).
-type AgentEnrolmentKind string
 
 // AssignMachineCredentialOwnerRequest defines model for AssignMachineCredentialOwnerRequest.
 type AssignMachineCredentialOwnerRequest struct {
@@ -564,7 +564,10 @@ type CliCredentialGrant struct {
 
 // CreateDeviceRequest defines model for CreateDeviceRequest.
 type CreateDeviceRequest struct {
-	FullTunnel   *bool                            `json:"full_tunnel,omitempty"`
+	FullTunnel *bool `json:"full_tunnel,omitempty"`
+
+	// Kind S15.3 — 'agent' enrols an AI agent as a PEER homed on the chosen gateway. ⛔ An agent is a CLIENT, not a gateway: it holds its own /32, its traffic is FORWARDED through the gateway, and the policy chain therefore sees it. Default 'human'.
+	Kind         *CreateDeviceRequestKind         `json:"kind,omitempty"`
 	Name         string                           `json:"name"`
 	NodeId       openapi_types.UUID               `json:"node_id"`
 	Platform     *string                          `json:"platform,omitempty"`
@@ -572,6 +575,9 @@ type CreateDeviceRequest struct {
 	PublicKey    *string                          `json:"public_key,omitempty"`
 	UserId       *openapi_types.UUID              `json:"user_id,omitempty"`
 }
+
+// CreateDeviceRequestKind S15.3 — 'agent' enrols an AI agent as a PEER homed on the chosen gateway. ⛔ An agent is a CLIENT, not a gateway: it holds its own /32, its traffic is FORWARDED through the gateway, and the policy chain therefore sees it. Default 'human'.
+type CreateDeviceRequestKind string
 
 // CreateDeviceRequestProvisioning defines model for CreateDeviceRequest.Provisioning.
 type CreateDeviceRequestProvisioning string
@@ -611,12 +617,12 @@ type CreatePolicyRuleRequest struct {
 	// SrcCidr Required when src_kind=cidr (S8.7): a literal source CIDR, e.g. 172.31.17.64/32. Validated well-formed; org-range meaningfulness is a read-time warning, not a creation refusal (warn-not-refuse).
 	SrcCidr *string `json:"src_cidr"`
 
+	// SrcDeviceId Required when src_kind=agent (S15.3): the agent DEVICE whose /32 is the source. An agent is a peer, so a grant names exactly one device — never a node, which would grant every device behind that gateway.
+	SrcDeviceId *openapi_types.UUID `json:"src_device_id"`
+
 	// SrcGroupId Required when src_kind=group (or omitted).
 	SrcGroupId *openapi_types.UUID             `json:"src_group_id"`
 	SrcKind    *CreatePolicyRuleRequestSrcKind `json:"src_kind,omitempty"`
-
-	// SrcNodeId Required when src_kind=agent (S15.3): the agent whose own /32 is the source. Resolves exactly as a user-source resolves to that user's device — an agent IS a device, and this names which one.
-	SrcNodeId *openapi_types.UUID `json:"src_node_id"`
 
 	// SrcSiteId Required when src_kind=site (S8.2); the compiler resolves it to the source site's approved subnet CIDRs (the LAN source).
 	SrcSiteId *openapi_types.UUID `json:"src_site_id"`
@@ -1338,14 +1344,14 @@ type PolicyRule struct {
 	OrgId                 openapi_types.UUID  `json:"org_id"`
 
 	// SrcCidr Set when src_kind=cidr (S8.7): a literal source CIDR (/32-precise).
-	SrcCidr    *string             `json:"src_cidr"`
-	SrcGroupId *openapi_types.UUID `json:"src_group_id"`
-	SrcKind    PolicyRuleSrcKind   `json:"src_kind"`
+	SrcCidr *string `json:"src_cidr"`
 
-	// SrcNodeId S15.3 — set when src_kind=agent: the agent whose /32 is the source.
-	SrcNodeId *openapi_types.UUID `json:"src_node_id"`
-	SrcSiteId *openapi_types.UUID `json:"src_site_id"`
-	SrcUserId *openapi_types.UUID `json:"src_user_id"`
+	// SrcDeviceId S15.3 — set when src_kind=agent: the agent device whose /32 is the source.
+	SrcDeviceId *openapi_types.UUID `json:"src_device_id"`
+	SrcGroupId  *openapi_types.UUID `json:"src_group_id"`
+	SrcKind     PolicyRuleSrcKind   `json:"src_kind"`
+	SrcSiteId   *openapi_types.UUID `json:"src_site_id"`
+	SrcUserId   *openapi_types.UUID `json:"src_user_id"`
 }
 
 // PolicyRuleDstKind defines model for PolicyRule.DstKind.

@@ -36,19 +36,22 @@ type ResourceInput struct {
 // SrcUserID); ExpiresAt set makes it a temporary grant (nil = permanent). SrcKind
 // blank is treated as "group" (back-compat with pre-S7.5.4 callers).
 type RuleInput struct {
-	SrcKind         string // "" | group | user | site (S8.2) | cidr (S8.7)
-	SrcGroupID      uuid.UUID
-	SrcUserID       *uuid.UUID
-	SrcSiteID       *uuid.UUID // S8.2: set iff SrcKind=="site" — a site's LAN as the policy SOURCE
-	SrcCIDR         *string    // S8.7: set iff SrcKind=="cidr" — a literal source CIDR (/32-precise grants)
-	DstKind         string     // resource | group | site (S8.1) | k8s_service (S10.3)
-	DstResourceID   *uuid.UUID
-	DstGroupID      *uuid.UUID
-	DstSiteID       *uuid.UUID // S8.1: set iff DstKind=="site"
-	DstK8sServiceID *uuid.UUID // S10.3: set iff DstKind=="k8s_service"
-	ExpiresAt       *time.Time // nil = permanent; set = temporary grant
-	// SrcNodeID (S15.3) — src_kind='agent': the agent whose OWN /32 is the source.
-	SrcNodeID *uuid.UUID
+	SrcKind    string // "" | group | user | site (S8.2) | cidr (S8.7)
+	SrcGroupID uuid.UUID
+	SrcUserID  *uuid.UUID
+	SrcSiteID  *uuid.UUID // S8.2: set iff SrcKind=="site" — a site's LAN as the policy SOURCE
+	SrcCIDR    *string    // S8.7: set iff SrcKind=="cidr" — a literal source CIDR (/32-precise grants)
+	// SrcAgentDeviceID (S15.3) — set iff SrcKind=="agent": the agent DEVICE whose /32 is the source.
+	// ⚠ Named distinctly from AllowEntry.SrcDeviceID (observability metadata) so the two cannot be confused:
+	// this one is POLICY INPUT and decides what the rule matches.
+	SrcAgentDeviceID *uuid.UUID
+	DstKind          string // resource | group | site (S8.1) | k8s_service (S10.3)
+	DstResourceID    *uuid.UUID
+	DstGroupID       *uuid.UUID
+	DstSiteID        *uuid.UUID // S8.1: set iff DstKind=="site"
+	DstK8sServiceID  *uuid.UUID // S10.3: set iff DstKind=="k8s_service"
+	ExpiresAt        *time.Time // nil = permanent; set = temporary grant
+
 }
 
 // AffectedDevice is a full-tunnel device whose internet egress becomes policy-

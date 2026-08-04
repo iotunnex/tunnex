@@ -362,8 +362,8 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 		// ⛔ THE NODE MUST BE AN AGENT, AND THE CHECK IS HERE RATHER THAN AT THE COMPILER. A rule naming a
 		// plain gateway would compile to nothing and look like a working grant — the reassuring-empty class
 		// applied to a policy rule, where the operator believes access was granted and it never was.
-		if in.SrcNodeID == nil || in.SrcGroupID != uuid.Nil || in.SrcUserID != nil || in.SrcSiteID != nil || in.SrcCIDR != nil {
-			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind=agent requires src_node_id (and no other src_*)")
+		if in.SrcAgentDeviceID == nil || in.SrcGroupID != uuid.Nil || in.SrcUserID != nil || in.SrcSiteID != nil || in.SrcCIDR != nil {
+			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind=agent requires src_device_id (and no other src_*)")
 		}
 	default:
 		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind must be group, user, site, cidr, or agent")
@@ -463,8 +463,8 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 		r, e = q.CreatePolicyRule(ctx, sqlc.CreatePolicyRuleParams{
 			OrgID: orgID, SrcKind: srcKind, SrcGroupID: toPgUUIDVal(in.SrcGroupID), SrcUserID: toPgUUID(in.SrcUserID),
 			SrcSiteID: toPgUUID(in.SrcSiteID), SrcCidr: in.SrcCIDR,
-			SrcNodeID: toPgUUID(in.SrcNodeID),
-			DstKind:   in.DstKind, DstResourceID: toPgUUID(in.DstResourceID), DstGroupID: toPgUUID(in.DstGroupID),
+			SrcDeviceID: toPgUUID(in.SrcAgentDeviceID),
+			DstKind:     in.DstKind, DstResourceID: toPgUUID(in.DstResourceID), DstGroupID: toPgUUID(in.DstGroupID),
 			DstSiteID: toPgUUID(in.DstSiteID), DstK8sServiceID: toPgUUID(in.DstK8sServiceID), ExpiresAt: toPgTimestamptz(in.ExpiresAt),
 			ManagedByMachine: pgtype.UUID{Bytes: managedByMachine, Valid: managedByMachine != uuid.Nil},
 		})
@@ -785,9 +785,9 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 		snap.Rules = append(snap.Rules, Rule{
 			ID:      r.ID,
 			SrcKind: r.SrcKind, SrcGroupID: fromPgUUID(r.SrcGroupID), SrcUserID: fromPgUUID(r.SrcUserID),
-			SrcSiteID:     fromPgUUID(r.SrcSiteID), // S8.2: src_kind='site' resolution
-			SrcCIDR:       derefString(r.SrcCidr),  // S8.7: src_kind='cidr' resolution
-			SrcNodeID:     fromPgUUID(r.SrcNodeID), // S15.3: src_kind='agent' resolution
+			SrcSiteID:     fromPgUUID(r.SrcSiteID),   // S8.2: src_kind='site' resolution
+			SrcCIDR:       derefString(r.SrcCidr),    // S8.7: src_kind='cidr' resolution
+			SrcDeviceID:   fromPgUUID(r.SrcDeviceID), // S15.3: src_kind='agent' resolution
 			DstKind:       r.DstKind,
 			DstResourceID: fromPgUUID(r.DstResourceID), DstGroupID: fromPgUUID(r.DstGroupID),
 			DstSiteID:       fromPgUUID(r.DstSiteID),

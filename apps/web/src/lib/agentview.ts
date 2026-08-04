@@ -28,12 +28,15 @@
  * marker, and the join is gone.
  */
 export interface AgentRow {
-  node_id: string;
+  device_id: string;
   name: string;
-  enrolment_kind: EnrolmentKind;
   owner_email: string | null;
   unattributable: boolean;
   address: string | null;
+  /** The gateway this agent connects THROUGH — why its traffic is forwarded and therefore policed. */
+  gateway_name: string;
+  node_id?: string;
+  connected?: boolean;
   status: string;
 }
 
@@ -43,9 +46,11 @@ export interface AgentRow {
  * ⚠ THE TWO STATES AN OPERATOR CANNOT LEARN ANYWHERE ELSE COME FIRST, and neither may depend on a name.
  */
 export function sortAgents(rows: AgentRow[]): AgentRow[] {
-  const rank = (a: AgentRow) =>
-    a.unattributable ? 0 : a.enrolment_kind === "undetermined" ? 1 : 2;
-  return [...rows].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  // ⚠ UNATTRIBUTABLE FIRST, and it must not depend on a name — it is the one state an operator cannot
+  // learn anywhere else.
+  return [...rows].sort(
+    (a, b) => Number(b.unattributable) - Number(a.unattributable) || a.name.localeCompare(b.name),
+  );
 }
 
 /**
@@ -139,3 +144,35 @@ export function agentSummary(rows: Pick<AgentRow, "unattributable">[]): {
         : null,
   };
 }
+
+/**
+ * The command an operator runs ON THE AI-AGENT HOST to bring the tunnel up.
+ *
+ * ⛔ THE AGENT IS A PEER, SO WHAT IT NEEDS IS A WIREGUARD CONFIG — not a node-agent container. The earlier
+ * version handed over a `docker run` that started a GATEWAY on the agent's host: traffic originating there
+ * is locally-originated, never traverses FORWARD, and therefore is never seen by the policy chain. The
+ * address it was granted was held by nothing and the grant could not fire.
+ *
+ * ⚠ ONE COMMAND, NOT A FILE TO SAVE AND THEN A COMMAND TO RUN. A two-step ceremony is where the config gets
+ * pasted into the wrong path, and the config carries a private key shown exactly once.
+ *
+ * The heredoc is quoted ('TUNNEXEOF') so the shell performs NO expansion on the key material — an unquoted
+ * heredoc would mangle any `$` in a base64 key.
+ */
+export function agentConnectCommand(conf: string, ifaceName = "tunnex"): string {
+  return [
+    `sudo mkdir -p /etc/wireguard && sudo tee /etc/wireguard/${ifaceName}.conf >/dev/null <<'TUNNEXEOF'`,
+    conf.trim(),
+    "TUNNEXEOF",
+    `sudo chmod 600 /etc/wireguard/${ifaceName}.conf && sudo wg-quick up ${ifaceName}`,
+  ].join("\n");
+}
+
+/**
+ * What the operator must have on the agent host first.
+ *
+ * ⚠ STATED, NOT ASSUMED. `wg-quick` is not installed by default on most images, and a command that fails
+ * with "command not found" reads as a broken product rather than a missing package.
+ */
+export const AGENT_PREREQ =
+  "Requires wireguard-tools on the agent host (apt install wireguard-tools / yum install wireguard-tools).";

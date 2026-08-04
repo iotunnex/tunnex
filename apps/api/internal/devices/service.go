@@ -121,6 +121,10 @@ type CreateInput struct {
 	NodeID   uuid.UUID // the gateway the peer connects through
 	Name     string
 	Platform string
+	// Kind (S15.3) — "human" (default) or "agent". An AGENT is enrolled exactly like any other peer: it is
+	// homed on a gateway, holds its own /32, and its traffic is FORWARDED through that gateway, which is
+	// what puts it in front of the policy chain.
+	Kind string
 	// PublicKey, if set, is a client-generated peer key (preferred). If empty, the
 	// server generates a keypair and returns the private key ONCE (browser flow).
 	PublicKey string
@@ -311,7 +315,15 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 			// rows, but Go's zero value for a string is "" — which the CHECK constraint rejects. Relying on
 			// the DEFAULT here would mean this insert breaks the moment sqlc names the column, and it would
 			// break at runtime rather than at compile time.
-			Kind: "human",
+			// ⚠ Defaulted here rather than at the caller, and the direction is conservative: an unspecified
+			// device is a HUMAN, which counts toward the per-user cap. Defaulting to 'agent' would exempt
+			// rows from the cap by accident.
+			Kind: func() string {
+				if in.Kind == "agent" {
+					return "agent"
+				}
+				return "human"
+			}(),
 			// Persisted (0019) so the S7.2 mode-enable can enumerate the full-tunnel
 			// devices whose egress the enforcing flip governs.
 			FullTunnel: in.FullTunnel,

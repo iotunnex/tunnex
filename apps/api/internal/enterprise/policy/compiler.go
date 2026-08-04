@@ -79,7 +79,7 @@ type Rule struct {
 	SrcUserID       uuid.UUID
 	SrcSiteID       uuid.UUID // S8.2: src_kind='site' — resolved to the SOURCE site's subnet CIDRs
 	SrcCIDR         string    // S8.7: src_kind='cidr' — a LITERAL source CIDR, placed on its containing site's gateway
-	SrcNodeID       uuid.UUID // S15.3: src_kind='agent' — the agent whose OWN /32 is the source
+	SrcDeviceID     uuid.UUID // S15.3: src_kind='agent' — the agent DEVICE whose /32 is the source
 	DstKind         string
 	DstResourceID   uuid.UUID
 	DstGroupID      uuid.UUID
@@ -399,10 +399,10 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 			// (the pre-S7.5.4 path, and the default for legacy blank src_kind).
 			var matched bool
 			if r.SrcKind == "agent" {
-				// ⛔ AN AGENT RULE MATCHES EXACTLY ONE DEVICE: the agent's OWN row on the named node.
-				// Matching on node alone would also grant every HUMAN device homed on that gateway — a
-				// grant to an agent silently becoming a grant to everyone behind it.
-				matched = r.SrcNodeID == d.NodeID && d.Kind == "agent"
+				// ⛔ EXACTLY ONE DEVICE. An agent IS a peer, so the grant names it directly — naming its
+				// gateway would grant every device homed there, a grant to one agent silently becoming a
+				// grant to everything behind it.
+				matched = r.SrcDeviceID == d.ID
 			} else if r.SrcKind == "user" {
 				matched = r.SrcUserID == d.UserID
 			} else {
