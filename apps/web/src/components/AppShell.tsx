@@ -11,7 +11,6 @@ import {
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { Logo, PRODUCT_TAGLINE, Tagline } from "../brand";
 import { useAuth } from "../lib/auth";
-import { desktop } from "../lib/desktop";
 import { useResendVerification } from "../lib/useResendVerification";
 import { Button } from "./ui";
 import { HealthStatus } from "./HealthStatus";
@@ -329,13 +328,9 @@ export function AppShell() {
   const email = state.status === "authed" ? state.user.email : "";
 
   async function onLogout() {
-    // Desktop: revoke the credential + clear the keychain via the bridge (main
-    // reloads the window afterward). Browser: the cookie-session logout.
-    const d = desktop();
-    if (d) {
-      await d.auth.logout().catch(() => {});
-      return; // main reloads → /auth/me (no bearer) → anon → /login
-    }
+    // ⛔ THE DESKTOP ARM IS GONE (S14.20 step 4) — this shell is dashboard chrome and the client
+    // never mounts it. Signing out of the CLIENT is `auth.logout()` on its own Settings pane, which
+    // is where the credential and the keychain actually live.
     await logout();
     navigate("/login", { replace: true });
   }

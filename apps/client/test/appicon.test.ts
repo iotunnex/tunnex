@@ -60,3 +60,29 @@ test("the generated helper binary stays OUT of git", () => {
   ).trim();
   assert.equal(addable, "", "the staged helper binary became addable — it is a build output");
 });
+
+// ── S14.20 step 4: the dashboard is not shipped ─────────────────────────────────────────────────
+test("⛔ the packaged bundle EXCLUDES the dashboard entry, and keeps the shared brand chunk", () => {
+  // The vite build emits two entries. The client loads client.html and cannot reach index.html at
+  // all, so shipping it put the whole admin dashboard — 352 KB of JS plus its CSS — inside the
+  // client as code that cannot execute but can be read.
+  //
+  // ⚠ `brand-*` is SHARED and must survive: client.html references brand.css and brand.js. Verified
+  // against the built HTML, not guessed — which is why this asserts the keep as well as the drop.
+  const yml = readFileSync(join(__dirname, "..", "electron-builder.yml"), "utf8");
+  assert.match(yml, /!index\.html/, "index.html is still shipped to the client");
+  assert.match(yml, /!assets\/index-\*/, "the dashboard chunk is still shipped to the client");
+  assert.ok(!/!assets\/brand-/.test(yml), "brand-* must NOT be excluded — the client renders it");
+});
+
+test("⛔ the app:// fallback serves the CLIENT entry, not the dashboard's", () => {
+  // It served index.html for any extension-less path. That was right while the client loaded the
+  // dashboard; now index.html is not even packaged, so the fallback would 404 on "/".
+  const src = readFileSync(join(__dirname, "..", "src", "main", "index.ts"), "utf8")
+    .replace(/^\s*\/\/.*$/gm, " ")
+    .replace(/\/\*[\s\S]*?\*\//g, " ");
+  const fallback = /const serveIndex = \(\) => \{[\s\S]*?\n    \};/.exec(src)?.[0] ?? "";
+  assert.ok(fallback.length > 0, "serveIndex not found — this test is measuring nothing");
+  assert.ok(!/index\.html/.test(fallback), "the fallback still points at the dashboard entry");
+  assert.match(fallback, /CLIENT_ENTRY/);
+});

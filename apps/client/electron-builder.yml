@@ -31,8 +31,21 @@ files:
   - package.json
 extraResources:
   # apps/web build → Resources/web (index.ts bundleDir() = resourcesPath/web).
+  #
+  # ⛔ THE DASHBOARD IS NOT SHIPPED (S14.20 step 4). The vite build emits two entries; the client
+  # loads `client.html` and can no longer reach `index.html` at all. Shipping it anyway put the
+  # entire admin dashboard — 352 KB of JS plus its CSS — inside the client bundle as code that
+  # cannot execute but can be read.
+  #
+  # `brand-*` is shared by both entries and STAYS: the client renders the wordmark from it.
+  # Verified against the built HTML rather than guessed — client.html references brand.css,
+  # brand.js and client.js, and nothing else.
   - from: ../web/dist
     to: web
+    filter:
+      - "**/*"
+      - "!index.html"
+      - "!assets/index-*"
   # The staged, ad-hoc-signed helper binary(ies) → Resources/helper.
   - from: build/helper
     to: helper

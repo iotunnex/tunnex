@@ -39,8 +39,6 @@ vi.mock("../src/lib/api", async () => {
 
 import { AuthLayout } from "../src/components/AuthLayout";
 import { MachineCredentials } from "../src/components/MachineCredentials";
-import { DesktopSettings } from "../src/components/DesktopSettings";
-import { TunnelControl } from "../src/components/TunnelControl";
 import { AuthProvider } from "../src/lib/auth";
 
 const mount = (ui: React.ReactElement) =>
@@ -69,13 +67,5 @@ describe("the four Card consumers with no wiring test still mount and keep their
     expect(document.body.textContent?.length).toBeGreaterThan(0);
   });
 
-  it("DesktopSettings mounts (no-op in the browser build)", () => {
-    mount(<DesktopSettings />);
-    expect(document.body).toBeTruthy();
-  });
 
-  it("TunnelControl mounts (no-op in the browser build)", () => {
-    mount(<TunnelControl />);
-    expect(document.body).toBeTruthy();
-  });
 });
