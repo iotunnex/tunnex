@@ -23,19 +23,13 @@ function cred(over: Partial<Record<string, unknown>> = {}) {
     created_at: new Date(Date.now() - 86_400_000).toISOString(),
     last_used_at: over.last_used_at ?? null,
     owner_user_id: over.owner_user_id ?? null,
-    // ⛔ THE FIXTURE OMITTED owner_email, AND THAT OMISSION IS WHY SEVEN PASSING TESTS MISSED THE
-    // FOUNDER'S FIRST FINDING. The DTO serves it; the fixture did not carry it; so no test could fail
-    // when the component never read it. A fixture narrower than the contract cannot catch a consumer
-    // that ignores the difference — the fixture-fidelity trap, on the field this slice added.
-    // ⚠ `in`, NOT `??` — a nullable field cannot be overridden to null by a coalescing default. The
-    // first version of this line silently ignored `owner_email: null` and handed back the default,
-    // so the unresolvable-owner test was asserting against a fixture that could not produce the case.
-    owner_email:
-      "owner_email" in over
-        ? over.owner_email
-        : over.owner_user_id
-          ? "owner@demo.tunnex.local"
-          : null,
+    // ⛔ PRESENT AND ALWAYS NULL, AND THAT IS THE CONTRACT — not an oversight in the fixture. It was
+    // ABSENT before, which is what let seven passing tests miss the founder's first finding: a fixture
+    // narrower than the contract cannot catch a consumer that ignores the difference. The handler
+    // deliberately does not resolve it (one resolver: the web reads the member roster it already
+    // fetches, the same way the Audit Log does). A fixture that populated it would let a component
+    // reading `c.owner_email` pass here and render "unknown" against the real API.
+    owner_email: null,
   };
 }
 
@@ -142,11 +136,12 @@ describe("the row tells the truth about what it knows", () => {
     expect(row.textContent).toContain("owner@demo.tunnex.local");
   });
 
-  it("⛔ an owned row whose owner_email cannot be resolved says SO — never renders blank", async () => {
-    // The FK is ON DELETE RESTRICT so this should be unreachable. If it happens anyway, an owned row
-    // rendering blank is indistinguishable from an unowned one — the worse of the two failures.
+  it("⛔ an owned row whose owner is NOT ON THE ROSTER says so — never renders blank", async () => {
+    // Reachable for a real reason: the FK is ON DELETE RESTRICT on `users`, but nothing pins the
+    // MEMBERSHIP — an owner who leaves the org keeps the credential and drops off the roster. An owned
+    // row rendering blank is indistinguishable from an unowned one, the worse of the two failures.
     stubGet({
-      [LIST]: [cred({ id: "c1", owner_user_id: "u1", owner_email: null, name: "ghost" })],
+      [LIST]: [cred({ id: "c1", owner_user_id: "u1", name: "ghost" })],
       [MEMBERS]: [],
     });
     const { container } = render(<MachineCredentials orgId={ORG} canManage />);
@@ -155,7 +150,7 @@ describe("the row tells the truth about what it knows", () => {
       expect(li).not.toBeNull();
       return li as HTMLElement;
     });
-    expect(row.textContent).toMatch(/unknown/i);
+    expect(row.textContent).toMatch(/not a member of this organization/i);
     expect(row.querySelector('[data-badge="refused"]')).toBeNull();
   });
 
