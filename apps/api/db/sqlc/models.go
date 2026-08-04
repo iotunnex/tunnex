@@ -116,6 +116,7 @@ type Device struct {
 	RevokedPrevStatus *string `json:"revoked_prev_status"`
 	// The gateway whose endpoint + public key this device's ISSUED config baked. Compared against node_id at read time to derive needs_reexport for STATIC exports (S13.1 review fold F3).
 	ProvisionedNodeID pgtype.UUID `json:"provisioned_node_id"`
+	Kind              string      `json:"kind"`
 }
 
 type DeviceHealth struct {
