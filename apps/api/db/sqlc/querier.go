@@ -128,6 +128,13 @@ type Querier interface {
 	// reserves a real pool /32 and is a real enrollment, so excluding it let a user create
 	// unbounded pending devices (cap bypass on approve + an org-pool DoS). CONVENTION: pending
 	// is EXCLUDED from enforcement but INCLUDED in resource accounting (caps, pools, sweeps).
+	// ⛔ HUMANS ONLY (S15.2 slice 3). An agent is a `devices` row, and without this predicate every gateway an
+	// admin enrolled would spend that admin's PERSONAL laptop allowance — a fleet charged to one human. The cap
+	// convention is right for humans and wrong for agents, and the exemption is EXPLICIT here rather than
+	// implied by a caller.
+	// ⚠ The partial index `devices_org_user_active_human_idx` is keyed the same way, so the exempted shape is
+	// the one the database is built for and a future count that forgets this predicate is slow and visible
+	// rather than silently wrong.
 	CountDevicesForUserCap(ctx context.Context, arg CountDevicesForUserCapParams) (int64, error)
 	// Any origin — the refuse-unless-empty guard (D1) must see a hand-added member too.
 	CountGroupMembers(ctx context.Context, arg CountGroupMembersParams) (int64, error)
@@ -162,6 +169,8 @@ type Querier interface {
 	// status is 'active' normally, or 'pending' when the org requires device approval
 	// (S7.3). A pending device holds its assigned_ip from creation (excluded from every
 	// status='active' reader EXCEPT the allocator, which counts its IP as in-flight).
+	// ⚠ `kind` (S15.2 slice 3) distinguishes an AGENT's row from a human's. It carries the cap exemption and
+	// the one-per-node uniqueness; it is NOT a permission and grants nothing.
 	CreateDevice(ctx context.Context, arg CreateDeviceParams) (Device, error)
 	CreateDomainClaim(ctx context.Context, arg CreateDomainClaimParams) (DomainClaim, error)
 	// ── group mapping (create / bind / unbind) ───────────────────────────────────────

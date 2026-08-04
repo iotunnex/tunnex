@@ -307,6 +307,11 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, err
 			OrgID: in.OrgID, UserID: in.OwnerID, NodeID: in.NodeID,
 			Name: in.Name, Platform: in.Platform, PublicKey: pub,
 			AssignedIp: &assignedIP,
+			// ⛔ EXPLICIT, NOT DEFAULTED (S15.2 slice 3). The column has a 'human' DEFAULT for the existing
+			// rows, but Go's zero value for a string is "" — which the CHECK constraint rejects. Relying on
+			// the DEFAULT here would mean this insert breaks the moment sqlc names the column, and it would
+			// break at runtime rather than at compile time.
+			Kind: "human",
 			// Persisted (0019) so the S7.2 mode-enable can enumerate the full-tunnel
 			// devices whose egress the enforcing flip governs.
 			FullTunnel: in.FullTunnel,

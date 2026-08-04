@@ -2,8 +2,10 @@
 -- status is 'active' normally, or 'pending' when the org requires device approval
 -- (S7.3). A pending device holds its assigned_ip from creation (excluded from every
 -- status='active' reader EXCEPT the allocator, which counts its IP as in-flight).
-INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel, status, transport)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+-- ⚠ `kind` (S15.2 slice 3) distinguishes an AGENT's row from a human's. It carries the cap exemption and
+-- the one-per-node uniqueness; it is NOT a permission and grants nothing.
+INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel, status, transport, kind)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING *;
 
 -- name: ApproveDevice :one
@@ -100,8 +102,16 @@ ORDER BY d.created_at;
 -- reserves a real pool /32 and is a real enrollment, so excluding it let a user create
 -- unbounded pending devices (cap bypass on approve + an org-pool DoS). CONVENTION: pending
 -- is EXCLUDED from enforcement but INCLUDED in resource accounting (caps, pools, sweeps).
+-- ⛔ HUMANS ONLY (S15.2 slice 3). An agent is a `devices` row, and without this predicate every gateway an
+-- admin enrolled would spend that admin's PERSONAL laptop allowance — a fleet charged to one human. The cap
+-- convention is right for humans and wrong for agents, and the exemption is EXPLICIT here rather than
+-- implied by a caller.
+-- ⚠ The partial index `devices_org_user_active_human_idx` is keyed the same way, so the exempted shape is
+-- the one the database is built for and a future count that forgets this predicate is slow and visible
+-- rather than silently wrong.
 SELECT count(*) FROM devices
-WHERE org_id = $1 AND user_id = $2 AND status IN ('active', 'pending') AND deleted_at IS NULL;
+WHERE org_id = $1 AND user_id = $2 AND status IN ('active', 'pending') AND deleted_at IS NULL
+  AND kind = 'human';
 
 -- name: RevokeDevice :one
 -- Terminal revocation of an active OR pending device (S7.3 finding #3: an owner may CANCEL

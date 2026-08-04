@@ -307,6 +307,23 @@ func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentV
 			}
 			return e
 		}
+		// ⛔ THE AGENT IS ADDRESS-BEARING (D15), AND THE ADDRESS IS A `devices` ROW (rank-3 ruled).
+		//
+		// Attribution rides the artifact's /32→device map (`accesslog/ingest.go:40-75`). A principal design
+		// that avoids the /32 goes dark on attribution SILENTLY — no error, no gap, and the flow log will
+		// not complain. Reusing `devices` means the agent lands in that map by construction rather than
+		// through a parallel implementation, and inherits the revocation full-sweep unchanged.
+		//
+		// ⚠ ONLY FOR AN OWNED AGENT, AND THAT IS NOT A LIMITATION — IT IS THE DEGRADED STATE MADE CONCRETE.
+		// `devices.user_id` is NOT NULL ("owner; no unowned peers"), so an agent with no owner CANNOT have a
+		// device row, and therefore has no /32 and no attribution. That is exactly what D25(C)'s
+		// `unattributable` flag already says. The invariant and the flag agree instead of colliding: an
+		// unowned agent RUNS, and what it loses is the audit trail, not the tunnel.
+		if tok.IssuedBy.Valid {
+			if e := s.allocateAgentDevice(ctx, q, tok.OrgID, uuid.UUID(tok.IssuedBy.Bytes), node.ID, nodeName); e != nil {
+				return e
+			}
+		}
 		res = EnrollResult{NodeID: node.ID.String(), CertPEM: iss.CertPEM, CAPEM: string(s.ca.CertPEM())}
 		// Same keyed fingerprint as the node.token_issued row — issue and redeem
 		// correlate in the audit stream without the raw token appearing anywhere.
@@ -2208,4 +2225,50 @@ func spkiText(spki []byte) *string {
 	}
 	enc := base64.StdEncoding.EncodeToString(spki)
 	return &enc
+}
+
+
+// allocateAgentDevice gives an owned agent its /32 — the address D15 makes binding.
+//
+// ⛔ THE SAME ALLOCATION DEFINITION AS A HUMAN'S DEVICE, DELIBERATELY. `ListActiveDeviceAllocations` is the
+// query the resize orphan-check also uses, so "live allocation" has ONE definition. A second read with its
+// own filter is how two views of the same pool drift, and a drifted pool hands out an address twice.
+//
+// ⚠ EXHAUSTION IS A HARD REFUSAL AND IT REFUSES THE ENROLMENT. 253 allocatable addresses on the default
+// /24, org-wide, shared with every human's devices — a fleet collectively exhausts a pool that the per-user
+// cap does not watch (D15's named cost). Failing the enrolment is correct: an agent that enrolled without
+// an address would be silently unattributable, which is the state D25(C) reserves for agents that never had
+// an owner, not for ones we could not allocate for.
+func (s *Service) allocateAgentDevice(ctx context.Context, q *sqlc.Queries, orgID, ownerID, nodeID uuid.UUID, nodeName string) error {
+	org, err := q.GetOrganizationByID(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	allocs, err := q.ListActiveDeviceAllocations(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	used := make([]string, 0, len(allocs))
+	for _, r := range allocs {
+		if r.AssignedIp != nil {
+			used = append(used, *r.AssignedIp)
+		}
+	}
+	ip, err := ipalloc.Allocate(org.PoolCidr, used)
+	if err != nil {
+		if errors.Is(err, ipalloc.ErrPoolExhausted) {
+			return apierr.Conflict("pool_exhausted", "no free tunnel address in the org pool for this agent")
+		}
+		return err
+	}
+	// ⚠ THE AGENT'S OWN PUBLIC KEY IS NOT KNOWN AT ENROLMENT — the agent generates its WireGuard key after
+	// it has a certificate. The row is created with a placeholder keyed to the node so the UNIQUE index on
+	// (node_id, public_key) cannot collide, and the reconcile replaces it. A placeholder that looked like a
+	// real key would be worse: it would be indistinguishable from a peer that had never handshaked.
+	_, err = q.CreateDevice(ctx, sqlc.CreateDeviceParams{
+		OrgID: orgID, UserID: ownerID, NodeID: nodeID,
+		Name: nodeName, Platform: "agent", PublicKey: "pending-agent-" + nodeID.String(),
+		AssignedIp: &ip, Status: "active", Kind: "agent",
+	})
+	return err
 }
