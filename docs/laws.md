@@ -4676,3 +4676,48 @@ subject.** Censusing by input is not enough if the input is a token rather than 
 - **a proof it can fail** — a deliberately planted second construction site was caught by file and line,
   and removing it went green. *A gate that has only ever passed is indistinguishable from one that does
   nothing.*
+
+---
+
+## A GUARD WRITTEN FOR A HAZARD IS NOT A GUARD AGAINST THE HAZARD
+
+**S15.2 / EPIC 15 walk Leg 4, 2026-08-04 — found on a live wire, not in review.**
+
+`ListActiveWireGuardPeersForNode` has filtered `public_key <> ''` since S9.1, and **its own comment names
+the general hazard**: *"a keyless row would make `wg syncconf` reject the ENTIRE config — one OpenVPN client
+bricking the WG fleet."* An agent device row carrying `pending-agent-<uuid>` is **non-empty**, passed the
+guard, and did exactly that: **zero peers configured on the gateway, including every human device.**
+
+> ## **`<> ''` ASKS *IS THERE A KEY*. THE PARSER ASKS *IS THIS A KEY*.** Emptiness is a **special case** of
+> ## malformedness, so a guard that tests the special case is **silent on the general one** — while its
+> ## comment names the general hazard, **which is what makes it read as covered.**
+
+⚠ **The comment is the trap, not the code.** A predicate with no explanation invites scrutiny. A predicate
+whose comment names the full hazard has already answered the reviewer's question, wrongly, and nobody asks
+twice.
+
+### ⛔ THE SHAPE, SO IT CAN BE LOOKED FOR
+
+> ## **ANY GUARD WHOSE PREDICATE IS CHEAPER THAN THE CONSUMER'S PARSE IS ONE PREDICATE TOO NARROW.**
+
+Presence (`<> ''`, `IS NOT NULL`) is the cheapest possible predicate; parsing is the most expensive. Wherever
+those two sit on the same value, the gap between them is unguarded — and it stays invisible while every
+writer happens to produce well-formed values. **`public_key` was fine for years because everything writing it
+produced real keys. The defect arrived with the first writer that did not.**
+
+### CENSUS OF THE CLASS — measured 2026-08-04, filed, NOT fixed
+
+**5 presence-only guards on values a downstream consumer parses:**
+
+| value | guards | what parses it | status |
+| --- | --- | --- | --- |
+| `public_key` | 2 | `wg syncconf` / wgctrl key parser | ⛔ **FIXED** — now format-checked (`^[A-Za-z0-9+/]{43}=$`) at the peer-set source, with the complement query reporting exclusions |
+| **`assigned_ip`** | **3** — `ListActiveDeviceAllocations`, `ListActiveOVPNDevicesForNode`, `ListActiveDevicesForOrg` | `netip` and WireGuard `AllowedIPs` | ⚠ **OPEN.** Presence-only |
+
+⚠ **`assigned_ip` is the same shape and is currently safe for the same reason `public_key` was:** every
+writer today is `ipalloc.Allocate`, which produces well-formed addresses. **That is a property of the
+writers, not of the guard** — and it is exactly the property that stopped holding the day something wrote a
+placeholder.
+
+⛔ **Not fixed here** — measured and filed, per the founder's instruction. Checked and found to have **no**
+presence-only guards: `cidr`, `pool_cidr`, `vip_range`, `endpoint`, `cert_serial`, `cert_public_key`.
