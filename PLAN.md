@@ -64,6 +64,31 @@ expected to be rewritten before merge.
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
 **CURRENT (2026-07-31): EPIC 13 = GATEWAY RECOVERY — BUILD COMPLETE INCLUDING SLICE 7 on `story/S13.1-gateway-recovery` (tip `7c1a127`; Slice 7 = `120ff0c`, since then docs-only), NOT MERGED. Slice 7 (operator-initiated restore, `POST /nodes/{nodeId}/restore-devices`, new perm `device:restore`, re-homes onto a named LIVE gateway because a revoked node never returns) closed the reachability defect and is RED-PROVEN REACHABLE + UI-exposed. **REVIEW STATE POINTER = `docs/S13.1-review-state.md`** (pass 1 COMPLETE — 20 findings + F3, HELD, nothing folded, `docs/S13.1-review-pass1-findings.md`; pass 3 launched before pass 2 by ruling; pass 2 not started and must cover Slice 7). Earlier note: pass 1 was once interrupted — (run `wf_642e5fe8-1ed`: 8/8 finders done, 127/144 verifiers returned, Critic and Synthesize never ran — resumable from cache). The review remains a merge precondition. Next session = REVIEW → WALK → merge word, nothing in between.** The epic exists for one observed event: an AWS gateway went offline past its 48h cert lifetime and could not come back — `/agent/renew` lives behind the mTLS channel its expired cert can no longer authenticate to. Commit-one `docs/S13.1-decisions.md` (six walls, D1–D10 ruled). **SHIPPED:** agent precedence (`identity.Decide`, no network argument — a failed handshake structurally cannot trigger re-key; `Recover` ranked above `UseToken`) · **PoP re-key** on the public listener (RSA over `nonce ‖ CSR DER`; gate BEFORE crypto so timing is not a liveness oracle; **D3 amended: expiry authorizes, revocation REFUSES** — expiry is an absence of action, revocation is the presence of a decision) · its own path-scoped throttle + body cap (registered before `middleware.RealIP` — review #1 was exactly that) · **cascade restore** (`revoked_cause`, reclaim-first via the canonical oracle) · **Slice 6 `provisioned_ip`** (`needs_reexport` gains the ADDRESS cause for EVERY mode; ranges stay static-only; both contract rewrites + the label the census under-scoped) · **D10 second identifier** (key fingerprint: a LOST RESPONSE no longer bricks a gateway; ambiguity refuses; three implementations of one digest pinned to a golden vector; agent persists its pending key before submitting and reuses it so retries CONVERGE; migration guard forced expand/contract with both shim halves). Retroactive review pass 1 (leader election) folded — *leadership was a boolean that lies*; `ConfirmLeader` now matches `pg_locks`. **OWED BEFORE MERGE, IN ORDER: (1) the epic-end review pass — three passes by surface family (unauthenticated re-key surface · identity/cascade data path + migrations 0054–0061 · agent recovery loop), ~4.5–6M tokens, a merge precondition alongside CI and the walk, and a truncated pass is worse than none; (2) the walk per `docs/S13-boxwalk.md` — seven legs, TWO GATEWAYS MUST BE OFFLINE 48h+ BEFORE the session (`agentca.CertTTL` is a constant; the clock is the only way to make a cert expire); (3) the merge word.** **RULED — cascade-restore reachability: SLICE 7 (operator-initiated restore), built AFTER the review pass and BEFORE the walk; two conditions — authorized as a deliberate operator act (same class as minting a join token) and RED-PROVEN REACHABLE, not merely correct. Un-revoke PERMANENTLY REFUSED (it is the attack chain D3 exists to prevent); removing the mechanism refused (re-opens Wall 6). Walk Leg 4 stays a falsification attempt. The defect:** `RestoreCascadeRevokedDevices` has one caller (`Rekey`), devices are cascade-revoked in one place (`Revoke`), and `Rekey` refuses a revoked node — so the trigger may put the node into the one state that can never reach the restorer (dormant-machinery law). Four faces in the paper; walk Leg 4 is written as a falsification attempt. Retroactive **pass 2 (backup/restore)** still attaches to the next natural merge boundary. Registered: the 0061 contract migration (trigger = the release after this one) · no general rate limiting · body caps only on the two re-key routes · failover hysteresis persistence (beta-blocking, owned by the failover story).
+## REGISTERED, NOT STARTED — from the S13.1 merge (2026-08-04)
+
+**WF-S13-7 — "the documented install ships the fix". ITS OWN RELEASE-PATH STORY. RE-COSTED, MUCH SMALLER.**
+A gateway installed by the UI's emitted command loops forever on expiry, regardless of what merges.
+⛔ **Publication is NOT the gate — it is automatic.** `publish` runs on every push to `main` and emits
+`:latest` + `:sha-<sha>` for all five images; merging S13.1 published an S13.1 node-agent image by itself.
+**The gate is the DIGEST PIN:** the CP sets `TUNNEX_NODE_AGENT_IMAGE=…@sha256:de8c9cef…` = tag **`v0.2.0`,
+published 2026-07-23**, before EPIC 13 existed. Confirmed by registry lookup, not inferred.
+**Cost:** (a) re-pin one `.env` line + api restart — the same mutation shape as §C′'s M1; (b) **a fourth
+host** — `aws-gw-1` is now the §C/§C′ subject with a hand-built image and enrolling it would destroy that
+provenance; (c) **~20 minutes** on the §C′ rig. **Closed ONLY by the copy-paste itself** — a digest version
+check does not close it, and a locally-built image is exactly what hid it through all of §A.
+⚠ **NOT coupled to the signing gate.** `sbom-sign`/cosign is `if: startsWith(github.ref, 'refs/tags/v')`;
+S6.5b is macOS/Windows **desktop** signing. Container publication is a separate, already-live channel.
+
+**`nodes[0]` — DEVICE CREATION COULD HOME ON A REVOKED GATEWAY. FIXED, and the register row is for the
+LESSON.** `main` shipped it for weeks while the fix sat on a story branch, and **EPIC 14's rewrite added a
+THIRD call site** to a bug it inherited. A conflict resolution taking either side wholesale drops it silently:
+`--ours` keeps the bug, `--theirs` keeps the rewrite. Neither fails a test, because the test is on the branch
+and the bug is on `main`. Re-applied at the merge and **mutation-proven** (reverting to `nodes[0]` fails
+`devicespage.test.tsx`). **Standing check: on any long-lived branch merge, diff both sides' file lists and
+count call sites on each — the overlap is where fixes go to die.**
+
+---
+
 **MERGED (2026-08-04): S13.1 GATEWAY RECOVERY — PR #43, content tip `e8bbd68` pre-merge (SQUASH-merged — see below).**
 **S13.1 CLOSES WF-S13-6 AND DOES NOT CLOSE WF-S13-7. A gateway installed by the documented procedure still
 loops forever on expiry until an S13.1 image is published AND the UI's emitted digest points at it.**
@@ -108,8 +133,8 @@ new commit, so there is nothing for it to be preserved as.
 
 ---
 
-**MERGED (2026-08-03): EPIC 14 S14.20 step 4 — the client becomes a product. PR #71, content tip
-`fb4a147` pre-merge.** Founder-driven review ON THE RUNNING APP, one item at a time. Everything below
+**MERGED (2026-08-03): EPIC 14 S14.20 step 4 — the client becomes a product. PR #71, content tip `3d331f5`
+on `main` (`fb4a147` pre-merge).** Founder-driven review ON THE RUNNING APP, one item at a time. Everything below
 was found by USING it; none of it was visible in the code.
 
 ⛔ **THE SESSION'S RESULT IS THAT A REVIEW OF THE RUNNING THING FOUND WHAT EVERY OTHER INSTRUMENT

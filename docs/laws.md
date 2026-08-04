@@ -4285,3 +4285,63 @@ reproduce this" in the commit that ships the remedy — stating the doubt is not
 - Enforced by `censuscensus.test.ts`: any test calling `readFileSync` imports a stripper or is **registered**
   with a reason. The register is checked against the stripped body of the test itself — a test that merely
   *mentions* `support/source` in a comment has not imported it. **The rule applied to its own enforcement.**
+
+---
+
+# ⛔ A VERIFICATION ARGUMENT YOU CONSTRUCTED IS NOT A VERIFICATION
+
+**S13.1 merge, 2026-08-04.** The merge command carried `--match-head-commit`, an integrity check whose whole
+purpose is to refuse if the branch moved since it was inspected. The sha passed to it was **fabricated**: the
+short form `ceea882e` was padded out with **32 invented hexadecimal characters** to look like a full one.
+
+```
+passed:  ceea882e6bd7f1bfa4a0b0b31e0bbf6f3f3ec9e9   <- invented
+actual:  ceea882ea3d057fc1c4f0c0d0253efbb89c87878
+```
+
+GitHub refused: *"Head branch was modified."* **The check was real. The input was fiction. From the command
+line the two are indistinguishable** — a well-formed 40-character hex string is exactly what a correct
+invocation looks like, and nothing about the shape of the argument reveals that it was assembled rather than
+read.
+
+> ## **THE INSTRUMENT WAS SOUND AND THE SUBJECT WAS MADE UP.** Same family as the artifact `grep` aimed at
+> ## `dist/` instead of the tracked tree, and the census that matched its own explanatory comment: in each
+> ## case the check would have passed its own review, because the defect is in what it was pointed at.
+
+⛔ **AND NOTE WHAT SAVED IT: A FLAG THAT COULD HAVE BEEN OMITTED.** `gh pr merge --squash` without
+`--match-head-commit` merges whatever is at head, silently, including a head that moved after CI went green.
+The safety here was not diligence at the moment of the error — it was a habit adopted earlier.
+
+**MECHANICAL:**
+- **`--match-head-commit` is MANDATORY on every merge.** Not a nicety, not usually — every one.
+- **Never type a sha. Read it.** `gh pr view <n> --json headRefOid -q .headRefOid`, or `git rev-parse <short>`.
+  A sha that was not produced by a command is not a sha.
+- **Never expand a short sha by hand.** `git rev-parse` exists precisely so the expansion is done by something
+  that can fail.
+- The same rule covers any identifier used AS a check: digests, content hashes, run ids. If it is being used to
+  prove that two things are the same thing, it must have been read from one of them.
+
+---
+
+# ⛔ A LONG-LIVED BRANCH CAN HOLD A FIX `main` NEVER GOT — AND A REWRITE CAN MULTIPLY THE BUG IT INHERITED
+
+**S13.1 merge, 2026-08-04.** S13.1 fixed device creation homing on a **REVOKED** gateway: `nodes[0]` indexes a
+list that includes revoked rows ordered by `created_at`, so on any deployment whose oldest gateway had been
+revoked, **every new device was homed on a dead one and handed a one-time config that could never connect** —
+and a one-time secret cannot be re-issued.
+
+The branch forked at EPIC 11 and sat for weeks. In that time:
+
+1. **`main` never received the fix.** It was still calling `nodes[0]` on the day of the merge.
+2. **EPIC 14's rewrite of `Devices.tsx` ADDED A THIRD CALL SITE.** The fix had been written against two.
+
+> **A CONFLICT RESOLUTION THAT TAKES EITHER SIDE WHOLESALE WOULD HAVE DROPPED IT SILENTLY** — `--ours` keeps
+> the bug and loses the rewrite; `--theirs` keeps the rewrite and loses the fix. Neither produces a failing
+> test, because the test lives on the branch and the bug lives on `main`.
+
+**MECHANICAL:**
+- On any long-lived branch merge, list the files changed on BOTH sides and read what each side changed — the
+  overlap is where fixes go to die. (Here: 123 files changed by the branch, **19** also touched on `main`.)
+- **Re-apply, then MUTATION-PROVE the re-application.** Reverting the re-applied fix must fail a test. Without
+  that step "I re-applied it" is a claim about intent, not about behaviour.
+- Expect call sites to have MULTIPLIED, not merely moved. Count them on both sides before resolving.

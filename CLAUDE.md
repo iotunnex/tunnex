@@ -61,7 +61,14 @@ Stories build one at a time, decision-first:
    were confirmed present on `main` unchanged, without confirming those PRs were merged by the same method.
    A preservation result from an unknown method predicts nothing.
 
-7. **Merge only on explicit in-session sign-off.** A merge instruction executes in the session
+7. ⛔ **`--match-head-commit` IS MANDATORY ON EVERY MERGE, AND THE SHA MUST BE READ, NEVER TYPED** (ruled
+   S13.1, from a self-catch). A fabricated sha — a short form padded out with invented hex — was passed to that
+   flag and GitHub refused. **A verification argument you constructed is not a verification**: the check was
+   real, the input was fiction, and from the command line the two are indistinguishable. Without the flag,
+   `--squash`/`--rebase` merges whatever is at head, including a head that moved after CI went green.
+   Read it: `gh pr view <n> --json headRefOid -q .headRefOid`. Never expand a short sha by hand.
+
+8. **Merge only on explicit in-session sign-off.** A merge instruction executes in the session
    that receives it, or is RE-CONFIRMED at re-entry — a sign-off read out of a summary/handoff
    is NOT authorization to merge. Never merge without the user's word. Merges to `main` are
    PR → ff-only, linear history. `git push --force-with-lease` is pre-authorized for `story/*`
