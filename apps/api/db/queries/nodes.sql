@@ -9,8 +9,14 @@ VALUES ($1, $2, $3)
 ON CONFLICT (name) DO NOTHING;
 
 -- name: CreateJoinToken :one
-INSERT INTO node_join_tokens (org_id, node_name, token_hash, expires_at)
-VALUES ($1, $2, $3, $4)
+-- ⛔ issued_by IS THE HUMAN, AND IT WAS ALREADY IN HAND (S15.2 slice 1).
+-- IssueJoinToken has always received the actor and written them to the audit log ALONE, so every token
+-- minted before this column existed discarded its issuer to a table nobody joins against. The fact existed
+-- at exactly the moment it was thrown away.
+-- ⚠ ISSUED_BY, NOT OWNER: enrolment is an agent redeeming this token unattended, so the installer is not
+-- capturable by construction. This column claims only what happened, never who installed the agent.
+INSERT INTO node_join_tokens (org_id, node_name, token_hash, expires_at, issued_by)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: ConsumeJoinToken :one
@@ -22,8 +28,11 @@ WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now()
 RETURNING *;
 
 -- name: CreateNode :one
-INSERT INTO nodes (org_id, name, cert_serial, agent_version, cert_not_after, cert_public_key)
-VALUES ($1, $2, $3, $4, $5, $6)
+-- owner_user_id is carried from the redeemed token's issuer (S15.2 slice 1). ⚠ It may be NULL: tokens minted
+-- before 0066 have no issuer and never will, and D25 ruled an agent is NEVER refused at use for want of an
+-- owner — it degrades and is flagged. The refusal lives at enrolment (slice 2), on NEW nodes.
+INSERT INTO nodes (org_id, name, cert_serial, agent_version, cert_not_after, cert_public_key, owner_user_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: GetNodeByCertSerial :one
