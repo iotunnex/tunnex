@@ -2152,7 +2152,7 @@ export interface components {
             /** Format: uuid */
             org_id: string;
             /** @enum {string} */
-            src_kind: "group" | "user" | "site" | "cidr";
+            src_kind: "group" | "user" | "site" | "cidr" | "agent";
             /** Format: uuid */
             src_group_id?: string | null;
             /** Format: uuid */
@@ -2161,6 +2161,11 @@ export interface components {
             src_site_id?: string | null;
             /** @description Set when src_kind=cidr (S8.7): a literal source CIDR (/32-precise). */
             src_cidr?: string | null;
+            /**
+             * Format: uuid
+             * @description S15.3 — set when src_kind=agent: the agent whose /32 is the source.
+             */
+            src_node_id?: string | null;
             cidr_outside_org_ranges: boolean;
             /** @enum {string} */
             dst_kind: "resource" | "group" | "site" | "k8s_service";
@@ -2183,7 +2188,7 @@ export interface components {
         };
         CreatePolicyRuleRequest: {
             /** @enum {string} */
-            src_kind?: "group" | "user" | "site" | "cidr";
+            src_kind?: "group" | "user" | "site" | "cidr" | "agent";
             /**
              * Format: uuid
              * @description Required when src_kind=group (or omitted).
@@ -2201,6 +2206,11 @@ export interface components {
             src_site_id?: string | null;
             /** @description Required when src_kind=cidr (S8.7): a literal source CIDR, e.g. 172.31.17.64/32. Validated well-formed; org-range meaningfulness is a read-time warning, not a creation refusal (warn-not-refuse). */
             src_cidr?: string | null;
+            /**
+             * Format: uuid
+             * @description Required when src_kind=agent (S15.3): the agent whose own /32 is the source. Resolves exactly as a user-source resolves to that user's device — an agent IS a device, and this names which one.
+             */
+            src_node_id?: string | null;
             /** @enum {string} */
             dst_kind: "resource" | "group" | "site" | "k8s_service";
             /**

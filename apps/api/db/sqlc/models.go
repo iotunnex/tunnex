@@ -407,6 +407,7 @@ type PolicyRule struct {
 	Disabled         bool               `json:"disabled"`
 	DstK8sServiceID  pgtype.UUID        `json:"dst_k8s_service_id"`
 	ManagedByMachine pgtype.UUID        `json:"managed_by_machine"`
+	SrcNodeID        pgtype.UUID        `json:"src_node_id"`
 }
 
 type Resource struct {

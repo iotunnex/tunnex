@@ -47,6 +47,8 @@ type RuleInput struct {
 	DstSiteID       *uuid.UUID // S8.1: set iff DstKind=="site"
 	DstK8sServiceID *uuid.UUID // S10.3: set iff DstKind=="k8s_service"
 	ExpiresAt       *time.Time // nil = permanent; set = temporary grant
+	// SrcNodeID (S15.3) — src_kind='agent': the agent whose OWN /32 is the source.
+	SrcNodeID *uuid.UUID
 }
 
 // AffectedDevice is a full-tunnel device whose internet egress becomes policy-

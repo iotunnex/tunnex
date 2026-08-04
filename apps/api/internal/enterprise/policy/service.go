@@ -358,8 +358,15 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 		if _, err := netip.ParsePrefix(*in.SrcCIDR); err != nil {
 			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_cidr must be a valid CIDR (e.g. 172.31.17.64/32)")
 		}
+	case "agent": // S15.3: the source is ONE agent's own /32.
+		// ⛔ THE NODE MUST BE AN AGENT, AND THE CHECK IS HERE RATHER THAN AT THE COMPILER. A rule naming a
+		// plain gateway would compile to nothing and look like a working grant — the reassuring-empty class
+		// applied to a policy rule, where the operator believes access was granted and it never was.
+		if in.SrcNodeID == nil || in.SrcGroupID != uuid.Nil || in.SrcUserID != nil || in.SrcSiteID != nil || in.SrcCIDR != nil {
+			return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind=agent requires src_node_id (and no other src_*)")
+		}
 	default:
-		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind must be group, user, site, or cidr")
+		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "src_kind must be group, user, site, cidr, or agent")
 	}
 	// Destination shape: exactly one dst_* set, matching dst_kind.
 	switch in.DstKind {
@@ -456,7 +463,8 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 		r, e = q.CreatePolicyRule(ctx, sqlc.CreatePolicyRuleParams{
 			OrgID: orgID, SrcKind: srcKind, SrcGroupID: toPgUUIDVal(in.SrcGroupID), SrcUserID: toPgUUID(in.SrcUserID),
 			SrcSiteID: toPgUUID(in.SrcSiteID), SrcCidr: in.SrcCIDR,
-			DstKind: in.DstKind, DstResourceID: toPgUUID(in.DstResourceID), DstGroupID: toPgUUID(in.DstGroupID),
+			SrcNodeID: toPgUUID(in.SrcNodeID),
+			DstKind:   in.DstKind, DstResourceID: toPgUUID(in.DstResourceID), DstGroupID: toPgUUID(in.DstGroupID),
 			DstSiteID: toPgUUID(in.DstSiteID), DstK8sServiceID: toPgUUID(in.DstK8sServiceID), ExpiresAt: toPgTimestamptz(in.ExpiresAt),
 			ManagedByMachine: pgtype.UUID{Bytes: managedByMachine, Valid: managedByMachine != uuid.Nil},
 		})
@@ -779,6 +787,7 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 			SrcKind: r.SrcKind, SrcGroupID: fromPgUUID(r.SrcGroupID), SrcUserID: fromPgUUID(r.SrcUserID),
 			SrcSiteID:     fromPgUUID(r.SrcSiteID), // S8.2: src_kind='site' resolution
 			SrcCIDR:       derefString(r.SrcCidr),  // S8.7: src_kind='cidr' resolution
+			SrcNodeID:     fromPgUUID(r.SrcNodeID), // S15.3: src_kind='agent' resolution
 			DstKind:       r.DstKind,
 			DstResourceID: fromPgUUID(r.DstResourceID), DstGroupID: fromPgUUID(r.DstGroupID),
 			DstSiteID:       fromPgUUID(r.DstSiteID),
@@ -822,7 +831,7 @@ func (s *Service) BuildSnapshot(ctx context.Context, orgID uuid.UUID) (Snapshot,
 		if d.AssignedIp != nil {
 			ip = *d.AssignedIp
 		}
-		snap.Devices = append(snap.Devices, Device{ID: d.ID, UserID: d.UserID, NodeID: d.NodeID, AssignedIP: ip})
+		snap.Devices = append(snap.Devices, Device{ID: d.ID, UserID: d.UserID, NodeID: d.NodeID, AssignedIP: ip, Kind: d.Kind})
 	}
 	return snap, nil
 }

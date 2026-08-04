@@ -5,7 +5,12 @@ import {
   attributionNote, enrolmentKind, NO_AGENTS,
   UNDETERMINED_DETAIL, UNDETERMINED_LABEL, sortAgents, type AgentRow,
 } from "../lib/agentview";
-import { Badge, Card } from "../components/ui";
+import { Badge, Button, Card, Field, Input } from "../components/ui";
+// ⛔ THE SAME COMMAND BUILDER THE GATEWAY CEREMONY USES — imported, never re-implemented. Two places
+// emitting enrolment commands is the one-truth risk the founder refused shape C over; what makes this an
+// agent enrolment is the TOKEN's marker, not a different command.
+import { enrollCommand } from "../components/Gateways";
+import { OneTimeSecretModal } from "../components/OneTimeSecret";
 
 /**
  * AI agents — S15.3. A top-level destination in NETWORK, beside Kubernetes.
@@ -24,6 +29,35 @@ export default function Agents() {
   // ⚠ A SEPARATE FLAG, NOT AN ERROR. edition_required is a successful answer and must not reach the
   // failed state — see load() below.
   const [notEntitled, setNotEntitled] = useState(false);
+  // The enrolment ceremony — mint a MARKED token, show the command once.
+  const [name, setName] = useState("");
+  const [token, setToken] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+
+  async function enrol() {
+    if (!orgId) return;
+    setBusy(true);
+    setErr(null);
+    // ⛔ enrols_kind: "agent" IS THE WHOLE DIFFERENCE. Same endpoint, same ceremony, same emitted command —
+    // the operator's declaration rides the token, captured at the same instant as the issuer.
+    const { data, error } = await api.POST(
+      "/api/v1/organizations/{orgId}/nodes/join-token",
+      {
+        params: { path: { orgId } },
+        body: { node_name: name.trim() || undefined, enrols_kind: "agent" },
+      },
+    );
+    setBusy(false);
+    if (error || !data) {
+      setErr("Could not create the enrolment token.");
+      return;
+    }
+    setToken((data as { join_token: string }).join_token);
+    setName("");
+    setReload((n) => n + 1);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -54,7 +88,7 @@ export default function Agents() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reload]);
 
   // ⛔ ABSENCE, NOT A STYLED-AWAY CONTROL AND NOT AN UPSELL. The open edition simply does not have this
   // screen; inventing a boundary the client draws is the S14.5 defect.
@@ -69,6 +103,32 @@ export default function Agents() {
           only what they are granted.
         </p>
       </div>
+      {/* ⛔ THE CREATION PATH. The screen listed agents and offered no way to make one — a capability the
+          product had and the operator could not reach, on the screen built to name that capability.
+          ⚠ It is the EXISTING ceremony, named for agents: same endpoint, same emitted command. What makes
+          it an agent is the marker on the token. */}
+      <Card>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[14rem] flex-1">
+            <Field label="Agent name (optional — pins the token to this name)">
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="mcp-agent-prod"
+              />
+            </Field>
+          </div>
+          <Button onClick={() => void enrol()} disabled={busy}>
+            {busy ? "Creating…" : "Enrol an agent"}
+          </Button>
+        </div>
+        {err && <p className="mt-2 text-xs text-danger">{err}</p>}
+        <p className="mt-2 text-[11px] text-ink-secondary">
+          Enrolling mints a single-use token and records <strong>you</strong> as the person who authorised
+          this agent. Run the command it gives you on the host that will run the agent.
+        </p>
+      </Card>
+
       <Card>
         <p className="text-xs text-slate-500">
           Each agent is shown with the person who authorised it into this organization. What an agent may
@@ -158,6 +218,19 @@ export default function Agents() {
           </>
         )}
       </Card>
+      {token && (
+        <OneTimeSecretModal
+          title="Enrol your agent: run this once"
+          caption={
+            <>
+              Paste this <span className="font-semibold">single command</span> on the host that will run
+              the agent. Shown <span className="font-semibold">exactly once</span>, single-use: copy it now.
+            </>
+          }
+          secret={enrollCommand(token, null)}
+          onDismiss={() => setToken(null)}
+        />
+      )}
       {orgId === null && <span className="sr-only">no organization</span>}
     </div>
   );
