@@ -140,6 +140,9 @@ export default function Kubernetes() {
       (raw?.nodes ?? []).map((n: Node) => ({
         siteId: n.site_id ?? null,
         endpointsUnavailable:
+          // ⛔ S14.21: a REVOKED gateway is not reporting anything — its last known kind is a stale
+          // reading of a machine that is no longer meant to work.
+          n.status !== "revoked" &&
           n.policy_degraded_kind === "k8s_endpoints_unavailable",
       })),
     [raw],

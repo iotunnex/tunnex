@@ -384,8 +384,9 @@ export function Gateways({
                   badge beside it describes a gateway that is no longer meant to work. Matches the same
                   suppression Devices.tsx has always applied to device rows; this list never had it, which stayed
                   invisible only while the badges were vague ("degraded") rather than instructional. */}
-              {n.status !== "revoked" &&
-                (() => {
+              {/* S14.21: `n.status !== "revoked" &&` removed — policyHealthBadge now refuses a verdict
+                  for a revoked node itself, so restating it here implied the callee does not. */}
+              {(() => {
                   const b = policyHealthBadge(n);
                   return b ? (
                     <span className={`ml-2 text-xs ${badgeClass(b.tone)}`}>

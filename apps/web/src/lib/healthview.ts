@@ -75,9 +75,34 @@ const DEGRADED_BADGE: Record<NonHealthyPolicyDegradedKind, HealthBadge> = {
 /** Degraded, but we have nothing more specific to say. Never null while the bool is true. */
 const GENERIC_DEGRADED: HealthBadge = { label: "degraded", tone: "warn" };
 
+/**
+ * ⛔ `status` IS REQUIRED, AND THAT IS THE WHOLE FIX (S14.21).
+ *
+ * This took `Pick<Node, "policy_degraded" | "policy_degraded_kind">`. That did not merely FAIL to check
+ * `status` — it made checking IMPOSSIBLE: a caller could not pass one, and the compiler was satisfied by an
+ * object that had none. **The function was structurally forbidden from forming the verdict it is named for**,
+ * so the guard ended up OUTSIDE it, in the callers, where it was inherited by whoever remembered.
+ *
+ * The census that produced this change: SEVEN sites form a health verdict about a gateway. Four guarded
+ * `revoked`, three did not — and the three that did carried the SAME LINE COPY-PASTED, which is the tell. A
+ * rule restated at each site is not enforced, it is remembered. On the deployed dashboard a revoked gateway
+ * rendered the literal word **"healthy"**, in green.
+ *
+ * Third time this defect was fixed — `Gateways.tsx` at EPIC 11, `sitesview.ts` at S13.1. Both fixed the site
+ * where the bug was SEEN. This fixes the place the verdict is FORMED, and requires `status` so a caller that
+ * forgets does not compile.
+ *
+ * ⚠ WHAT THIS DOES NOT CLOSE: a raw `.filter(n => n.policy_degraded)` bypasses this function entirely. The
+ * signature ENABLES correct sourcing; it cannot FORCE it. Two such reads existed and are re-sourced in the
+ * same change — but the class stays open by construction, because the field remains readable.
+ */
 export function policyHealthBadge(
-  node: Pick<Node, "policy_degraded" | "policy_degraded_kind">,
+  node: Pick<Node, "status" | "policy_degraded" | "policy_degraded_kind">,
 ): HealthBadge | null {
+  // ⛔ REVOKED IS THE STATE. A degradation badge beside it describes a gateway that is no longer meant to
+  // work, and "site link down" on a deliberately-revoked node instructs an operator to go repair something
+  // that was decommissioned on purpose. No health verdict at all — not a healthy one, not a degraded one.
+  if (node.status === "revoked") return null;
   if (!node.policy_degraded) return null; // bool primary — not degraded → no badge
   const kind = node.policy_degraded_kind;
   // Degraded per the authoritative bool but the kind is absent or says `healthy`. STILL A BADGE: the badge is
@@ -143,4 +168,24 @@ export function badgeClass(tone: BadgeTone): string {
     unknown: "border-white/10 text-slate-400",
   };
   return `inline-flex items-center rounded-full border px-2 py-0.5 text-micro ${colour[tone]}`;
+}
+
+/**
+ * The gateway ROW verdict — label and tone together, for any list that shows one line per gateway.
+ *
+ * ⛔ THE PANEL WAS FORMING THIS ITSELF, AND THAT WAS THE LAST VERDICT OUTSIDE THIS MODULE. It read
+ * `b ? b.label : "healthy"` — turning "no badge" into the CLAIM "healthy". Those are different things and
+ * they differ for exactly one reason: a revoked gateway has no verdict at all, and calling that healthy is
+ * how a decommissioned machine ended up green on the deployed dashboard.
+ *
+ * Widening `policyHealthBadge` to require `status` stopped it returning a WRONG verdict. It could not stop a
+ * caller INVENTING one from the absence — only moving the decision here does that.
+ */
+export function gatewayHealthRow(
+  node: Pick<Node, "status" | "policy_degraded" | "policy_degraded_kind">,
+): { label: string; tone: "ok" | "warn" | "danger" | "neutral" } {
+  if (node.status === "revoked") return { label: "revoked", tone: "neutral" };
+  const b = policyHealthBadge(node);
+  if (!b) return { label: "healthy", tone: "ok" };
+  return { label: b.label, tone: b.tone === "unknown" ? "neutral" : b.tone };
 }
