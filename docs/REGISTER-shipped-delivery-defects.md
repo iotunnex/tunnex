@@ -280,3 +280,26 @@ about the component and not about the surface.
 
 The fixture is also **not reachable in the product** — it is reached by database ordering (row 2). The
 rename removes the false claim; it does not make the state reviewable by a user.
+
+---
+
+## ⚠ 5 — `users.deleted_at` IS READ EVERYWHERE AND WRITTEN NOWHERE
+
+**Status: OPEN. Found while measuring D26's reachability, 2026-08-04. Collected, not chased.**
+
+`users.deleted_at` is filtered on by nearly every query touching the table — and **no query, and no Go
+code, ever sets it.** Deactivation is `users.status`; `RemoveMember` removes the *membership*.
+
+⛔ **SO EVERY `deleted_at IS NULL` PREDICATE ON `users` IS PRESENTLY A NO-OP.** Including the one that
+`lint:allow-deleted` reasons about on `ListMachineCredentialsForOrg` and `ListNodeOwnerEmails`: those
+annotations argue about *soft-deleted users*, and there are none, and there cannot be.
+
+> ## **DORMANT MACHINERY THAT LOOKS LIKE A GUARD.** The predicate reads as protection and provides none.
+> ## Worse, its presence is what makes the annotation feel like a considered exception rather than a
+> ## statement about a state the product cannot reach.
+
+⚠ **The annotations are still right** — they describe what *should* happen when soft-delete exists. But
+nobody reading them can tell the difference between "we thought about this" and "this is untested by
+construction", and that is exactly the gap this register exists for.
+
+**Not fixed:** whether the column is wired up or removed is a product decision, not a slice's.

@@ -4644,3 +4644,35 @@ three facts in front of it.
 **The distinction, stated per finding, in one line:** *does the current core deliverable depend on this
 answer?* If yes it halts; if no it is written down and the core continues. ⚠ **Blocking still halts** — in
 the same session, a query-lint failure that WAS mine and WAS in the gate path stopped the work until fixed.
+
+---
+
+## A CENSUS'S INPUT MUST BE THE SUBJECT, NOT A NAME THE CODEBASE SHARES
+
+**S15.2 slice 4, 2026-08-04 — caught before it shipped, by running the gate it belonged to.**
+
+D24 ruled that a second agent-principal constructor required the census to be **re-run as a merge gate**.
+The first implementation censused assignments to the field name **`NodeID`** — and fired on access-log
+events (`accesslog/ingest.go`, `store.go`) and device params (`devices/service.go`, `restore.go`), none of
+which build a principal at all.
+
+⛔ **IT WOULD HAVE SHIPPED PERMANENTLY RED.**
+
+> ## **A GATE THAT CRIES WOLF GETS SUPPRESSED, AND THE SUPPRESSION OUTLIVES THE REASON.** A census that
+> ## cannot distinguish its subject from a name the codebase happens to share is not a strict gate — it is a
+> ## gate on its way to being deleted, and it takes the guarantee with it.
+
+**The fix was to scope the match to the `Principal` composite literal**, so `NodeID` means the agent
+identity field only where it is one.
+
+⚠ **AND THE LESSON IS THE OLD LESSON, ONE LEVEL DOWN.** `policyHealthBadge` taught *census by INPUT, not by
+function* — because two of seven sites never called the function. This adds: **the input has to be the
+subject.** Censusing by input is not enough if the input is a token rather than a thing.
+
+**Two properties every census gate needs, both now in `agent_principal_census_test.go`:**
+
+- **a vacuity floor** — if it finds *zero* known sites it fails as broken, rather than passing forever
+  because a package moved or a pattern rotted;
+- **a proof it can fail** — a deliberately planted second construction site was caught by file and line,
+  and removing it went green. *A gate that has only ever passed is indistinguishable from one that does
+  nothing.*
