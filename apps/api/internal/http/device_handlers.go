@@ -169,6 +169,12 @@ func toAPIDevice(d sqlc.Device) api.Device {
 	if d.Platform != "" {
 		out.Platform = &d.Platform
 	}
+	// ⛔ SERVED (S15.3). `kind` was persisted by S15.2 and read by NOBODY — the second instance in two
+	// stories, after `owner_email` in S15.1. A device list could not tell an agent from a laptop.
+	// ⚠ Always set, never conditional: an absent field would make 'human' and "this build predates kind"
+	// indistinguishable, which is the reassuring-empty class in a DTO.
+	k := api.DeviceKind(d.Kind)
+	out.Kind = &k
 	if d.AssignedIp != nil {
 		out.AssignedIp = d.AssignedIp
 	}

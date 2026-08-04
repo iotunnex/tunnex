@@ -229,6 +229,8 @@ type Querier interface {
 	// satisfy it. The column stays until the registered contract migration drops it; nothing writes it now.
 	CreateRekeyChallenge(ctx context.Context, arg CreateRekeyChallengeParams) error
 	// ── resources (static destinations) ─────────────────────────────────────────────
+	// ⚠ `label` is a free-text OPERATOR NOTE (S15.3). It is NOT read by the compiler — CanonicalHash sees
+	// cidr, protocol and the port bounds only — so it cannot desync an artifact or bump RequiredVersion.
 	CreateResource(ctx context.Context, arg CreateResourceParams) (Resource, error)
 	CreateSite(ctx context.Context, arg CreateSiteParams) (Site, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)

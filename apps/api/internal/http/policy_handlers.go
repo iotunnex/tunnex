@@ -27,8 +27,8 @@ type policyPort interface {
 	AddGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error
 	RemoveGroupMember(ctx context.Context, orgID, groupID, userID uuid.UUID) error
 	ListResources(ctx context.Context, orgID uuid.UUID) ([]sqlc.Resource, error)
-	CreateResource(ctx context.Context, orgID uuid.UUID, in policyspec.ResourceInput) (sqlc.Resource, error)
-	UpdateResource(ctx context.Context, orgID, resourceID uuid.UUID, in policyspec.ResourceInput) (sqlc.Resource, error)
+	CreateResource(ctx context.Context, orgID uuid.UUID, in policyspec.ResourceInput, label *string) (sqlc.Resource, error)
+	UpdateResource(ctx context.Context, orgID, resourceID uuid.UUID, in policyspec.ResourceInput, label *string) (sqlc.Resource, error)
 	DeleteResource(ctx context.Context, orgID, resourceID uuid.UUID) error
 	ListPolicyRules(ctx context.Context, orgID uuid.UUID) ([]sqlc.PolicyRule, error)
 	CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in policyspec.RuleInput, managedByMachine, actorUserID uuid.UUID, actorSystem, cause string) (sqlc.PolicyRule, error)
@@ -203,7 +203,7 @@ func (s apiServer) CreateResource(ctx context.Context, req api.CreateResourceReq
 	if req.Body == nil {
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
-	r, err := s.policy.CreateResource(ctx, req.OrgId, resourceInput(*req.Body))
+	r, err := s.policy.CreateResource(ctx, req.OrgId, resourceInput(*req.Body), req.Body.Label)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +220,7 @@ func (s apiServer) UpdateResource(ctx context.Context, req api.UpdateResourceReq
 	if req.Body == nil {
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
-	r, err := s.policy.UpdateResource(ctx, req.OrgId, req.ResourceId, resourceInput(*req.Body))
+	r, err := s.policy.UpdateResource(ctx, req.OrgId, req.ResourceId, resourceInput(*req.Body), req.Body.Label)
 	if err != nil {
 		return nil, err
 	}
@@ -448,6 +448,9 @@ func toAPIResource(r sqlc.Resource) api.Resource {
 		Id: r.ID, OrgId: r.OrgID, Name: r.Name, Cidr: r.Cidr,
 		Protocol: api.ResourceProtocol(r.Protocol), CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 		PortLow: i32toIntPtr(r.PortLow), PortHigh: i32toIntPtr(r.PortHigh),
+		// ⚠ Operator free text (S15.3). Rendered as written; never derived, never validated against
+		// anything the product claims to detect.
+		Label: r.Label,
 	}
 	return out
 }

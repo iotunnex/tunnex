@@ -210,7 +210,19 @@ func (s *Service) ListResources(ctx context.Context, orgID uuid.UUID) ([]sqlc.Re
 	return s.q.ListResourcesByOrg(ctx, orgID)
 }
 
-func (s *Service) CreateResource(ctx context.Context, orgID uuid.UUID, in policyspec.ResourceInput) (sqlc.Resource, error) {
+// ⛔ `label` IS A SEPARATE PARAMETER, NOT A FIELD ON policyspec.ResourceInput — AND THAT IS DELIBERATE.
+//
+// S15.3's binding constraint is that nothing it adds may reach the compiled artifact. `ResourceInput` lives
+// in `policyspec`, the compiler's own package; adding a descriptive field there would touch the compiler's
+// input type to carry something the compiler must never read.
+//
+// > **THE COMPILER'S INPUT TYPE STAYS PURE.** A trailing parameter looks less tidy and says something true:
+// > this value is not policy input. A field on ResourceInput would say the opposite, and the next person
+// > would have to check the compiler to find out which.
+//
+// ⚠ The mechanical test still holds either way — `CanonicalHash` reads cidr, protocol and the port bounds —
+// but the type is where a reader looks first, and it should not need the test.
+func (s *Service) CreateResource(ctx context.Context, orgID uuid.UUID, in policyspec.ResourceInput, label *string) (sqlc.Resource, error) {
 	if err := validateResource(in); err != nil {
 		return sqlc.Resource{}, err
 	}
@@ -221,6 +233,7 @@ func (s *Service) CreateResource(ctx context.Context, orgID uuid.UUID, in policy
 		r, e = q.CreateResource(ctx, sqlc.CreateResourceParams{
 			OrgID: orgID, Name: strings.TrimSpace(in.Name), Cidr: in.CIDR,
 			Protocol: in.Protocol, PortLow: i32ptr(in.PortLow), PortHigh: i32ptr(in.PortHigh),
+			Label: label,
 		})
 		if e != nil {
 			return conflictIfDup(e, "a resource with that name already exists")
@@ -231,7 +244,7 @@ func (s *Service) CreateResource(ctx context.Context, orgID uuid.UUID, in policy
 	return r, err
 }
 
-func (s *Service) UpdateResource(ctx context.Context, orgID, resourceID uuid.UUID, in policyspec.ResourceInput) (sqlc.Resource, error) {
+func (s *Service) UpdateResource(ctx context.Context, orgID, resourceID uuid.UUID, in policyspec.ResourceInput, label *string) (sqlc.Resource, error) {
 	if err := validateResource(in); err != nil {
 		return sqlc.Resource{}, err
 	}
@@ -242,6 +255,7 @@ func (s *Service) UpdateResource(ctx context.Context, orgID, resourceID uuid.UUI
 		r, e = q.UpdateResource(ctx, sqlc.UpdateResourceParams{
 			ID: resourceID, OrgID: orgID, Name: strings.TrimSpace(in.Name), Cidr: in.CIDR,
 			Protocol: in.Protocol, PortLow: i32ptr(in.PortLow), PortHigh: i32ptr(in.PortHigh),
+			Label: label,
 		})
 		if errors.Is(e, pgx.ErrNoRows) {
 			return apierr.NotFound("resource_not_found", "resource not found")

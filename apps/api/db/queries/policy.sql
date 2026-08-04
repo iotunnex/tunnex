@@ -54,8 +54,10 @@ WHERE org_id = $1;
 
 -- ── resources (static destinations) ─────────────────────────────────────────────
 -- name: CreateResource :one
-INSERT INTO resources (org_id, name, cidr, protocol, port_low, port_high)
-VALUES ($1, $2, $3, $4, $5, $6)
+-- ⚠ `label` is a free-text OPERATOR NOTE (S15.3). It is NOT read by the compiler — CanonicalHash sees
+-- cidr, protocol and the port bounds only — so it cannot desync an artifact or bump RequiredVersion.
+INSERT INTO resources (org_id, name, cidr, protocol, port_low, port_high, label)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: GetResource :one
@@ -69,7 +71,7 @@ ORDER BY name;
 
 -- name: UpdateResource :one
 UPDATE resources
-SET name = $3, cidr = $4, protocol = $5, port_low = $6, port_high = $7
+SET name = $3, cidr = $4, protocol = $5, port_low = $6, port_high = $7, label = $8
 WHERE id = $1 AND org_id = $2
 RETURNING *;
 

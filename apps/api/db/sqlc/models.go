@@ -417,6 +417,7 @@ type Resource struct {
 	PortHigh  *int32    `json:"port_high"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	Label     *string   `json:"label"`
 }
 
 type Site struct {
