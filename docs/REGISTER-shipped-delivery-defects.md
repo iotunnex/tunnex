@@ -338,3 +338,63 @@ reasoning is sound and untested by construction, and a reader cannot tell which.
 Whether the column is wired up or removed is a product decision. ⛔ **What this row buys is that the day
 someone writes it, the blast radius is already counted: 18 predicates, 5 of them on the data plane.**
 
+
+
+---
+
+## ⚠ 6 — CORRECTION: THE "Talking:" ROW NAMED A LOCATION THAT DOES NOT EXIST
+
+**Status: CORRECTED 2026-08-04 at EPIC 15 walk. The item was carried as three claims; none is true of the
+current build.**
+
+Carried as: *registered on Gateways* · *seen on Settings* · *absent from source*. Resolved by asking **which
+claim is true**, rather than by hunting for the string:
+
+| where | occurrences of `Talking` |
+| --- | --- |
+| `apps/web/src`, `apps/client/src`, `packages` | **0** |
+| the **SERVED** bundle (`index-BnNTvxeh.js`, fetched from the running stack) | **0** |
+| the entire repo, excluding `node_modules` / `.git` / `dist` | **0** |
+
+⛔ **IT IS NOT IN THE PRODUCT.** Either a string removed by an earlier change, or **never ours** — a browser,
+extension, or other application's chrome seen over the top of the screen.
+
+> ## **A REGISTER ROW THAT NAMES A LOCATION IS A PROMISE THE NEXT PERSON WILL TRY TO KEEP.** "Registered on
+> ## Gateways" sends someone to a file to find something that has never been there, and when they fail they
+> ## will assume they looked wrong rather than that the row was.
+
+**The honest row: sighted, unlocatable in the current build, cause undetermined.** ⚠ Not closed — a sighting
+is evidence of something. What is closed is the claim about *where*.
+
+---
+
+## ⛔ 7 — `GET /api/v1/organizations` RETURNS `[]` FOR A MACHINE PRINCIPAL
+
+**Status: OPEN. Found inside a PASSING leg (EPIC 15 walk Leg 1), 2026-08-04. Registered, not fixed.**
+
+A machine principal authenticates, and the endpoint whose entire purpose is enumerating organizations
+returns an **empty array** — while every org-scoped read works normally.
+
+**Measured on the wire, same token, immediately after a successful assignment:**
+
+| call | result |
+| --- | --- |
+| `GET /api/v1/organizations` | **200 `[]`** |
+| `GET /api/v1/organizations/{id}` | 200, real org row |
+| `GET /api/v1/organizations/{id}/members` | 200, real roster |
+| `GET /api/v1/organizations/{id}/resources` | 200, real resources |
+
+**The cause is a design decision meeting a handler that predates it.** `ListOrganizations` resolves via
+`ListOrganizationsForUser(p.UserID)` (`handlers.go:171`), and a machine principal has `UserID == uuid.Nil`
+**by design** — D4 keeps a machine out of the identity-binding subject space. Its org membership lives in
+`Roles map[orgID]string`, which this handler never consults.
+
+> ## **D4'S SEPARATION PRODUCED A HOLE NOBODY CHOSE.** The decision was right and its consequence at this
+> ## handler was never asked about. An operator can read everything *inside* an org it cannot discover it
+> ## belongs to — so any client that bootstraps by listing orgs gets an empty list and concludes it has none.
+
+⚠ **AND IT IS THE FIRST ABSENCE QUESTION AGAIN** — *what can this principal not do that the API allows?* —
+arriving through a principal kind rather than a screen. Same shape as row 2's `orgs[0]`, different cause.
+
+**Not fixed in the walk.** The obvious repair (resolve from `Roles` when `UserID` is nil) is a handler
+change with its own blast radius across every principal kind, and this walk changes no code.

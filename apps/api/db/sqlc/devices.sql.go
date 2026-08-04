@@ -467,7 +467,7 @@ JOIN users u ON u.id = d.user_id
 JOIN memberships mem ON mem.org_id = d.org_id AND mem.user_id = d.user_id
 WHERE d.node_id = $1
   AND d.status = 'active' AND NOT d.health_blocked AND d.deleted_at IS NULL
-  AND d.public_key <> ''
+  AND d.public_key ~ '^[A-Za-z0-9+/]{43}=$'
   AND u.status = 'active' AND u.deleted_at IS NULL
 ORDER BY d.created_at
 `
@@ -486,6 +486,23 @@ type ListActiveWireGuardPeersForNodeRow struct {
 //	severs open-edition WG access, not only the compiled policy — without it RemoveMember's
 //	org-wide push rebuilt a query that still served the removed member); NOT health_blocked is
 //	the orthogonal posture gate.
+//	⛔ MALFORMED-KEY EXCLUSION (S15.2 walk Leg 4) — THIS GUARD EXISTED AND WAS ONE PREDICATE TOO NARROW.
+//	The S9.1 note below names this exact hazard and defends against EMPTINESS. Emptiness is a SPECIAL CASE
+//	of malformedness, and the guard tested the special case: an agent device row carrying the placeholder
+//	`pending-agent-<uuid>` is non-empty, sailed through `<> ''`, and made `wg syncconf` reject the ENTIRE
+//	interface — zero peers configured on that gateway, including every human device.
+//
+//	> A GUARD WRITTEN FOR A HAZARD IS NOT A GUARD AGAINST THE HAZARD. It is a guard against the instance
+//	> that was in front of whoever wrote it. `<> ''` answers "is there a key"; the parser asks "is this a
+//	> key", and only the second question is the one `wg` will ask.
+//
+//	Now a FORMAT check: base64 of 32 bytes — 43 chars plus '='. ⛔ FAIL-CLOSED FOR THE PEER, NEVER FOR THE
+//	INTERFACE: a malformed row is dropped from the peer set so the remaining peers still configure. The
+//	alternative — letting it through and having `wg` refuse the batch — is fail-closed for the whole
+//	data plane, which is the outage this fixes.
+//	⚠ AND EXCLUSION IS SURFACED, NOT SILENT: see ListMalformedKeyPeersForNode, logged at reconcile with the
+//	device named. A peer that vanishes without a word is the reassuring-empty class on a data plane.
+//
 //	KEYLESS EXCLUSION (S9.1 D-S9.4-MODEL / WF-OVPN-10): public_key <> '' — a KEYLESS device (an
 //	OpenVPN client carries a cert, not a WG key) is NEVER a WireGuard peer. The query NAME + this
 //	WHERE are the SINGLE SOURCE, so every consumer (the per-node peer list AND the hub-set
@@ -712,6 +729,55 @@ func (q *Queries) ListDevicesByUser(ctx context.Context, arg ListDevicesByUserPa
 			&i.DiskEncrypted,
 			&i.ReportedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMalformedKeyPeersForNode = `-- name: ListMalformedKeyPeersForNode :many
+SELECT d.id, d.name, d.public_key
+FROM devices d
+JOIN users u ON u.id = d.user_id
+JOIN memberships mem ON mem.org_id = d.org_id AND mem.user_id = d.user_id
+WHERE d.node_id = $1
+  AND d.status = 'active' AND NOT d.health_blocked AND d.deleted_at IS NULL
+  AND d.public_key <> ''
+  AND d.public_key !~ '^[A-Za-z0-9+/]{43}=$'
+  AND u.status = 'active' AND u.deleted_at IS NULL
+ORDER BY d.created_at
+`
+
+type ListMalformedKeyPeersForNodeRow struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	PublicKey string    `json:"public_key"`
+}
+
+// ⛔ THE VISIBLE HALF OF THE EXCLUSION (S15.2 walk Leg 4). ListActiveWireGuardPeersForNode drops any device
+// whose public_key is not a well-formed WireGuard key; this names them so the drop can be REPORTED.
+//
+// > A PEER EXCLUDED FOR A MALFORMED KEY MUST BE VISIBLE, NOT SILENTLY ABSENT. A device that quietly stops
+// > being a peer is indistinguishable from a device that was never configured — the reassuring-empty class,
+// > on a data plane, where the symptom is "my tunnel does not work" and the screen says everything is fine.
+//
+// ⚠ THE PREDICATE IS THE EXACT COMPLEMENT of the peer query's format check. Written as an independent
+// condition it would drift, and the two would disagree about which rows are excluded — the one-truth
+// violation, in the pair whose whole purpose is to agree.
+func (q *Queries) ListMalformedKeyPeersForNode(ctx context.Context, nodeID uuid.UUID) ([]ListMalformedKeyPeersForNodeRow, error) {
+	rows, err := q.db.Query(ctx, listMalformedKeyPeersForNode, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMalformedKeyPeersForNodeRow{}
+	for rows.Next() {
+		var i ListMalformedKeyPeersForNodeRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.PublicKey); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
