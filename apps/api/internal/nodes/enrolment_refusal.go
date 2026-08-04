@@ -23,10 +23,22 @@ package nodes
 // matters until the proof is discharged: one credential, three states, on the wire — refused → assigned →
 // authenticates.
 //
-// ⚠ AND UNARMED IS NOT UNBUILT. The alternative — leaving it for later — means the refusal arrives with no
-// tests, no mutation evidence, and a reviewer who has to take its correctness on trust. This way the only
-// thing left to do is flip a boolean that already has a proven implementation behind it.
-const enrolmentRefusalArmed = false
+// ⛔ ARMED 2026-08-04, AND THE LICENCE IS A MEASUREMENT, NOT A DECISION TO SHIP IT.
+//
+// The gate was the D14 restore proof (`docs/S15.0-decisions.md` §15). It was **discharged on the wire** at
+// EPIC 15 walk Leg 1 (`walk-artifacts/EPIC-15-leg1-leg4.md`): one credential, three states, in order —
+// **401 refused → 204 assign through the picker's endpoint → 200 authenticates**, same token, same call.
+// Non-vacuous (three org-scoped endpoints returning real data), and controlled (a second credential left
+// UNOWNED returns 401 on those same three, so the flip was ownership and not the endpoint).
+//
+// > **A REFUSAL SHIPPED UNARMED BECAUSE ITS CURE WAS UNPROVEN DOES NOT STAY UNARMED ONCE THE CURE IS
+// > PROVEN.** Leaving it would be the dormant-machinery law in exactly the case that law was written for:
+// > machinery that exists, is correct, is tested, and does nothing.
+//
+// ⚠ AND UNARMED WAS NOT UNBUILT — that was the point. The rule shipped with tests and mutation evidence, so
+// arming it is a boolean flip over a proven implementation rather than a leap of faith. This is the payoff
+// of having built it early.
+const enrolmentRefusalArmed = true
 
 // RefuseUnownedEnrolment reports whether an enrolment with no resolvable owner must be refused.
 //

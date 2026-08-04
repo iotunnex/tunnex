@@ -307,6 +307,22 @@ func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentV
 			}
 			return e
 		}
+		// ⛔ D25(B) — THE ENROLMENT REFUSAL, ARMED. An agent may not COME INTO EXISTENCE unowned.
+		//
+		// ⚠ AT ENROLMENT, NEVER AT USE. D25 ruled that a running agent is never refused for want of an owner
+		// — it degrades and is flagged, because an unattributable tunnel is a LOGGING failure and dropping it
+		// would buy nothing. This gate is the other half: refuse the CREATION, so the degraded state is only
+		// ever inherited by agents that predate the column, never manufactured by one that comes after it.
+		//
+		// ⚠ AND THE TOKEN IS ALREADY CONSUMED AT THIS POINT — deliberately. A refused enrolment must not
+		// leave a reusable token behind: the operator fixes the cause (issue a token as a verified admin)
+		// and issues a new one, rather than retrying into the same wall with the same secret.
+		if RefuseUnownedEnrolment(tok.IssuedBy.Valid) {
+			return apierr.New(422, "enrolment_owner_required",
+				"this join token records no issuer, so the agent it enrols could not be attributed to a person — "+
+					"issue a new join token and enrol with that")
+		}
+
 		// ⛔ THE AGENT IS ADDRESS-BEARING (D15), AND THE ADDRESS IS A `devices` ROW (rank-3 ruled).
 		//
 		// Attribution rides the artifact's /32→device map (`accesslog/ingest.go:40-75`). A principal design
