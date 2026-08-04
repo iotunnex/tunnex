@@ -23,13 +23,16 @@ function cred(over: Partial<Record<string, unknown>> = {}) {
     created_at: new Date(Date.now() - 86_400_000).toISOString(),
     last_used_at: over.last_used_at ?? null,
     owner_user_id: over.owner_user_id ?? null,
-    // ⛔ PRESENT AND ALWAYS NULL, AND THAT IS THE CONTRACT — not an oversight in the fixture. It was
-    // ABSENT before, which is what let seven passing tests miss the founder's first finding: a fixture
-    // narrower than the contract cannot catch a consumer that ignores the difference. The handler
-    // deliberately does not resolve it (one resolver: the web reads the member roster it already
-    // fetches, the same way the Audit Log does). A fixture that populated it would let a component
-    // reading `c.owner_email` pass here and render "unknown" against the real API.
-    owner_email: null,
+    // ⛔ POPULATED BY THE SERVER (D22 ruled). It was documented-and-always-null before, which is what
+    // let the first consumer read it and render "unknown" on every owned row. The handler now resolves
+    // it by LEFT JOIN on `users`, so it survives the owner leaving the org — `in`, not `??`, because a
+    // nullable field cannot be overridden to null by a coalescing default.
+    owner_email:
+      "owner_email" in over
+        ? over.owner_email
+        : over.owner_user_id
+          ? "owner@demo.tunnex.local"
+          : null,
   };
 }
 
@@ -153,12 +156,13 @@ describe("the row tells the truth about what it knows", () => {
     expect(row.textContent).toContain("owner@demo.tunnex.local");
   });
 
-  it("⛔ an owned row whose owner is NOT ON THE ROSTER says so — never renders blank", async () => {
-    // Reachable for a real reason: the FK is ON DELETE RESTRICT on `users`, but nothing pins the
-    // MEMBERSHIP — an owner who leaves the org keeps the credential and drops off the roster. An owned
-    // row rendering blank is indistinguishable from an unowned one, the worse of the two failures.
+  it("⛔ AN OWNER WHO HAS LEFT THE ORG STILL RENDERS THEIR IDENTITY — the red that makes D22 not a refactor", async () => {
+    // ⛔ THE ROSTER IS EMPTY AND THE OWNER IS STILL NAMED. This is the case a roster-only resolver went
+    // blank on: nothing pins a membership, so an owner who leaves keeps the credential and drops off the
+    // roster — and that is precisely the row an accountability screen exists for. The server resolves
+    // owner_email from `users`, which survives both leaving and deactivation.
     stubGet({
-      [LIST]: [cred({ id: "c1", owner_user_id: "u1", name: "ghost" })],
+      [LIST]: [cred({ id: "c1", owner_user_id: "u1", name: "ghost", owner_email: "departed@demo.tunnex.local" })],
       [MEMBERS]: [],
     });
     const { container } = render(<MachineCredentials orgId={ORG} canManage />);
@@ -167,7 +171,9 @@ describe("the row tells the truth about what it knows", () => {
       expect(li).not.toBeNull();
       return li as HTMLElement;
     });
-    expect(row.textContent).toMatch(/not a member of this organization/i);
+    expect(row.textContent).toContain("departed@demo.tunnex.local");
+    // Not a blank and not "unknown" — the recorded identity.
+    expect(row.textContent).not.toMatch(/unknown|not a member/i);
     expect(row.querySelector('[data-badge="refused"]')).toBeNull();
   });
 
@@ -206,6 +212,22 @@ describe("the row tells the truth about what it knows", () => {
     await waitFor(() => expect(container.querySelectorAll("li").length).toBe(2));
     expect(container.querySelector('[data-state="some-refused"]')).toBeNull();
     expect(container.querySelector('[data-badge="refused"]')).toBeNull();
+  });
+
+  it("⛔ THE PICKER OFFERS VERIFIED ACCOUNTS ONLY — and still offers the verified ones (D21)", async () => {
+    stubGet({
+      [LIST]: [cred({ id: "c2", name: "orphan" })],
+      [MEMBERS]: [
+        { user_id: "u1", email: "verified@demo.tunnex.local", role: "admin", status: "active", email_verified: true },
+        { user_id: "u2", email: "unverified@demo.tunnex.local", role: "admin", status: "active", email_verified: false },
+      ],
+    });
+    render(<MachineCredentials orgId={ORG} canManage />);
+    const sel = (await screen.findByRole("combobox", { name: /owner for orphan/i })) as HTMLSelectElement;
+    const offered = Array.from(sel.options).map((o) => o.textContent);
+    // ⚠ BOTH DIRECTIONS. A filter that offered nobody would pass the exclusion half and is not a filter.
+    expect(offered).toContain("verified@demo.tunnex.local");
+    expect(offered).not.toContain("unverified@demo.tunnex.local");
   });
 
   it("⛔ NO SUGGESTED OWNER — the picker starts empty and the copy says the system does not know", async () => {

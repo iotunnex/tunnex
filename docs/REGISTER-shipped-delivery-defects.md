@@ -140,6 +140,36 @@ thing that can verify it is the header.
 - ⚠ **It is not in the deferral register either**, so it has been carried as folklore rather than as a
   registered gap.
 
+### ⭐ AND THE LOGIN PAGE ASKS FOR AN ORG — MEASURED, BECAUSE IT LOOKED LIKE THIS WAS BY DESIGN
+
+`localhost/login` shows an **Organization** field (placeholder `acme`). If the org were chosen at login,
+`orgs[0]` would be a consequence of a deliberate design and this row would be wrong. **It is not.**
+
+| question | measured |
+| --- | --- |
+| what the field is | an input **inside the SSO block**, feeding `?org=` to `GET /api/v1/auth/sso/{provider}/start` (`Login.tsx:287-306`) |
+| what the server does with it | `s.sso.StartLogin(ctx, req.Params.Org, provider)` — resolves **which org's IdP configuration to use** (`sso_handlers.go:50`) |
+| does password login send it | **no** — body is `{email, password}`, and `LoginRequest` is `additionalProperties: false` |
+| does the session carry an org | **no** — `session.Session` is `{ID, UserID, CreatedAt, ExpiresAt, AuthMethod}` |
+| does the principal | `Roles map[uuid.UUID]string` — **orgID → role, plural.** Explicitly multi-org |
+| live multi-org users | **1** (`owner@demo.tunnex.local`, 2 memberships) — ⚠ a fixture this review created, so *demonstrated reachable*, not evidence of field usage |
+
+⛔ **So the field routes an IdP lookup for one SSO handshake and never selects a tenant.** It is real and
+submitted — not decorative — but it is **SSO-scoped in the code and reads as global on the screen**, which
+is what made this look like tenant selection.
+
+### And single-org was never ruled — the opposite was
+
+**`PLAN.md:12` — "Tenant routing: Single domain (`app.tunnex.io`), org resolved from membership after
+login."** *Membership-resolved, explicitly.*
+
+> ## **THE SERVER ALREADY IMPLEMENTS THE LOCKED DECISION CORRECTLY.** The principal is multi-org by
+> ## construction, `GET /organizations` already serves every membership, and the session is deliberately
+> ## org-less. **Only the client discards what it was handed.** The defect is one layer thick.
+
+⚠ **Three answers to one question:** the login page asks for an org, the API returns all of them, the UI
+reads the first. They must agree — and the one that is wrong is the UI's.
+
 ### Blast radius
 
 `GET /api/v1/organizations` returns **every** org the user belongs to. The UI reads index zero and
@@ -180,10 +210,22 @@ UPDATE organizations SET created_at = now() - interval '1 hour'   WHERE slug = '
 ⛔ **This is a review procedure and must never be read as the state being reachable in the product.** It
 requires database access, and no user or operator has that path.
 
-### Not decided here
+### Not decided here — RULING HELD until after S15.1 merges
 
-Whether the fix is a switcher, an org-scoped route (`/orgs/{slug}/…`), or an explicit single-org product
-decision with the API narrowed to match. **Registered, not designed** — it is founder scope.
+Three dispositions, measured and held. **Not to be started.**
+
+| | what it means | cost |
+| --- | --- | --- |
+| **A — login selects the org** | the field becomes real for password login; session carries an org; `GET /organizations` narrows to match | **contradicts `PLAN.md:12`**; switching orgs requires re-login; SSO needs the org *before* auth, so the paths stay asymmetric |
+| **B — a switcher** *(recommended)* | `orgs[0]` becomes a **default rather than a ceiling** | UI work; needs a persisted "last used org" or it re-defaults each load |
+| **C — org-scoped routes** | org in the URL; deep links work; the current screen is always nameable | largest — every route, link and redirect |
+
+**Recommendation: B**, because it is the only one requiring **no** change to the API or to the locked
+decision — the server is already right and only the client is wrong. A and C both change the contract to
+match a client limitation. ⚠ **C is the better long-term shape and B does not block it**: a switcher that
+sets state becomes a switcher that sets a route.
+
+⛔ **HELD — the founder rules it after S15.1 merges. It must not ride that merge.**
 
 ---
 

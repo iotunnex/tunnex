@@ -378,6 +378,19 @@ type Querier interface {
 	// writer-partitioned fields (configured + demoted) + the D5 generation. The ACTIVE order is DERIVED from
 	// these by deriveActive (never stored). No rows until the first ReconcileHubSet.
 	GetOrgHubSet(ctx context.Context, orgID uuid.UUID) (GetOrgHubSetRow, error)
+	// S15.1 / D21 — is this user eligible to be named as an accountable owner?
+	//
+	// ⛔ RULED NO FOR UNVERIFIED ACCOUNTS. Ownership is an ACCOUNTABILITY CLAIM, and an account that cannot
+	// perform org mutations (requireVerifiedUser gates those) cannot be held accountable for what a credential
+	// does. Nameable-but-unable-to-act is a contradiction the screen would render as fact.
+	//
+	// ⚠ THIS EXISTS FOR THE MESSAGE, NOT FOR THE TRUTH. The refusal is enforced in the UPDATE statement itself,
+	// which cannot be raced; this read only lets the handler say WHICH precondition failed instead of returning
+	// an undifferentiated not-found. No oracle is created: the caller holds machine:manage and can already read
+	// every member's email_verified from the roster.
+	//
+	// No row = not a live member of this org (already the AssignOwner failure mode).
+	GetOrgMemberVerification(ctx context.Context, arg GetOrgMemberVerificationParams) (bool, error)
 	// ── org_mfa (enforce flag — slice 2 logic; org-scoped) ─────────────────────────────
 	GetOrgMfa(ctx context.Context, orgID uuid.UUID) (OrgMfa, error)
 	// Verifies a node belongs to the org (id+org scoped) before a device attaches to it.
@@ -594,7 +607,23 @@ type Querier interface {
 	// agree BY CONSTRUCTION (L2): a zone the gateway would REFUSE for (no Service yet) is never handed to a client
 	// as a resolver. DISTINCT collapses a multi-Service cluster to one zone row.
 	ListK8sServedZonesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListK8sServedZonesForOrgRow, error)
-	ListMachineCredentialsForOrg(ctx context.Context, orgID uuid.UUID) ([]MachineCredential, error)
+	// ⛔ owner_email IS RESOLVED HERE, FROM `users` AND NOT FROM `memberships` (S15.1, D22 ruled).
+	//
+	// The field was on the DTO, documented as "resolved from owner_user_id for display", and NEVER POPULATED —
+	// the web resolved it from the member roster it already fetches. That is correct until the owner LEAVES THE
+	// ORG, at which point the roster cannot name them and the accountability screen goes blank on precisely the
+	// row accountability exists for.
+	//
+	// ⚠ LEFT JOIN ON `users`, WHICH SURVIVES BOTH LOSSES THE ROSTER DOES NOT: membership deletion (nothing pins
+	// it) and deactivation. The FK is ON DELETE RESTRICT, so an assigned credential cannot outlive its user row —
+	// the recorded identity is always recoverable, and the LEFT JOIN is for the NULL owner, not for a missing user.
+	// lint:allow-deleted — DELIBERATE, AND IT IS THE RULING (D22), NOT A BYPASS.
+	// The lint's default is right for every query that ACTS on a user. This one does not act; it RESOLVES A
+	// RECORDED IDENTITY for display. Filtering `u.deleted_at IS NULL` here would blank the owner of a credential
+	// whose owner was soft-deleted — the exact failure D22 was ruled to end, arrived at from a different
+	// direction: the roster could not name a departed member, and `deleted_at` scoping cannot name a deleted one.
+	// ⚠ A screen whose purpose is accountability must not lose the name at the moment accountability matters.
+	ListMachineCredentialsForOrg(ctx context.Context, orgID uuid.UUID) ([]ListMachineCredentialsForOrgRow, error)
 	ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]Membership, error)
 	// lint:cross-org — intentionally spans orgs: a user's memberships across all
 	// their organizations (used to resolve which orgs a principal belongs to).
