@@ -409,11 +409,27 @@ func (s *Service) DesiredState(ctx context.Context, node sqlc.Node) (DesiredStat
 	if err != nil {
 		return DesiredState{}, err
 	}
+	// ⛔ THE EXCLUSION IS REPORTED, NOT SILENT (S15.2 walk Leg 4). A device dropped from the peer set for a
+	// malformed key is invisible to its owner — their tunnel simply does not work, and every screen says
+	// the gateway is healthy. That is the reassuring-empty class on a data plane.
+	//
+	// ⚠ ONE LOG LINE PER EXCLUDED DEVICE, NAMED. A count would say "something is wrong somewhere"; the
+	// operator needs to know WHICH device, because the fix is per-device (re-enrol, or wait for the agent
+	// to report its real key).
+	if bad, e := s.q.ListMalformedKeyPeersForNode(ctx, node.ID); e == nil {
+		for _, b := range bad {
+			slog.Warn("peer_excluded_malformed_key",
+				slog.String("node", node.Name), slog.String("device_id", b.ID.String()),
+				slog.String("device", b.Name), slog.String("public_key", b.PublicKey),
+				slog.String("consequence", "this device is NOT a WireGuard peer on this gateway and its tunnel will not work"),
+				slog.String("why", "wg syncconf rejects the ENTIRE interface config on one malformed key, so the peer is dropped to keep every other peer working"))
+		}
+	}
 	peers := make([]Peer, 0, len(rows))
 	for _, r := range rows {
-		// Keyless (OVPN) devices are excluded AT THE SOURCE now (ListActiveWireGuardPeersForNode's
-		// `public_key <> ''` — the single owner of the D-S9.4-MODEL invariant). This stays as a cheap
-		// subordinate assertion so a query regression can't silently re-brick the fleet (WF-OVPN-10).
+		// Keyless (OVPN) devices are excluded AT THE SOURCE now (ListActiveWireGuardPeersForNode's format
+		// check — the single owner of the D-S9.4-MODEL invariant). This stays as a cheap subordinate
+		// assertion so a query regression can't silently re-brick the fleet (WF-OVPN-10).
 		if r.PublicKey == "" {
 			continue
 		}
