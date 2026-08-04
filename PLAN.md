@@ -117,8 +117,25 @@ assignment surface, real work not a footnote** (a capability with no caller is u
 NULL owner AT USE, with a red** — *a nullable `user_id` IS the grandfather clause whether or not it is called
 one* · (4) contract to `NOT NULL`.
 
-**ALL SEVEN DECIDE-ITEMS RULED. NOTHING HELD.** Owed before any slice — **D14/D19 work, not S15.1**: which
-enforcement point step 3 uses, and what an admin sees in step 2.
+**ALL SEVEN DECIDE-ITEMS RULED. NOTHING HELD. AND BOTH OWED QUESTIONS ARE NOW CLOSED (paper §7).**
+
+⛔ **WHERE A NULL OWNER IS REFUSED — ONE SEAM, MEASURED.** The machine-credential USE path funnels through
+exactly one function (`http/machine_bearer.go:25-51`) — the only place a `Principal` carrying a `MachineID` is
+built — and it **already fails closed four times** there (unknown token · DB error · revoked · no-oracle). The
+refusal is **one line beside four that already live there**. It must NOT be restated per handler: *a guard made
+the caller's responsibility is inherited by every new caller*, which already cost seven call sites and a fourth
+instance of the same fix. ⭐ **AND THE TYPE CAN MAKE IT IMPOSSIBLE RATHER THAN CHECKED** — `Principal` is a
+struct literal today (the `policyHealthBadge` shape); **the owner field does not exist yet**, so a constructor
+that cannot be called without an owner is available *now and not again*. Both are needed: **types make the
+PRINCIPAL impossible to build wrong, the seam check makes the ROW impossible to use**, and the seam check
+retires at step 4. **Two reds** — NULL-owner refused, **and an owned credential still ACCEPTED** (a guard that
+refuses everything passes the first).
+
+**THE ASSIGNMENT SURFACE** — name · fingerprint · `created_at` · `last_used_at` · in-use. ⛔ **`created_by` does
+not exist, so THE ADMIN IS CHOOSING, NOT CONFIRMING**: no pre-selected or suggested owner — *a client-invented
+value where a server fact belongs*. Owner-only (`machine:manage`), reasoned not inherited. ⚠ **Three
+distinguishable empty states** — none exist · all owned · **the list failed to load** (an unreachable query
+rendering as empty is *"migration complete"* written by an error path).
 
 **`AuthMethod` MEASURED (2026-08-04), out of the unverified list.** `authctx.Principal.AuthMethod`
 (`authctx/authctx.go:42`) ∈ {`AuthLocalPassword`, `AuthSSO`, `AuthBearer`, `AuthMachine`, `""`}; stamped at
