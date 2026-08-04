@@ -17,6 +17,34 @@ table or the FK actions rather than by using the screen.
 > ## GitOps operator writing policy IS the product. A principal that can be talked into a request, and
 > ## can then write the rule that permits it, is a compromised principal granting itself what it was denied.
 
+### ⛔ RE-RATED 2026-08-04 — THE ENTRY WAS TRUE AND INCOMPLETE. THE EXPOSURE IS THE COMPOUND.
+
+*"A machine principal can author its own access rules"* names ONE property. Measurement found **three, on one
+credential**, and the compound is written down nowhere:
+
+| property | measured at |
+|---|---|
+| can author its own access rules | `apps/api/internal/rbac/rbac.go:141` — `RoleOperator` holds `PermPolicyManage` |
+| ⛔ **has NO OWNER** — `machine_credentials` has no `user_id` column at all | live schema: `id · org_id · name · role · token_hash · fingerprint · created_at · last_used_at · revoked_at` |
+| **role fixed at mint**, not narrowable | `apps/api/internal/machineauth/service.go:83` |
+
+> ## **A PRINCIPAL THAT CAN REWRITE POLICY, THAT NOTHING ATTRIBUTES TO A PERSON, AND WHOSE ROLE CANNOT BE
+> ## NARROWED.** Each property is registered or measurable alone. **The compound is the actual exposure.**
+
+⛔ **AND IT IS NOT ATTRIBUTABLE EVEN IN THE AUDIT LAYER.** `audit_logs` carries `actor_user_id` and
+`actor_system` as **parallel columns, not a chain** — an event is attributed to a human OR a subsystem, never
+"this system acting for that human". The operator's `X-Tunnex-Cause` (S10.2) supplies **which CR triggered
+this**, which is provenance of the TRIGGER; delegation is provenance of the AUTHORITY. **The operator has the
+first and not the second**, and the two are easy to conflate in prose.
+
+**CENSUS-THE-MIRROR-SURFACE applies: the instance was found, the SET was not sized.** This entry recorded the
+grant and stopped; nobody asked what else was true of the same credential.
+
+⛔ **THE CONSEQUENCE FOR ANY FUTURE AGENT DESIGN, STATED HERE SO IT IS NOT DISCOVERED LATER:** the ownerless
+machine principal is **not a design option to be permitted — it is the SHIPPED STATE**. `devices.user_id`
+carries the per-user device cap, the "which human launched it" provenance, and any future delegation link;
+`machine_credentials` has no equivalent, so a machine principal is outside all three at once.
+
 **Why it is live today, not an EPIC-15 concern:** machine credentials ship now, the UI presents them as an
 integration credential, and **nothing on that screen says the holder can author access policy.** S14.13
 already registered that no revoke control ships over `managed_by_machine`; this is the other half — the
