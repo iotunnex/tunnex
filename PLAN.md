@@ -64,6 +64,32 @@ expected to be rewritten before merge.
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
 **CURRENT (2026-07-31): EPIC 13 = GATEWAY RECOVERY — BUILD COMPLETE INCLUDING SLICE 7 on `story/S13.1-gateway-recovery` (tip `7c1a127`; Slice 7 = `120ff0c`, since then docs-only), NOT MERGED. Slice 7 (operator-initiated restore, `POST /nodes/{nodeId}/restore-devices`, new perm `device:restore`, re-homes onto a named LIVE gateway because a revoked node never returns) closed the reachability defect and is RED-PROVEN REACHABLE + UI-exposed. **REVIEW STATE POINTER = `docs/S13.1-review-state.md`** (pass 1 COMPLETE — 20 findings + F3, HELD, nothing folded, `docs/S13.1-review-pass1-findings.md`; pass 3 launched before pass 2 by ruling; pass 2 not started and must cover Slice 7). Earlier note: pass 1 was once interrupted — (run `wf_642e5fe8-1ed`: 8/8 finders done, 127/144 verifiers returned, Critic and Synthesize never ran — resumable from cache). The review remains a merge precondition. Next session = REVIEW → WALK → merge word, nothing in between.** The epic exists for one observed event: an AWS gateway went offline past its 48h cert lifetime and could not come back — `/agent/renew` lives behind the mTLS channel its expired cert can no longer authenticate to. Commit-one `docs/S13.1-decisions.md` (six walls, D1–D10 ruled). **SHIPPED:** agent precedence (`identity.Decide`, no network argument — a failed handshake structurally cannot trigger re-key; `Recover` ranked above `UseToken`) · **PoP re-key** on the public listener (RSA over `nonce ‖ CSR DER`; gate BEFORE crypto so timing is not a liveness oracle; **D3 amended: expiry authorizes, revocation REFUSES** — expiry is an absence of action, revocation is the presence of a decision) · its own path-scoped throttle + body cap (registered before `middleware.RealIP` — review #1 was exactly that) · **cascade restore** (`revoked_cause`, reclaim-first via the canonical oracle) · **Slice 6 `provisioned_ip`** (`needs_reexport` gains the ADDRESS cause for EVERY mode; ranges stay static-only; both contract rewrites + the label the census under-scoped) · **D10 second identifier** (key fingerprint: a LOST RESPONSE no longer bricks a gateway; ambiguity refuses; three implementations of one digest pinned to a golden vector; agent persists its pending key before submitting and reuses it so retries CONVERGE; migration guard forced expand/contract with both shim halves). Retroactive review pass 1 (leader election) folded — *leadership was a boolean that lies*; `ConfirmLeader` now matches `pg_locks`. **OWED BEFORE MERGE, IN ORDER: (1) the epic-end review pass — three passes by surface family (unauthenticated re-key surface · identity/cascade data path + migrations 0054–0061 · agent recovery loop), ~4.5–6M tokens, a merge precondition alongside CI and the walk, and a truncated pass is worse than none; (2) the walk per `docs/S13-boxwalk.md` — seven legs, TWO GATEWAYS MUST BE OFFLINE 48h+ BEFORE the session (`agentca.CertTTL` is a constant; the clock is the only way to make a cert expire); (3) the merge word.** **RULED — cascade-restore reachability: SLICE 7 (operator-initiated restore), built AFTER the review pass and BEFORE the walk; two conditions — authorized as a deliberate operator act (same class as minting a join token) and RED-PROVEN REACHABLE, not merely correct. Un-revoke PERMANENTLY REFUSED (it is the attack chain D3 exists to prevent); removing the mechanism refused (re-opens Wall 6). Walk Leg 4 stays a falsification attempt. The defect:** `RestoreCascadeRevokedDevices` has one caller (`Rekey`), devices are cascade-revoked in one place (`Revoke`), and `Rekey` refuses a revoked node — so the trigger may put the node into the one state that can never reach the restorer (dormant-machinery law). Four faces in the paper; walk Leg 4 is written as a falsification attempt. Retroactive **pass 2 (backup/restore)** still attaches to the next natural merge boundary. Registered: the 0061 contract migration (trigger = the release after this one) · no general rate limiting · body caps only on the two re-key routes · failover hysteresis persistence (beta-blocking, owned by the failover story).
+**S15.2 SLICES 1–4 BUILT (2026-08-04) — content tip `4fcfd940` pre-merge. NOT MERGED.**
+The address-bearing agent + the agent as an RBAC principal. Four slices in the chain's order.
+
+**1 — the issuer column** (`0066`): `node_join_tokens.issued_by` + `nodes.owner_user_id`. ⛔ FIRST BECAUSE
+IT STOPPED AN ONGOING LOSS — `IssueJoinToken` always received the human and wrote them to the audit log
+ALONE. ⚠ Two FK actions, each argued not copied: node = **RESTRICT** (S15.1's choice), token = **SET NULL**
+(a spent record of an act should survive losing the name). Both mutation-pinned.
+
+**2 — degrade-and-flag** (D25(C)): an unowned agent RUNS, is flagged `unattributable`, and says so. ⛔ THE
+REFUSAL (D25(B)) IS BUILT, TESTED, MUTATION-PROVEN AND **SHIPPED UNARMED** behind a build-time constant —
+never a config flag, which would be the grandfather clause D14 refused. The rule is tested SEPARATELY from
+its arming, so arming it later is not a leap of faith.
+
+**3 — the agent IS a `devices` row** (`0067`, `kind`): D15 satisfied BY CONSTRUCTION (the /32 map) and the
+revocation full-sweep inherited. ⭐ **§9.2's "collision" was not one** — `devices.user_id NOT NULL` means an
+unowned agent has no row, no /32 and no attribution, which is EXACTLY what `unattributable` says. The
+invariant and the flag are one fact. Cap exemption in the INDEX, mutation-proven both ways.
+
+**4 — the agent principal** (`NewAgentPrincipal`, `AuthAgent`, `RoleAgent` with **NO PermPolicyManage**).
+Six auth sites collapsed to ONE seam. ⛔ **THE CENSUS RE-RUN IS AN EXECUTABLE MERGE GATE** with a vacuity
+floor, and it is PROVEN ABLE TO FAIL (a planted second construction site was caught by file and line).
+
+⛔ **HELD:** arming the enrolment refusal — gated on the D14 restore proof (`S15.0 §15`), which does NOT
+proceed on a substitute · **D26** (an agent is a `devices` row, so it inherits `ON DELETE CASCADE` —
+LATENT, since no code path deletes a `users` row) · **D23** · step 4 · the org question.
+
 **S15.2 COMMIT-ONE (2026-08-04) — content tip `5ead183b` pre-merge. PAPER ONLY; ALL FOUR DECIDE-ITEMS RULED.**
 The address-bearing agent + the agent as an RBAC principal. `docs/S15.2-decisions.md`. **RULED: ONE STORY,
 D15 THEN D4** — D4-then-D15 ships a role that names nothing for the length of the gap; the reverse has no
