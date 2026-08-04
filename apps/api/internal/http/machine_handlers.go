@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
@@ -26,9 +27,20 @@ func (s apiServer) ListMachineCredentials(ctx context.Context, req api.ListMachi
 	if err != nil {
 		return nil, err
 	}
+	// ⚠ owner_email is NOT resolved here. The web already fetches the member roster for this screen and
+	// resolves ids the same way the Audit Log does (resolveActor) — one resolver, so the two cannot drift.
+	// Resolving it a second time server-side would be a second source of truth for the same fact.
 	out := make([]api.MachineCredential, len(rows))
 	for i, c := range rows {
-		out[i] = api.MachineCredential{Id: c.ID, Name: c.Name, Fingerprint: c.Fingerprint, CreatedAt: c.CreatedAt, LastUsedAt: timePtr(c.LastUsedAt)}
+		// ⛔ owner_user_id is NULL for every credential minted before S15.1 — that is the migration's whole
+		// subject, and the surface must render it as UNASSIGNED rather than blank. owner_email is resolved,
+		// never guessed: there is no created_by, so an absent owner is an absent fact.
+		mc := api.MachineCredential{Id: c.ID, Name: c.Name, Fingerprint: c.Fingerprint, CreatedAt: c.CreatedAt, LastUsedAt: timePtr(c.LastUsedAt)}
+		if c.UserID.Valid {
+			owner := uuid.UUID(c.UserID.Bytes)
+			mc.OwnerUserId = &owner
+		}
+		out[i] = mc
 	}
 	return api.ListMachineCredentials200JSONResponse{Body: out, Headers: api.ListMachineCredentials200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
 }
@@ -71,4 +83,32 @@ func timePtr(t pgtype.Timestamptz) *time.Time {
 		return nil
 	}
 	return &t.Time
+}
+
+// AssignMachineCredentialOwner names the human a machine credential acts for (S15.1, D14/D19 step 2).
+//
+// ⛔ OWNER-GATED (machine:manage), AND THE GATE IS REASONED RATHER THAN INHERITED: assigning an owner decides
+// whose per-user device cap the credential spends and whose name appears in the delegation link, so it is at
+// least as consequential as minting. A narrower gate would be a hole; a wider one would let a non-owner assign
+// accountability to somebody else.
+func (s apiServer) AssignMachineCredentialOwner(ctx context.Context, req api.AssignMachineCredentialOwnerRequestObject) (api.AssignMachineCredentialOwnerResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermMachineManage); err != nil {
+		return nil, err
+	}
+	p, ok := authctx.PrincipalFrom(ctx)
+	if !ok {
+		return nil, apierr.New(401, "unauthenticated", "authentication required")
+	}
+	if req.Body == nil || req.Body.UserId == uuid.Nil {
+		return nil, apierr.BadRequest("user_id_required", "an owner must be named — the system does not know who minted this credential")
+	}
+	assigned, err := s.machine.AssignOwner(ctx, req.OrgId, p.UserID, req.CredentialId, req.Body.UserId)
+	if err != nil {
+		return nil, err
+	}
+	if !assigned {
+		return nil, apierr.NotFound("machine_credential_or_member_not_found",
+			"no such active machine credential, or that user is not an active member of this organization")
+	}
+	return api.AssignMachineCredentialOwner204Response{}, nil
 }

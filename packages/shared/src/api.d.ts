@@ -1161,7 +1161,8 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        /** Assign the human owner of a machine credential (S15.1/D14; machine:manage, owner-only). The admin CHOOSES — created_by does not exist, so nothing is suggested. */
+        put: operations["assignMachineCredentialOwner"];
         post?: never;
         /** Revoke a machine credential — severs on its next request (S10.2; machine:manage). */
         delete: operations["revokeMachineCredential"];
@@ -2060,8 +2061,25 @@ export interface components {
             fingerprint: string;
             /** Format: date-time */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description LAST AUTHENTICATED AT, and nothing more. Stamped on every successful auth — NOT a liveness signal. A credential idle for a day may be an hourly GitOps reconcile or abandoned, and this column cannot tell them apart, so it renders as 'last seen'. No in-use badge is derived from it.
+             */
             last_used_at?: string | null;
+            /**
+             * Format: uuid
+             * @description S15.1/D14 — the human this machine principal acts for. NULL means UNASSIGNED, and an unassigned credential is REFUSED AT USE (machine_bearer.go). Nullable only for the length of the expand/contract migration; step 4 contracts it.
+             */
+            owner_user_id?: string | null;
+            /** @description Resolved from owner_user_id for display. NULL when unassigned — never a guess, and never a suggestion: created_by does not exist, so the system does not know who minted this. */
+            owner_email?: string | null;
+        };
+        AssignMachineCredentialOwnerRequest: {
+            /**
+             * Format: uuid
+             * @description The org member who owns this credential. The admin CHOOSES — there is no created_by to confirm against.
+             */
+            user_id: string;
         };
         MintMachineCredentialRequest: {
             /** @description A label for the credential; appears in audit as operator:<name>. */
@@ -4695,6 +4713,32 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["MintedMachineCredential"];
                 };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    assignMachineCredentialOwner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                credentialId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignMachineCredentialOwnerRequest"];
+            };
+        };
+        responses: {
+            /** @description Owner assigned. The credential authenticates again from its next request. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Error"];
         };

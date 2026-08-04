@@ -401,6 +401,12 @@ type AffectedDevice struct {
 	Name string             `json:"name"`
 }
 
+// AssignMachineCredentialOwnerRequest defines model for AssignMachineCredentialOwnerRequest.
+type AssignMachineCredentialOwnerRequest struct {
+	// UserId The org member who owns this credential. The admin CHOOSES — there is no created_by to confirm against.
+	UserId openapi_types.UUID `json:"user_id"`
+}
+
 // AuditLogEntry defines model for AuditLogEntry.
 type AuditLogEntry struct {
 	Action      string                 `json:"action"`
@@ -1056,8 +1062,16 @@ type MachineCredential struct {
 	// Fingerprint Keyed proof-of-secret — a stable display id, NEVER the token.
 	Fingerprint string             `json:"fingerprint"`
 	Id          openapi_types.UUID `json:"id"`
-	LastUsedAt  *time.Time         `json:"last_used_at"`
-	Name        string             `json:"name"`
+
+	// LastUsedAt LAST AUTHENTICATED AT, and nothing more. Stamped on every successful auth — NOT a liveness signal. A credential idle for a day may be an hourly GitOps reconcile or abandoned, and this column cannot tell them apart, so it renders as 'last seen'. No in-use badge is derived from it.
+	LastUsedAt *time.Time `json:"last_used_at"`
+	Name       string     `json:"name"`
+
+	// OwnerEmail Resolved from owner_user_id for display. NULL when unassigned — never a guess, and never a suggestion: created_by does not exist, so the system does not know who minted this.
+	OwnerEmail *string `json:"owner_email"`
+
+	// OwnerUserId S15.1/D14 — the human this machine principal acts for. NULL means UNASSIGNED, and an unassigned credential is REFUSED AT USE (machine_bearer.go). Nullable only for the length of the expand/contract migration; step 4 contracts it.
+	OwnerUserId *openapi_types.UUID `json:"owner_user_id"`
 }
 
 // Member defines model for Member.
@@ -1702,6 +1716,9 @@ type ExposeK8sServiceJSONRequestBody = ExposeK8sServiceRequest
 // MintMachineCredentialJSONRequestBody defines body for MintMachineCredential for application/json ContentType.
 type MintMachineCredentialJSONRequestBody = MintMachineCredentialRequest
 
+// AssignMachineCredentialOwnerJSONRequestBody defines body for AssignMachineCredentialOwner for application/json ContentType.
+type AssignMachineCredentialOwnerJSONRequestBody = AssignMachineCredentialOwnerRequest
+
 // ChangeMemberRoleJSONRequestBody defines body for ChangeMemberRole for application/json ContentType.
 type ChangeMemberRoleJSONRequestBody = ChangeRoleRequest
 
@@ -2136,6 +2153,11 @@ type ClientInterface interface {
 
 	// RevokeMachineCredential request
 	RevokeMachineCredential(ctx context.Context, orgId openapi_types.UUID, credentialId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AssignMachineCredentialOwnerWithBody request with any body
+	AssignMachineCredentialOwnerWithBody(ctx context.Context, orgId openapi_types.UUID, credentialId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	AssignMachineCredentialOwner(ctx context.Context, orgId openapi_types.UUID, credentialId openapi_types.UUID, body AssignMachineCredentialOwnerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListMembers request
 	ListMembers(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3640,6 +3662,30 @@ func (c *Client) MintMachineCredential(ctx context.Context, orgId openapi_types.
 
 func (c *Client) RevokeMachineCredential(ctx context.Context, orgId openapi_types.UUID, credentialId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRevokeMachineCredentialRequest(c.Server, orgId, credentialId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AssignMachineCredentialOwnerWithBody(ctx context.Context, orgId openapi_types.UUID, credentialId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAssignMachineCredentialOwnerRequestWithBody(c.Server, orgId, credentialId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AssignMachineCredentialOwner(ctx context.Context, orgId openapi_types.UUID, credentialId openapi_types.UUID, body AssignMachineCredentialOwnerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAssignMachineCredentialOwnerRequest(c.Server, orgId, credentialId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -7750,6 +7796,60 @@ func NewRevokeMachineCredentialRequest(server string, orgId openapi_types.UUID, 
 	return req, nil
 }
 
+// NewAssignMachineCredentialOwnerRequest calls the generic AssignMachineCredentialOwner builder with application/json body
+func NewAssignMachineCredentialOwnerRequest(server string, orgId openapi_types.UUID, credentialId openapi_types.UUID, body AssignMachineCredentialOwnerJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewAssignMachineCredentialOwnerRequestWithBody(server, orgId, credentialId, "application/json", bodyReader)
+}
+
+// NewAssignMachineCredentialOwnerRequestWithBody generates requests for AssignMachineCredentialOwner with any type of body
+func NewAssignMachineCredentialOwnerRequestWithBody(server string, orgId openapi_types.UUID, credentialId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "credentialId", runtime.ParamLocationPath, credentialId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/machine-credentials/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListMembersRequest generates requests for ListMembers
 func NewListMembersRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -10126,6 +10226,11 @@ type ClientWithResponsesInterface interface {
 	// RevokeMachineCredentialWithResponse request
 	RevokeMachineCredentialWithResponse(ctx context.Context, orgId openapi_types.UUID, credentialId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RevokeMachineCredentialResponse, error)
 
+	// AssignMachineCredentialOwnerWithBodyWithResponse request with any body
+	AssignMachineCredentialOwnerWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, credentialId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AssignMachineCredentialOwnerResponse, error)
+
+	AssignMachineCredentialOwnerWithResponse(ctx context.Context, orgId openapi_types.UUID, credentialId openapi_types.UUID, body AssignMachineCredentialOwnerJSONRequestBody, reqEditors ...RequestEditorFn) (*AssignMachineCredentialOwnerResponse, error)
+
 	// ListMembersWithResponse request
 	ListMembersWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListMembersResponse, error)
 
@@ -12055,6 +12160,28 @@ func (r RevokeMachineCredentialResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r RevokeMachineCredentialResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type AssignMachineCredentialOwnerResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r AssignMachineCredentialOwnerResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AssignMachineCredentialOwnerResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -14067,6 +14194,23 @@ func (c *ClientWithResponses) RevokeMachineCredentialWithResponse(ctx context.Co
 		return nil, err
 	}
 	return ParseRevokeMachineCredentialResponse(rsp)
+}
+
+// AssignMachineCredentialOwnerWithBodyWithResponse request with arbitrary body returning *AssignMachineCredentialOwnerResponse
+func (c *ClientWithResponses) AssignMachineCredentialOwnerWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, credentialId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AssignMachineCredentialOwnerResponse, error) {
+	rsp, err := c.AssignMachineCredentialOwnerWithBody(ctx, orgId, credentialId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAssignMachineCredentialOwnerResponse(rsp)
+}
+
+func (c *ClientWithResponses) AssignMachineCredentialOwnerWithResponse(ctx context.Context, orgId openapi_types.UUID, credentialId openapi_types.UUID, body AssignMachineCredentialOwnerJSONRequestBody, reqEditors ...RequestEditorFn) (*AssignMachineCredentialOwnerResponse, error) {
+	rsp, err := c.AssignMachineCredentialOwner(ctx, orgId, credentialId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAssignMachineCredentialOwnerResponse(rsp)
 }
 
 // ListMembersWithResponse request returning *ListMembersResponse
@@ -17056,6 +17200,32 @@ func ParseRevokeMachineCredentialResponse(rsp *http.Response) (*RevokeMachineCre
 	}
 
 	response := &RevokeMachineCredentialResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseAssignMachineCredentialOwnerResponse parses an HTTP response from a AssignMachineCredentialOwnerWithResponse call
+func ParseAssignMachineCredentialOwnerResponse(rsp *http.Response) (*AssignMachineCredentialOwnerResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AssignMachineCredentialOwnerResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

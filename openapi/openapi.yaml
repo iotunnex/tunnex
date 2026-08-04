@@ -1444,6 +1444,18 @@ paths:
       responses:
         "204": { description: Revoked. }
         default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: assignMachineCredentialOwner
+      summary: Assign the human owner of a machine credential (S15.1/D14; machine:manage, owner-only). The admin CHOOSES — created_by does not exist, so nothing is suggested.
+      tags: [machine]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssignMachineCredentialOwnerRequest" }
+      responses:
+        "204": { description: Owner assigned. The credential authenticates again from its next request. }
+        default: { $ref: "#/components/responses/Error" }
 
   /api/v1/organizations/{orgId}/resources:
     parameters:
@@ -2645,7 +2657,16 @@ components:
         name: { type: string }
         fingerprint: { type: string, description: "Keyed proof-of-secret — a stable display id, NEVER the token." }
         created_at: { type: string, format: date-time }
-        last_used_at: { type: string, format: date-time, nullable: true }
+        last_used_at: { type: string, format: date-time, nullable: true, description: "LAST AUTHENTICATED AT, and nothing more. Stamped on every successful auth — NOT a liveness signal. A credential idle for a day may be an hourly GitOps reconcile or abandoned, and this column cannot tell them apart, so it renders as 'last seen'. No in-use badge is derived from it." }
+        owner_user_id: { type: string, format: uuid, nullable: true, description: "S15.1/D14 — the human this machine principal acts for. NULL means UNASSIGNED, and an unassigned credential is REFUSED AT USE (machine_bearer.go). Nullable only for the length of the expand/contract migration; step 4 contracts it." }
+        owner_email: { type: string, nullable: true, description: "Resolved from owner_user_id for display. NULL when unassigned — never a guess, and never a suggestion: created_by does not exist, so the system does not know who minted this." }
+
+    AssignMachineCredentialOwnerRequest:
+      type: object
+      required: [user_id]
+      additionalProperties: false
+      properties:
+        user_id: { type: string, format: uuid, description: "The org member who owns this credential. The admin CHOOSES — there is no created_by to confirm against." }
 
     MintMachineCredentialRequest:
       type: object
