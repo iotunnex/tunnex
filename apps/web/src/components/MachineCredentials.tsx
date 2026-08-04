@@ -16,6 +16,17 @@ import { OneTimeSecretModal } from "./OneTimeSecret";
 // device config / .ovpn / recovery codes); the list shows the keyed FINGERPRINT only — the server never
 // re-serves the secret. Rendered only for machine:manage (owner) — the endpoints are owner-gated, so a
 // non-owner would only get 403s here.
+
+/**
+ * How many credentials this organization is currently REFUSING.
+ *
+ * ⛔ Not "how many are untidy". `MachineAuth` returns `nil, nil` on a NULL owner, so this is a count
+ * of live failures — exported so the count in the banner and the per-row badge cannot drift apart.
+ */
+export function refusedCount(creds: readonly MachineCredential[]): number {
+  return creds.filter((c) => !c.owner_user_id).length;
+}
+
 export function MachineCredentials({
   orgId,
   canManage,
@@ -168,6 +179,30 @@ export function MachineCredentials({
               Every machine credential has an owner. The migration is complete for this organization.
             </p>
           )}
+          {/* ⛔ UNASSIGNED IS AN OUTAGE, NOT UNTIDINESS — AND THE FIRST VERSION OF THIS SCREEN SAID SO
+              ONLY IN A FOOTNOTE UNDER THE LIST.
+              `MachineAuth` returns `nil, nil` on a NULL owner, so every row below without one is being
+              REFUSED RIGHT NOW. A calm amber `unassigned` chip beside it renders a live outage as a
+              tidy label — the reassuring-empty class inverted: not a zero claiming success, but a
+              failure claiming to be housekeeping.
+              ⚠ ABOVE THE ROWS AND IN THE DANGER TONE, for the same reason the all-owned banner is
+              above them: a qualifier under a list is read after the list is already believed. An
+              operator whose GitOps runner is dead must learn it from this screen, not from the
+              runner. */}
+          {creds.data.some((c) => !c.owner_user_id) && (
+            <p
+              data-state="some-refused"
+              className="mt-3 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-xs text-danger"
+            >
+              <strong>
+                {refusedCount(creds.data) === 1
+                  ? "1 machine credential is being refused right now."
+                  : `${refusedCount(creds.data)} machine credentials are being refused right now.`}
+              </strong>{" "}
+              A credential with no owner cannot authenticate — any operator using one is already
+              failing. Assign an owner to restore it.
+            </p>
+          )}
           <ul className="mt-3 space-y-1">
             {creds.data.map((c) => (
               <li
@@ -191,9 +226,28 @@ export function MachineCredentials({
                       ? ` · last seen ${relativeAge(c.last_used_at)}`
                       : " · never seen"}
                   </span>
-                  {!c.owner_user_id && (
-                    <span className="ml-2 rounded border border-warn/40 px-1.5 py-0.5 text-[10px] text-warn">
-                      unassigned
+                  {/* ⛔ THE MOMENT A CREDENTIAL ACQUIRED AN OWNER, THAT FACT BECAME INVISIBLE.
+                      `owner_email` was on the DTO, served by the handler, and read by nothing — the
+                      who-reads-this probe failing on a field this very slice added. On a screen whose
+                      entire purpose is accountability, the assigned state was the one state that said
+                      nothing at all.
+                      ⚠ `owner_email` is resolved by join, and the FK is ON DELETE RESTRICT, so an
+                      assigned row cannot outlive its user. If it is ever missing anyway, say the owner
+                      is unreadable — never render an owned row as blank, which is indistinguishable
+                      from unowned. */}
+                  {c.owner_user_id ? (
+                    <span className="ml-2 text-xs text-ink-secondary">
+                      · owner{" "}
+                      <span className="text-slate-300">
+                        {c.owner_email ?? "unknown (could not resolve this user)"}
+                      </span>
+                    </span>
+                  ) : (
+                    <span
+                      data-badge="refused"
+                      className="ml-2 rounded border border-danger/40 px-1.5 py-0.5 text-[10px] text-danger"
+                    >
+                      no owner — refused
                     </span>
                   )}
                 </span>
@@ -239,10 +293,12 @@ export function MachineCredentials({
               </li>
             ))}
           </ul>
+          {/* The refusal is stated ABOVE the rows now. What is left here is the thing that genuinely
+              belongs under the list: why there is nothing to pre-select. */}
           {canManage && creds.data.some((c) => !c.owner_user_id) && (
             <p className="mt-2 text-[11px] text-ink-secondary">
               Tunnex does not record who minted a credential, so it cannot suggest an owner — choose the
-              person accountable for what this credential does. Unassigned credentials do not authenticate.
+              person accountable for what this credential does.
             </p>
           )}
         </>

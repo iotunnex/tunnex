@@ -23,6 +23,19 @@ function cred(over: Partial<Record<string, unknown>> = {}) {
     created_at: new Date(Date.now() - 86_400_000).toISOString(),
     last_used_at: over.last_used_at ?? null,
     owner_user_id: over.owner_user_id ?? null,
+    // ⛔ THE FIXTURE OMITTED owner_email, AND THAT OMISSION IS WHY SEVEN PASSING TESTS MISSED THE
+    // FOUNDER'S FIRST FINDING. The DTO serves it; the fixture did not carry it; so no test could fail
+    // when the component never read it. A fixture narrower than the contract cannot catch a consumer
+    // that ignores the difference — the fixture-fidelity trap, on the field this slice added.
+    // ⚠ `in`, NOT `??` — a nullable field cannot be overridden to null by a coalescing default. The
+    // first version of this line silently ignored `owner_email: null` and handed back the default,
+    // so the unresolvable-owner test was asserting against a fixture that could not produce the case.
+    owner_email:
+      "owner_email" in over
+        ? over.owner_email
+        : over.owner_user_id
+          ? "owner@demo.tunnex.local"
+          : null,
   };
 }
 
@@ -108,6 +121,79 @@ describe("the row tells the truth about what it knows", () => {
     // The picker exists for the unassigned one only.
     expect(screen.getByRole("combobox", { name: /owner for orphan/i })).toBeTruthy();
     expect(screen.queryByRole("combobox", { name: /owner for owned-one/i })).toBeNull();
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+  // FOUNDER REVIEW, FIRST PASS — the two findings. Both were invisible to the seven tests above.
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+
+  it("⛔ AN ASSIGNED ROW SHOWS ITS OWNER — the whole point of the screen, previously invisible", async () => {
+    stubGet({
+      [LIST]: [cred({ id: "c1", owner_user_id: "u1", name: "backup-agent" })],
+      [MEMBERS]: [{ user_id: "u1", email: "owner@demo.tunnex.local", role: "owner", status: "active" }],
+    });
+    const { container } = render(<MachineCredentials orgId={ORG} canManage />);
+    const row = await waitFor(() => {
+      const li = container.querySelector('li[data-owned="yes"]');
+      expect(li).not.toBeNull();
+      return li as HTMLElement;
+    });
+    // ON THE ROW, not merely somewhere on the screen — an owner rendered elsewhere is not accountability.
+    expect(row.textContent).toContain("owner@demo.tunnex.local");
+  });
+
+  it("⛔ an owned row whose owner_email cannot be resolved says SO — never renders blank", async () => {
+    // The FK is ON DELETE RESTRICT so this should be unreachable. If it happens anyway, an owned row
+    // rendering blank is indistinguishable from an unowned one — the worse of the two failures.
+    stubGet({
+      [LIST]: [cred({ id: "c1", owner_user_id: "u1", owner_email: null, name: "ghost" })],
+      [MEMBERS]: [],
+    });
+    const { container } = render(<MachineCredentials orgId={ORG} canManage />);
+    const row = await waitFor(() => {
+      const li = container.querySelector('li[data-owned="yes"]');
+      expect(li).not.toBeNull();
+      return li as HTMLElement;
+    });
+    expect(row.textContent).toMatch(/unknown/i);
+    expect(row.querySelector('[data-badge="refused"]')).toBeNull();
+  });
+
+  it("⛔ UNASSIGNED IS AN OUTAGE — the row and the banner both say REFUSED, not 'untidy'", async () => {
+    stubGet({
+      [LIST]: [
+        cred({ id: "c1", name: "gitops-prod" }),
+        cred({ id: "c2", name: "gitops-staging" }),
+        cred({ id: "c3", owner_user_id: "u1", name: "ci-runner" }),
+      ],
+      [MEMBERS]: [{ user_id: "u1", email: "owner@demo.tunnex.local", role: "owner", status: "active" }],
+    });
+    const { container } = render(<MachineCredentials orgId={ORG} canManage />);
+    const banner = await waitFor(() => {
+      const p = container.querySelector('[data-state="some-refused"]');
+      expect(p).not.toBeNull();
+      return p as HTMLElement;
+    });
+    // The COUNT is of refused rows, not of all rows — 2 of the 3.
+    expect(banner.textContent).toContain("2 machine credentials are being refused");
+    expect(banner.textContent).toMatch(/cannot authenticate/i);
+    // ⚠ The badge itself must carry the consequence. "unassigned" alone reads as metadata, and an
+    // operator whose GitOps runner is dead would learn it from the runner rather than from this screen.
+    const badge = container.querySelector('[data-badge="refused"]') as HTMLElement;
+    expect(badge.textContent).toMatch(/refused/i);
+    expect(badge.textContent).not.toMatch(/^\s*unassigned\s*$/i);
+  });
+
+  it("the refused banner is absent when every credential is owned", async () => {
+    // Without this, the banner could be a constant and the test above would still pass.
+    stubGet({
+      [LIST]: [cred({ id: "c1", owner_user_id: "u1" }), cred({ id: "c2", owner_user_id: "u1" })],
+      [MEMBERS]: [{ user_id: "u1", email: "owner@demo.tunnex.local", role: "owner", status: "active" }],
+    });
+    const { container } = render(<MachineCredentials orgId={ORG} canManage />);
+    await waitFor(() => expect(container.querySelectorAll("li").length).toBe(2));
+    expect(container.querySelector('[data-state="some-refused"]')).toBeNull();
+    expect(container.querySelector('[data-badge="refused"]')).toBeNull();
   });
 
   it("⛔ NO SUGGESTED OWNER — the picker starts empty and the copy says the system does not know", async () => {
