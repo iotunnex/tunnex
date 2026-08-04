@@ -6,6 +6,132 @@ RBAC table, not asserted.
 
 ---
 
+# ⛔ CORRECTIONS — 2026-08-04. READ BEFORE THE PAPER.
+
+**A registered paper gets re-entered and believed. This one carried a cost model its own measurement pass
+refuted, so the corrections come before the argument, not after it.** Everything below is measured with a
+citation; where a claim is still second-hand it says so.
+
+⛔ **STATUS UNCHANGED: EPIC 15 is registered, paper-only, UNRULED.** No commit-one, no branch, no S15.x.
+**D14, D4 and the sequencing question are held for the founder.**
+
+## The three halves, measured
+
+| half | verdict |
+|---|---|
+| **destination** | ⛔ **already shipped** — see the rewritten 3a. A port-scoped `resource` expresses an MCP server today |
+| **audit** | **inherited, CONDITIONALLY** — see below. The condition binds D4 |
+| **principal** | **the whole remaining epic**, and it converges on one column |
+
+## The audit half — inherited, and the condition is binding
+
+`src_device_id` is **agent-stamped from the compiled artifact's `/32`→device map**; the CP performs one FK
+join to `src_user_id` (`apps/api/internal/accesslog/ingest.go:40-75`). Explicitly **not** an `src_ip` lookup —
+that inference is refused deliberately, and the refusal is narrower than it reads: what is refused is
+*deriving a person from an address*, not attribution as such.
+
+⛔ **THE CONDITION: attribution works IFF the principal is a `/32` the artifact maps to a device.** A
+principal shape that is not address-bearing goes dark on attribution **silently** — the flow log will not
+complain. **This is a constraint on the principal design (D4), not a property of the audit layer**, and it is
+exactly the kind of thing discovered in slice 2 after slice 1 shipped.
+
+## ⛔ D14 IS REFRAMED BY MEASUREMENT, NOT BY ARGUMENT
+
+**`machine_credentials` has no `user_id` column** (live schema: `id · org_id · name · role · token_hash ·
+fingerprint · created_at · last_used_at · revoked_at`).
+
+> ## **EVERY MACHINE PRINCIPAL SHIPPED TODAY IS ALREADY OWNERLESS. D14 IS NOT "PERMIT OWNERLESS AGENTS" —
+> ## IT IS "KEEP THE OWNERLESS PRINCIPAL WE ALREADY HAVE."**
+
+**And the mechanical argument, which replaces the philosophical one:**
+
+> **An ownerless agent is outside the cap query, outside any delegation link, and STILL INSIDE THE POOL. It
+> costs the scarce thing and escapes both accountable ones.**
+
+**`devices.user_id` carries three loads at once** — the per-user device cap
+(`apps/api/db/queries/devices.sql:98-104`), the posture cut's *"which human account launched it"*, and any
+future delegation link. **One column, three questions, and D14 turns all three off together.** An ownerless
+agent is therefore not a variant of the design; it is a different design.
+
+⚠ **Delegation exists in NEITHER layer.** `audit_logs` carries `actor_user_id` and `actor_system` as
+**parallel columns, not a chain** — an event is attributed to a human OR a subsystem, never *"this system
+acting for that human"*. `X-Tunnex-Cause` (S10.2) supplies **which CR triggered this**: provenance of the
+TRIGGER. Delegation is provenance of the AUTHORITY. **The operator has the first and not the second.**
+
+## The posture cut — scorecard corrected
+
+| the founder's cut | status |
+|---|---|
+| **which human account launched it** | ✅ persisted — `devices.user_id` |
+| **which enrolment** | ✅ weakly — `devices.id` + `created_at` + `provisioning_mode`; no device-enrolment provenance table (`node_join_tokens` is for NODES) |
+| **which host — server-observed** | ✅ **`devices.node_id`** — which gateway it actually attaches to |
+| **which host — client-claimed** | ⚠ `platform` / `name`, client-supplied, and `platform` is **empty on 2 of 3 live rows** |
+| **which host — attested** | ⛔ absent, and not addable by a column |
+
+⛔ **`node_id` is the row that satisfies the founder's own cut** — *keep only what binds to a real credential*.
+It is **server-observed, not client-claimed**. Anything stored about the machine itself is client-reported and
+must carry the same label the existing posture surface already applies to itself. **State that; do not
+discover it.**
+
+## ⛔ §0's SLICE-ORDER RATIONALE, REWRITTEN AGAINST MCP `2026-07-28`
+
+**Shipped 28 July 2026, after this paper was registered.** Stateless core; `initialize`/`initialized` retired;
+`Mcp-Session-Id` removed; and **`Mcp-Method` / `Mcp-Name` are now REQUIRED headers**, explicitly so gateways
+can route and meter **without parsing bodies**.
+
+**The ordering survives. The cost model behind it does not.** This paper argued per-tool granularity is last
+*because* every mechanism we own is L3/L4 and cannot see inside an MCP call. The first clause is still true;
+the second is weaker, because the consequential fields are now in headers.
+
+> ## ⛔ **THE EPIC'S FIRST NAMED LAW — THE HEADER TRAP.** `Mcp-Method` and `Mcp-Name` are **mirrored from the
+> ## body, and the body remains authoritative.** A gateway that authorizes on `Mcp-Name` without checking it
+> ## against the body **is authorizing on a client-supplied claim.**
+
+That is `A GUARD MUST BE EXERCISED THROUGH THE STACK IT RUNS IN`, one protocol over — the throttle that read
+`r.RemoteAddr` after `middleware.RealIP` had already replaced it with a caller-controlled header. Three tests
+passed and the guard was inert. **Here the header is *designed* to look authoritative, which is worse.** The
+mitigation is to state which artifact the decision is made from, and to red-prove that a header/body mismatch
+is refused.
+
+## AP2 IS NOT A THIRD PROTOCOL
+
+Signed **mandates** carried *inside* A2A and MCP messages; donated to the **FIDO Alliance, April 2026**.
+**It does not move money and has no wire of its own — there is nothing to route, nothing to terminate, no port
+to police.** Scope collapses to **a policy predicate plus an audit field, and only in the L7 tier**.
+
+⛔ **NO "AP2 SUPPORT" CLAIM.** A claim of supporting a payments protocol, made to a buyer who cannot check it,
+is a **render-floor violation at product scale** — the SOC 2 badge cut in S14.17, one domain over.
+
+## Competitive corrections
+
+**Versa** brokers **Versa's own** infrastructure APIs — a governance layer for AI operating Versa, **not** a
+general zero-trust layer for a customer's arbitrary MCP servers. Stop treating it as the same product shape.
+**Tailscale shipped Aperture** — an **LLM** gateway that *extracts* MCP calls for **observability**, with
+finer-grained MCP control still *"planned"*, **and it is SaaS**. ⭐ **The anchor of our category moved and has
+NOT shipped enforcement** — the sovereignty wedge holds, and the window is real but not wide.
+
+## EMA validates the slice order from inside the protocol
+
+MCP's **Enterprise Managed Authorization** extension has the corporate IdP decide **which servers an agent may
+connect to**, and **explicitly does not govern what the agent does once connected** — the admission/runtime
+line drawn exactly where slice 1 draws it.
+⚠ **SECOND-HAND.** Read from descriptions and one implementer's account, **not** the normative text in
+`modelcontextprotocol/ext-auth`. **Read it before the paper relies on this.**
+
+## ⚠ CARRIED AS UNVERIFIED — flagged, NOT quotable as fact
+
+- **`/.well-known/` discovery** — never checked. Search the FETCH side, not only the path string.
+- **`access_events` is empty** — one rig, one table, one moment. Does **not** establish the ingest path never ran.
+- **No pool-utilisation surface** — established by ONE encoding. The sibling claim ("no resize surface") was
+  already wrong. Re-check with `assigned_ip`, `ipalloc`, the overview counts.
+- **`Principal.AuthMethod`** — unlocated, not absent.
+- ⛔ **THE PASS ITSELF.** One session, one rig, one reader. **Its two sharpest corrections — `pool_cidr` is
+  resizable, and `node_id` is the server-observed host — both came from a reader pushing back, not from a
+  measurement.** Neither would have been found by measuring more. Read this paper against the dossier before
+  ruling.
+
+---
+
 # ⛔ 0. THE BOUNDARY, FIRST — BEFORE THE PITCH, NOT AFTER IT
 
 > ## **UNDER PROMPT INJECTION, AUTHENTICATION IS INTACT AND AUTHORIZATION IS INTACT. ONLY *INTENT* IS**
@@ -71,19 +197,33 @@ than by assuming the closest thing fit.
 
 # 3. WHAT IS GENUINELY NEW — the founder's three candidates, argued
 
-## 3a · MCP server as a first-class RESOURCE TYPE — **AGREED, and the precedent already exists**
+## 3a · MCP server as a first-class RESOURCE TYPE — ⛔ **REFUTED BY MEASUREMENT. THIS HALF IS ALREADY SHIPPED.**
 
-`dst_kind` is `CHECK (dst_kind IN ('resource','group','site','k8s_service'))`. **`k8s_service` is the proof**:
-a *named*, non-CIDR destination type was already added to this model once and the compiler absorbed it.
-`resources` are network-addressed (`cidr` + protocol + port range); `k8s_service` is the named one. An
-`mcp_server` destination is **the same shape as a precedent that shipped**, not a speculative extension.
+> **This section previously argued "AGREED, and the precedent already exists — COST: SMALL–MEDIUM." Both
+> halves were wrong, and wrong in the expensive direction: it pointed the work at a migration.**
 
-**So a rule reading `agent:X -> mcp:github-readonly` with an expiry is a vocabulary addition to a proven
-model.** Lowest-risk of the three.
+**A port-scoped `resource` already expresses an MCP server, with ZERO schema change.** The live `resources`
+table carries `cidr` + `protocol ∈ {any,tcp,udp}` + `port_low`/`port_high` under live CHECKs
+(`resources_check`, `resources_port_low_check`). An MCP server at `10.1.2.3:8080/tcp` is a `resource` with
+`protocol=tcp, port_low=port_high=8080`, referenced by the existing `dst_kind='resource'`.
 
-**COST: SMALL–MEDIUM.** One `dst_kind` value + a table + spec paths + compiler arm + a UI panel. No new
-enforcement plane. **SEQUENCE: FIRST — founder-ruled, and for this reason: it is the one item whose precedent
-already shipped.**
+⛔ **AND A NEW `dst_kind` WOULD BE INVISIBLE TO ENFORCEMENT BY CONSTRUCTION.** `hashAllow`
+(`apps/api/internal/policyspec/hash.go:15-21`) is exactly five fields — `{SrcIP, DstCIDR, Protocol, PortLow,
+PortHigh}`. **`dst_kind` never reaches the compiled artifact.** By the time enforcement sees a destination it
+is resolved addresses and ports; a `resource` and a hypothetical `mcp_server` are indistinguishable.
+
+**THE `k8s_service` PRECEDENT CLAIM IS STRUCK.** `policy_rules` uses a **discriminator column per kind** under
+an exclusive-arm CHECK (`policy_rules_check`: each `dst_kind` requires its own `dst_*_id` NOT NULL and the
+other three NULL). So a new kind is **a new column + two constraint rewrites + compiler resolution +
+goldens** — to add something enforcement cannot see. It is not "one enum value".
+
+**NO VERSION BUMP, and the reason is structural rather than a pattern-match to `site`.** `RequiredVersion`
+(`apps/api/internal/policyspec/policyspec.go:128-149`) triggers only on `VIPMappings`/`K8sDNSZones`→7,
+`PoolCIDR`→6, `Routes` or a CIDR `SrcIP`→5, else **4**. A CP-resolved destination emits an `AllowEntry`
+**byte-identical in shape** to a resource's — there is nothing for an old agent to fail to understand, so
+there is nothing to refuse.
+
+**REVISED COST: naming, ownership metadata and UI. Not enforcement machinery.**
 
 ## 3b · AGENT as a third device type — **AGREED on the type, ARGUE with the posture**
 
@@ -135,8 +275,10 @@ in the path of every agent call.** If it is never built, the epic still delivers
 
 # 4. THE COSTS, PLAINLY
 
-- **This is an epic, not a feature.** New principal type, new device type, new destination type, new posture
-  vocabulary, UI on both sides, and — if 3c is in — a new data-path component. **Frontend and backend both.**
+- ⛔ **CORRECTED 2026-08-04: THE DESTINATION TYPE IS NOT NEW WORK** (see 3a). What remains is a **principal
+  design** plus UI — and the two rulings below, which are founder-time rather than build-time.
+  **The build shrank; the decisions did not.** Whether this stays an epic between EPIC 14 and the beta bundle,
+  or becomes a story plus two rulings, is a SEQUENCING RULING and is not made by this paper.
 - **It delays beta by its own length.** That is the decision, stated as a cost rather than buried.
 - ⛔ **THE MCP PROTOCOL IS MOVING FAST. Anything coupled to its wire format may be stale in six months.**
 
