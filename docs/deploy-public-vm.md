@@ -113,3 +113,95 @@ For a throwaway test, `http://` works. For anything real:
   at localhost, or (with TLS) `TUNNEX_COOKIE_SECURE` mismatched the scheme.
 - **"Everything routes through the VPN" doesn't work:** expected — split-tunnel
   only until S3.7 (gateway NAT + forwarding).
+
+---
+
+## Updating a running deployment
+
+⛔ **THIS SECTION EXISTED NOWHERE UNTIL 2026-08-04.** The install steps above were written; the update
+steps were carried in one person's head, on the only live rig. It is written here because it was
+run — every command below was executed against `azure-cp` moving `3b1f892` → `6e01b33`, and the
+verifications are the ones that actually ran.
+
+### ⛔ FIRST: THE EDITION SELECTOR IS A BUILD ARG AND IT IS NOT IN `.env` BY DEFAULT
+
+`docker-compose.yml` builds the API with `TUNNEX_BUILD_TAGS: ${TUNNEX_BUILD_TAGS:-}` — **empty builds
+the OPEN image.** `make up-enterprise` passes it on the command line and does not persist it, so a
+host brought up as enterprise has the tag in **shell history, not in configuration.**
+
+> **A plain `docker compose up -d --build` on an enterprise host silently rebuilds it as OPEN.**
+> Policy, device posture, MFA enforcement and IdP sync begin returning `403 edition_required`, and
+> nothing about the deploy looks like it failed.
+
+**Persist it before the first rebuild:**
+
+```bash
+grep -q '^TUNNEX_BUILD_TAGS=' .env || printf 'TUNNEX_BUILD_TAGS=enterprise\n' >> .env
+```
+
+### Before you change anything
+
+```bash
+cd ~/tunnex
+git rev-parse --short HEAD && git rev-parse --abbrev-ref HEAD   # THE ROLLBACK POINT — write it down
+cp .env .env.bak-predeploy
+curl -sS http://127.0.0.1/api/v1/meta                            # the pre-state you will compare against
+sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -tAc 'SELECT version,dirty FROM schema_migrations;'
+```
+
+**Check the migration delta before deciding this is routine.** No delta means the database is not
+touched and rollback is free; a delta means rollback is no longer a checkout:
+
+```bash
+git ls-tree --name-only origin/main apps/api/db/migrations/ | grep -c up.sql   # compare with HEAD's count
+```
+
+Check `ProtocolVersion` on both sides too (`apps/api/internal/policyspec/policyspec.go`). **A bump
+refuses enrolled gateways** — the gate is fail-closed by design.
+
+### Update
+
+```bash
+git fetch origin main && git checkout -B main origin/main
+sudo TUNNEX_BUILD_TAGS=enterprise docker compose up -d --build --wait
+```
+
+⚠ **`api`, `web`, `nginx` AND `node-agent` restart. `node-agent` on this host IS A GATEWAY and drops
+for the duration of the rebuild** (~30s observed). Gateways on *other* hosts keep their tunnels: the
+data plane is independent of the control plane, and a CP outage surfaces as `agent_renew_failed`
+plus a retry. `postgres`, `redis` and `mailpit` are not rebuilt and do not restart.
+
+⚠ **`.env` is gitignored, so it survives the checkout** — including a digest pin in
+`TUNNEX_NODE_AGENT_IMAGE`. **Prove it survived rather than assuming it: the verification below reads
+the pin back out of the running API.**
+
+### Verify — all five, and none of them optional
+
+```bash
+curl -sS http://127.0.0.1/api/v1/meta
+#   "edition"          -> enterprise      the build-arg trap above
+#   "node_agent_image" -> the digest you pinned, unchanged
+#   "protocol_version" -> unchanged
+sudo docker compose ps --format "{{.Service}} {{.Status}}"           # every service healthy
+sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -c \
+  "SELECT name,status,cert_serial,now()-last_seen_at AS since_seen FROM nodes WHERE status='active';"
+#   serials UNCHANGED and last_seen recent -> enrolled gateways reconnected with their identities
+sudo docker exec tunnex-postgres-1 psql -U tunnex tunnex -tAc 'SELECT version,dirty FROM schema_migrations;'
+#   unchanged, and dirty MUST be f
+```
+
+**Abort condition:** if `edition` is wrong after the rebuild, roll back before doing anything else.
+Do not run further work against a downgraded control plane.
+
+### Rollback
+
+Free when there is no migration delta — the database is never touched:
+
+```bash
+cd ~/tunnex
+git checkout <the branch or sha recorded above>
+sudo TUNNEX_BUILD_TAGS=enterprise docker compose up -d --build --wait
+```
+
+Then re-run the verification block. **If migrations DID run, this is not a rollback** — reverting the
+code leaves the schema ahead of it, and that case needs a down-migration decided in advance.
