@@ -237,9 +237,9 @@ func TestDesiredStateOVPNRosterNotPeer(t *testing.T) {
 		nodeID, org, "s-"+nodeID.String())
 	// a WireGuard device (has a pubkey) + an OpenVPN device (no pubkey, transport openvpn).
 	wgDev, ovDev := uuid.New(), uuid.New()
-	mustExec("INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip,status,transport) VALUES ($1,$2,$3,$4,'wg','WGKEY000000000000000000000000000000000000000=','10.99.0.5','active','wireguard')",
+	mustExec("INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip,status,transport) VALUES ($1, $2, $3, $4, 'wg', 'bAT4o9cZhWwloteFz1RA+SbUVO/MaVA6+jF/B1+atfM=', '10.99.0.5', 'active', 'wireguard')",
 		wgDev, org, user, nodeID)
-	mustExec("INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip,status,transport) VALUES ($1,$2,$3,$4,'ovpn','','10.99.0.6','active','openvpn')",
+	mustExec("INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip,status,transport) VALUES ($1, $2, $3, $4, 'ovpn', '', '10.99.0.6', 'active', 'openvpn')",
 		ovDev, org, user, nodeID)
 
 	node, err := q.GetNodeByCertSerial(ctx, "s-"+nodeID.String())
@@ -255,7 +255,7 @@ func TestDesiredStateOVPNRosterNotPeer(t *testing.T) {
 	// WG peer present, OVPN NOT a peer (no key).
 	var wgPeer, ovPeer bool
 	for _, p := range ds.Peers {
-		if p.PublicKey == "WGKEY000000000000000000000000000000000000000=" {
+		if p.PublicKey == "bAT4o9cZhWwloteFz1RA+SbUVO/MaVA6+jF/B1+atfM=" {
 			wgPeer = true
 		}
 		if p.PublicKey == "" {

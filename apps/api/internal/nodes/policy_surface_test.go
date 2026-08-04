@@ -261,7 +261,7 @@ func TestDesiredStatePolicyErrorScopedByMode(t *testing.T) {
 			}
 			if _, err := tx.Exec(ctx,
 				"INSERT INTO devices (id,org_id,user_id,node_id,name,public_key,assigned_ip) VALUES ($1,$2,$3,$4,$5,$6,$7)",
-				dev, org, user, node, "laptop", "pubkey-a", "10.99.0.2"); err != nil {
+				dev, org, user, node, "laptop", "hKAQzLYMvJffbeFJdJjqG0wlvxqbc4uIUsl7Bds4cZY=", "10.99.0.2"); err != nil {
 				t.Fatalf("device: %v", err)
 			}
 
