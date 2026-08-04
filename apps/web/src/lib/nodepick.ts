@@ -28,7 +28,41 @@ export function selectableNodes(nodes: Node[]): Node[] {
  * merely inconvenient, it burns the artifact. Refusing is the recoverable direction.
  */
 export function defaultDeviceNode(nodes: Node[]): Node | null {
-  return selectableNodes(nodes)[0] ?? null;
+  const eligible = selectableNodes(nodes);
+  // ⛔ ONE ELIGIBLE GATEWAY IS A DEFAULT. TWO IS A QUESTION (S14.21b).
+  //
+  // This returned `eligible[0]` — the FIRST ACTIVE node in `created_at` order. On the live rig that homed a
+  // macOS laptop onto an in-cluster KUBERNETES gateway, because that node was enrolled four days earlier than
+  // the general-purpose VM gateway sitting beside it. The device was minted, and the gateway it was homed on
+  // has never recorded a handshake from any peer.
+  //
+  // > **`nodes[0]` OVER A FILTERED LIST IS STILL `nodes[0]`.** S13.1 replaced "first, including dead ones"
+  // > with "first, excluding dead ones" and left FIRST standing. `created_at` order is an implementation
+  // > detail of `ListNodes` doing duty as a product decision.
+  //
+  // ⛔ AND NOTHING IN THE PAYLOAD CAN DECIDE IT. Measured, not assumed: `Node` carries id · name · status ·
+  // agent_version · enrolled_at · last_seen_at · policy_degraded · site_id · max_policy_version ·
+  // ovpn_health · is_site_hub · policy_degraded_kind. `is_site_hub` is site TOPOLOGY. `capabilities` is not
+  // exposed, and would not help — a VM gateway and a cluster gateway carry the same keys. `endpoint` is not
+  // in the payload at all. There is no kind or type field. The cluster linkage lives in `k8s_clusters`,
+  // keyed by `site_id`, which this path never fetches — and "belongs to a site" is not "cannot serve a
+  // laptop" anyway.
+  //
+  // So the product CANNOT choose correctly from what it has, and a smarter sort would only hide that. The
+  // honest behaviour is to return null and make the caller ask. Returning null is already this function's
+  // answer for "none eligible"; it is now also its answer for "more than one, and I cannot know which".
+  return eligible.length === 1 ? eligible[0] : null;
+}
+
+/**
+ * Does the operator have to choose? True when more than one gateway is eligible.
+ *
+ * Separate from `defaultDeviceNode` returning null, because the two nulls mean OPPOSITE things: "no gateway
+ * can take this device" is an error to explain, and "several can, pick one" is a question to ask. A caller
+ * that cannot tell them apart will render the wrong one.
+ */
+export function requiresGatewayChoice(nodes: Node[]): boolean {
+  return selectableNodes(nodes).length > 1;
 }
 
 /**

@@ -10,7 +10,11 @@ import {
   type Org,
 } from "../lib/api";
 import { relativeAge } from "../lib/format";
-import { defaultDeviceNode, selectableNodes } from "../lib/nodepick";
+import {
+  defaultDeviceNode,
+  requiresGatewayChoice,
+  selectableNodes,
+} from "../lib/nodepick";
 import {
   Badge,
   Button,
@@ -68,6 +72,9 @@ export default function Devices() {
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [fullTunnel, setFullTunnel] = useState(false);
+  // ⛔ S14.21b: the operator's gateway choice. Empty means "not chosen yet", which is DIFFERENT from
+  // "no gateway available" — the form renders those two as different sentences.
+  const [nodeId, setNodeId] = useState<string>("");
   // The one-time export secret (a WireGuard .conf or an OpenVPN .ovpn) + which kind it is (so the
   // ceremony renders a QR for WG only). Cleared on dismiss — never re-fetched (D2).
   const [secret, setSecret] = useState<string | null>(null);
@@ -159,7 +166,11 @@ export default function Devices() {
     //
     // ⚠ THE REWRITE ADDED A THIRD CALL SITE. The fix was written against two; `main` now has three,
     // and a conflict resolution that took either side wholesale would have dropped it silently.
-    const target = defaultDeviceNode(nodes);
+    // ⛔ S14.21b: the CHOSEN gateway wins; the default applies only when there is exactly one.
+    // `defaultDeviceNode` returns null when several are eligible — it will not pick for the operator,
+    // because nothing in the payload lets it pick correctly (see lib/nodepick).
+    const chosen = selectableNodes(nodes).find((n) => n.id === nodeId);
+    const target = chosen ?? defaultDeviceNode(nodes);
     if (!org || !target) return;
     setBusy(true);
     setError(null);
@@ -311,7 +322,15 @@ export default function Devices() {
               />
               Full tunnel
             </label>
-            <Button type="submit" disabled={busy || selectableNodes(nodes).length === 0}>
+            <Button
+              type="submit"
+              disabled={
+                busy ||
+                selectableNodes(nodes).length === 0 ||
+                // Several eligible and none chosen: the button must not act on a guess.
+                (requiresGatewayChoice(nodes) && nodeId === "")
+              }
+            >
               {busy
                 ? "Creating…"
                 : kind === "openvpn"
@@ -319,6 +338,32 @@ export default function Devices() {
                   : "Create device"}
             </Button>
           </div>
+          {/* ⛔ S14.21b: ASK, DO NOT GUESS. The old rule was "the first active gateway in created_at
+              order", which on a real fleet homed a laptop onto an in-cluster Kubernetes gateway
+              because it happened to be enrolled first. Nothing in the payload distinguishes a gateway
+              that can serve a laptop from one that cannot — so the product stops pretending it can. */}
+          {requiresGatewayChoice(nodes) && (
+            <Field label="Gateway">
+              <select
+                id="device-gateway"
+                value={nodeId}
+                onChange={(e) => setNodeId(e.target.value)}
+                className="w-full rounded-md border border-line bg-surface-inset px-3 py-2 text-sm text-ink-body"
+              >
+                <option value="">Choose a gateway…</option>
+                {selectableNodes(nodes).map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {n.name}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-ink-secondary">
+                This device connects through the gateway you pick. There is no safe default when
+                several are enrolled — the config is issued once and cannot be re-issued.
+              </p>
+            </Field>
+          )}
+
           {/* Counts SELECTABLE gateways, not all rows: a fleet whose only gateway is revoked showed no
               warning at all and offered an enabled button. */}
           {selectableNodes(nodes).length === 0 && (
