@@ -4627,3 +4627,20 @@ CI log, not the local run.
 **NOT CHASED, DELIBERATELY.** Recording it beats a guess about docker/alpine/`-mod=readonly` differences.
 **TRIGGER: the next time `make test-editions` disagrees with CI on the same sha** — at that point there are
 two data points and the difference is worth naming.
+
+---
+
+## CORE-FIRST: A NON-BLOCKING FINDING IS COLLECTED, NOT CHASED — FIRST RECORDED INSTANCE
+
+**S15.1 close, 2026-08-04.** Setting up the D14 restore wire-proof, the local stack stopped answering on
+`:80` and a `curl` timed out at two minutes. **It was collected in one line and not investigated.**
+
+⛔ **THAT WAS THE RIGHT CALL AND IT IS WORTH A RECORDED INSTANCE, BECAUSE THE INSTINCT RUNS THE OTHER WAY.**
+The stack is a local rig; nothing about it bears on `main`, on the merge, or on the proof that was owed —
+and the proof itself turned out to be un-runnable for an unrelated and more important reason (no live
+machine credential exists). Chasing the hang would have spent the turn on the least consequential of the
+three facts in front of it.
+
+**The distinction, stated per finding, in one line:** *does the current core deliverable depend on this
+answer?* If yes it halts; if no it is written down and the core continues. ⚠ **Blocking still halts** — in
+the same session, a query-lint failure that WAS mine and WAS in the gate path stopped the work until fixed.
