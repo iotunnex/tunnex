@@ -1644,6 +1644,16 @@ function GroupsResourcesSection({
                         {r.cidr} · {r.protocol}/
                         {portLabel(r.port_low, r.port_high)}
                       </span>
+                      {/* ⛔ THE OPERATOR'S OWN NOTE (S15.3), RENDERED AS WRITTEN. It is an ASSERTION, never
+                          an inference — the product cannot detect what a destination speaks, and a label
+                          the system generated would claim a capability it does not have.
+                          ⚠ Rendered only when set, so an unlabelled resource shows nothing rather than an
+                          empty chip: the field is optional and must LOOK optional. */}
+                      {r.label && (
+                        <span className="ml-2 rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-secondary">
+                          {r.label}
+                        </span>
+                      )}
                     </span>
                     {canManage && (
                       <Button

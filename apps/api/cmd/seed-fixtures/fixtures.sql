@@ -766,6 +766,15 @@ ON CONFLICT (id) DO NOTHING;
 -- reviewer lands on by default.
 -- ─────────────────────────────────────────────────────────────────────────────────────────────────
 
+-- ⚠ A DEDICATED USER FOR THE DEPARTED-OWNER STATE. Using an existing fixture member and deleting their
+-- membership would disturb the Users screen; this user exists only to leave. The membership is created and
+-- then removed, which is exactly how the state arises in life: the person was a member when they authorised
+-- the agent, and is not one now.
+INSERT INTO users (id, email, name, email_verified_at)
+VALUES ('01900000-0000-7000-8000-00000000b001', 'departed@demo.tunnex.local', 'Dana (left the org)', now())
+ON CONFLICT (id) DO NOTHING;
+DELETE FROM memberships WHERE user_id = '01900000-0000-7000-8000-00000000b001';
+
 -- Two agent gateways. Both are real `nodes` rows so the surface's node-half resolves.
 INSERT INTO nodes (id, org_id, name, cert_serial, agent_version, owner_user_id)
 VALUES
@@ -773,11 +782,19 @@ VALUES
   ('01900000-0000-7000-8000-00000000a001', '01900000-0000-7000-8000-000000000001',
    'mcp-agent-prod', 'fixture-serial-ag001', '1.4.0',
    (SELECT id FROM users WHERE email = 'owner@demo.tunnex.local')),
-  -- ⛔ STATE 2 — UNATTRIBUTABLE. No owner: enrolled with a token minted before the issuer column existed.
-  -- It RUNS and policy still applies to it; what is lost is the audit trail. This is the screen's most
-  -- important row and the one an operator can learn nowhere else.
+  -- ⛔ STATE 2 — THE OWNER WHO LEFT THE ORG. The node keeps its recorded owner (the join token's issuer),
+  -- and that person is no longer a member. `owner_email` resolves from `users`, which survives the
+  -- membership going away (S15.1/D22) — so the agent stays ATTRIBUTABLE and the screen can still name who
+  -- authorised it. This is the degraded state the product can ACTUALLY reach.
+  --
+  -- ⚠ THE STATE THIS REPLACED WAS IMPOSSIBLE, AND THE FIXTURE WAS THE ONLY PLACE IT COULD EXIST. It set
+  -- `nodes.owner_user_id = NULL` while giving the agent a device row — and `allocateAgentDevice` runs only
+  -- when the token carries an issuer, setting NODE and DEVICE owner to the SAME person. An unowned agent
+  -- gets no device row at all. The fixture manufactured a contradiction the product cannot produce, and it
+  -- rendered as two opposite claims about one device on one screen.
   ('01900000-0000-7000-8000-00000000a002', '01900000-0000-7000-8000-000000000001',
-   'mcp-agent-legacy', 'fixture-serial-ag002', '1.2.0', NULL)
+   'mcp-agent-departed', 'fixture-serial-ag002', '1.2.0',
+   '01900000-0000-7000-8000-00000000b001')
 ON CONFLICT (id) DO NOTHING;
 
 -- The agent device rows — `kind='agent'`, which is what makes the surface recognise them.
@@ -792,11 +809,13 @@ VALUES
    (SELECT id FROM users WHERE email = 'owner@demo.tunnex.local'),
    '01900000-0000-7000-8000-00000000a001', 'mcp-agent-prod', 'agent',
    'pending-agent-01900000-0000-7000-8000-00000000a001', '10.99.0.31', 'active', 'agent', 'wireguard'),
-  -- ⛔ STATE 3 — NO ADDRESS. An agent that never received a /32 cannot be named in a flow event at all.
-  -- The screen must render "no address" rather than hiding the row or inventing one.
+  -- ⛔ STATE 3 — NO ADDRESS. An agent whose /32 allocation did not land cannot be named in a flow event at
+  -- all. The screen must render "no address" rather than hiding the row or inventing one.
+  -- ⚠ THE DEVICE'S USER IS THE NODE'S OWNER, because the product sets both from the SAME issuer. Setting
+  -- them independently is what produced two contradictory claims about one device.
   ('01900000-0000-7000-8000-00000000d002', '01900000-0000-7000-8000-000000000001',
-   (SELECT id FROM users WHERE email = 'owner@demo.tunnex.local'),
-   '01900000-0000-7000-8000-00000000a002', 'mcp-agent-legacy', 'agent',
+   '01900000-0000-7000-8000-00000000b001',
+   '01900000-0000-7000-8000-00000000a002', 'mcp-agent-departed', 'agent',
    'pending-agent-01900000-0000-7000-8000-00000000a002', NULL, 'active', 'agent', 'wireguard')
 ON CONFLICT (id) DO NOTHING;
 
@@ -815,3 +834,26 @@ ON CONFLICT (id) DO NOTHING;
 -- ⚠ STATE 6 — AN AGENT WITH NO REACHABLE DESTINATIONS is `mcp-agent-legacy`: NO grant references it, and
 -- that absence is deliberate. It is not a gap in the fixture; it is the state an operator most needs to
 -- recognise — an agent that exists, runs, and can reach nothing.
+
+
+-- ⛔ AND THE STATE THAT IS NOT SEEDED, DECLARED RATHER THAN OMITTED: **UNATTRIBUTABLE**.
+--
+-- An agent with no owner is UNREACHABLE IN THE PRODUCT'S OWN DATA MODEL, and the reason is structural:
+-- `allocateAgentDevice` runs only when the join token carries an issuer, so an unowned agent gets NO
+-- `kind='agent'` device row — and with no agent row it is **indistinguishable from a plain gateway**.
+--
+-- > **THE SCREEN'S MOST IMPORTANT STATE CANNOT OCCUR.** The renderer handles it (agentview.ts, tested), so
+-- > the surface is correct if the state ever arrives — but nothing can currently produce it, and a fixture
+-- > that faked it was manufacturing a contradiction rather than exercising a path.
+--
+-- ⚠ SUBSTITUTE: the unit tests in `apps/web/test/agentview.test.ts` cover the unattributable rendering and
+-- its sort order. NAMED TRIGGER: whenever a node gains an agent marker independent of its device row — the
+-- decide-item registered from S15.3.
+-- The grant below makes `mcp-agent-prod` reach a labelled destination, so the screen has one agent that
+-- reaches something and one that reaches nothing.
+INSERT INTO policy_rules (id, org_id, src_kind, src_user_id, dst_kind, dst_resource_id)
+SELECT '01900000-0000-7000-8000-00000000e001', '01900000-0000-7000-8000-000000000001',
+       'user', (SELECT id FROM users WHERE email = 'owner@demo.tunnex.local'),
+       'resource', '01900000-0000-7000-8000-00000000c001'
+WHERE EXISTS (SELECT 1 FROM resources WHERE id = '01900000-0000-7000-8000-00000000c001')
+ON CONFLICT (id) DO NOTHING;

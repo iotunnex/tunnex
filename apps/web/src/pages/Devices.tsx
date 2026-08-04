@@ -299,6 +299,19 @@ export default function Devices() {
           only what they are granted. Each is shown with the person who authorised it into this
           organization.
         </p>
+        {/* ⛔ THE COPY ABOVE SAYS AGENTS "REACH ONLY WHAT THEY ARE GRANTED", AND NOTHING ON THIS SCREEN
+            SHOWED WHAT ANY AGENT REACHES. A claim with no route to its evidence is a claim the reader
+            cannot check.
+            ⚠ A LINK, NOT A LIST. Rendering an agent's destinations here would be a second surface deriving
+            the same fact as Access Policies — the one-truth class, and the two would diverge exactly where
+            it matters. The honest move is to say where the answer lives. */}
+        <p className="mt-2 text-[11px] text-ink-secondary">
+          What each agent may reach is set by the grants on{" "}
+          <Link to="/access" className="text-slate-300 underline">
+            Access Policies
+          </Link>
+          . An agent with no grant reaches nothing.
+        </p>
         {(() => {
           const rows = agentRows(nodes, devices);
           if (rows.length === 0) {
