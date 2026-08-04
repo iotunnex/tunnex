@@ -154,7 +154,7 @@ indication that another org exists. The product silently behaves as single-org.
 
 ### How it was found — a fixture that proved the wrong thing
 
-A second org (`demo-migrated`) was seeded so the **all-owned banner** would have a reachable state, since
+A second org (`demo-eu`) was seeded so the **all-owned banner** would have a reachable state, since
 one unassigned row anywhere in an org suppresses it. The seeding was correct and verified by count in
 both databases. **The state was still unreviewable, because no reviewer can navigate to that org.**
 
@@ -172,9 +172,9 @@ Ordering is by `created_at`, so which org is `orgs[0]` can be chosen:
 
 ```sql
 -- show the all-owned org
-UPDATE organizations SET created_at = now() - interval '10 years' WHERE slug = 'demo-migrated';
+UPDATE organizations SET created_at = now() - interval '10 years' WHERE slug = 'demo-eu';
 -- put the four per-row states back
-UPDATE organizations SET created_at = now() - interval '1 hour'   WHERE slug = 'demo-migrated';
+UPDATE organizations SET created_at = now() - interval '1 hour'   WHERE slug = 'demo-eu';
 ```
 
 ⛔ **This is a review procedure and must never be read as the state being reachable in the product.** It
@@ -210,3 +210,31 @@ instead of N times.
 
 **Not fixed here** by instruction, and correctly: it is not S15.1's, and fixing it silently would have
 removed the evidence for this row.
+
+---
+
+## ⚠ 4 — A FIXTURE PUT ON SCREEN THE EXACT PHRASE THE PRODUCT IS BARRED FROM SAYING
+
+**Status: FIXED (fixture rename, `demo-migrated` → `demo-eu`, `Demo — migration complete` → `Demo EU`).**
+
+The all-owned banner is deliberately a claim about **ownership, not health**, and a test rejects
+`migration is complete`, `everything`, `all good/well/fine`, `healthy`. The fixture org created to make
+that banner reachable was named **`Demo — migration complete`** — so a reviewer saw *"migration
+complete"* twice on the screen, in the org name and the page subtitle, while the banner two lines below
+was forbidden from saying it.
+
+⛔ **A FIXTURE IS COPY. IT RENDERS.** The test pinned the component and the fixture walked the phrase in
+through the org name — a channel no assertion about the component can see, because it is not the
+component's text. The screen said the banned thing; nothing that guards the banner was wrong.
+
+> ## **A CONSTRAINT ENFORCED ON ONE SOURCE OF TEXT IS NOT ENFORCED ON THE SCREEN.** The banner's rule is
+> ## about what the product may claim. Every string that lands beside it — org names, page titles, seeded
+> ## entity names — is subject to the same rule and is covered by none of the same tests.
+
+⚠ **And it was written by the same person who wrote the ban, in the same session.** The rule was held
+about the component and not about the surface.
+
+### Not fixed by the rename
+
+The fixture is also **not reachable in the product** — it is reached by database ordering (row 2). The
+rename removes the false claim; it does not make the state reviewable by a user.
