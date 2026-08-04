@@ -241,8 +241,12 @@ func (s *Service) IssueJoinToken(ctx context.Context, actor, orgID uuid.UUID, no
 		namePin = &nodeName
 	}
 	err = s.withTx(ctx, func(q *sqlc.Queries) error {
+		// ⛔ THE ACTOR WAS ALWAYS IN HAND AND WAS ALWAYS THROWN AWAY (S15.2 slice 1). This function has
+		// received `actor` since it was written and wrote it to the audit log ALONE, so every token minted
+		// before 0066 discarded its issuer to a table nobody joins against. One parameter, and it stops.
 		if _, e := q.CreateJoinToken(ctx, sqlc.CreateJoinTokenParams{
 			OrgID: orgID, NodeName: namePin, TokenHash: hash, ExpiresAt: time.Now().Add(joinTokenTTL),
+			IssuedBy: pgtype.UUID{Bytes: actor, Valid: actor != uuid.Nil},
 		}); e != nil {
 			return e
 		}
@@ -289,9 +293,14 @@ func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentV
 		if e != nil {
 			return apierr.BadRequest("invalid_csr", "could not sign the certificate request")
 		}
+		// ⚠ THE OWNER IS THE TOKEN'S ISSUER, AND THE NAME MATTERS (rank-2 ruling). Enrolment is this agent
+		// redeeming a token UNATTENDED — no human is present — so the installer is not capturable at all.
+		// What is carried here is who AUTHORISED this agent into the org, never who installed it.
+		// ⚠ May be NULL for a token minted before 0066. D25 ruled an agent is NEVER refused at use for want
+		// of an owner: it degrades and is flagged. The refusal is at ENROLMENT and lands in slice 2.
 		node, e := q.CreateNode(ctx, sqlc.CreateNodeParams{OrgID: tok.OrgID, Name: nodeName, CertSerial: iss.Serial,
 			AgentVersion: agentVersion, CertNotAfter: pgtype.Timestamptz{Time: iss.NotAfter, Valid: true},
-			CertPublicKey: spkiText(iss.PublicKeySPKI)})
+			CertPublicKey: spkiText(iss.PublicKeySPKI), OwnerUserID: tok.IssuedBy})
 		if e != nil {
 			if pgerr.IsUnique(e) {
 				return apierr.Conflict("node_exists", "a node with this name already exists")

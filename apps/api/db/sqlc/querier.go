@@ -168,6 +168,12 @@ type Querier interface {
 	// Create a fresh Tunnex group already bound to an IdP group (origin='idp_sync').
 	CreateIdpSyncGroup(ctx context.Context, arg CreateIdpSyncGroupParams) (UserGroup, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
+	// ⛔ issued_by IS THE HUMAN, AND IT WAS ALREADY IN HAND (S15.2 slice 1).
+	// IssueJoinToken has always received the actor and written them to the audit log ALONE, so every token
+	// minted before this column existed discarded its issuer to a table nobody joins against. The fact existed
+	// at exactly the moment it was thrown away.
+	// ⚠ ISSUED_BY, NOT OWNER: enrolment is an agent redeeming this token unattended, so the installer is not
+	// capturable by construction. This column claims only what happened, never who installed the agent.
 	CreateJoinToken(ctx context.Context, arg CreateJoinTokenParams) (NodeJoinToken, error)
 	// S10.3: Kubernetes cluster + exposed-Service queries. Org-scoped (tenant isolation).
 	CreateK8sCluster(ctx context.Context, arg CreateK8sClusterParams) (K8sCluster, error)
@@ -179,6 +185,9 @@ type Querier interface {
 	// ── mfa_challenges (the login second-step token — NOT a session) ───────────────────
 	// lint:cross-org — user-scoped login challenge (pre-session, no org context).
 	CreateMfaChallenge(ctx context.Context, arg CreateMfaChallengeParams) error
+	// owner_user_id is carried from the redeemed token's issuer (S15.2 slice 1). ⚠ It may be NULL: tokens minted
+	// before 0066 have no issuer and never will, and D25 ruled an agent is NEVER refused at use for want of an
+	// owner — it degrades and is flagged. The refusal lives at enrolment (slice 2), on NEW nodes.
 	CreateNode(ctx context.Context, arg CreateNodeParams) (Node, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	// ── policy_rules (allow grants) ─────────────────────────────────────────────────
