@@ -255,7 +255,9 @@ export function assembleTopology(
         // other with the instructional one urging an operator to undo a deliberate revocation. Suppressed here,
         // in the view-model, rather than in the component: the same fix in Gateways.tsx was component-local and
         // that is precisely why this second surface still had the defect.
-        health: n.status === "revoked" ? null : policyHealthBadge(n),
+        // S14.21: the revoked guard moved INTO policyHealthBadge. Restating it here was the copy-paste
+        // that made the rule a caller responsibility in the first place.
+        health: policyHealthBadge(n),
         siteLinkNote: siteLinkNote(n), // WF-B: independent of `health` — the demoted-dead-peer subordinate line
         maxPolicyVersion: n.max_policy_version ?? null,
         agentVersion: n.agent_version,

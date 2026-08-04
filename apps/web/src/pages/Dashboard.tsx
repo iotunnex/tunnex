@@ -38,7 +38,7 @@ import {
   Loading,
   Panel,
 } from "../components/ui";
-import { policyHealthBadge } from "../lib/healthview";
+import { gatewayHealthRow, policyHealthBadge } from "../lib/healthview";
 import {
   isFreshOrg,
   sortGateways,
@@ -288,7 +288,10 @@ export default function Dashboard() {
               : [
                   ...(nodesRes?.ok
                     ? nodesRes.data
-                        .filter((n) => n.policy_degraded)
+                        // ⛔ RE-SOURCED THROUGH THE VERDICT (S14.21). A raw `n.policy_degraded` read
+                        // bypasses the function that owns the rule, so a REVOKED gateway could be listed
+                        // as needing attention — a decommissioned machine asking for repair.
+                        .filter((n) => policyHealthBadge(n) !== null)
                         .map((n) => ({
                           key: `gw-${n.id}`,
                           text: `${n.name}: ${policyHealthBadge(n)?.label ?? "degraded"}`,
@@ -308,8 +311,12 @@ export default function Dashboard() {
 
             // Sub-lines are QUALIFICATIONS, and each is `null` when there is nothing honest to say. A sub-line
             // is never filler: an unqualified number is a smaller claim than a wrongly-qualified one.
+            // ⛔ SAME RE-SOURCING, AND THIS IS THE ONE THE TYPE CANNOT PROTECT. A raw field read bypasses
+            // any function; the widened signature ENABLES this call and cannot FORCE it. The class stays
+            // open by construction — `policy_degraded` remains readable — so this line is a decision, not
+            // a guarantee.
             const degraded = nodesRes?.ok
-              ? nodesRes.data.filter((n) => n.policy_degraded).length
+              ? nodesRes.data.filter((n) => policyHealthBadge(n) !== null).length
               : null;
             const pendingInvites = null; // no endpoint for pending invites — the slot stays empty, not invented
             const siteSub = sitesRes?.ok
@@ -508,17 +515,12 @@ export default function Dashboard() {
                       <List label="Gateway health">
                         {sortGateways(
                           nodesRes.data.map((n): GatewayRow => {
-                            const b = policyHealthBadge(n);
-                            return {
-                              id: n.id,
-                              name: n.name,
-                              label: b ? b.label : "healthy",
-                              tone: b
-                                ? b.tone === "unknown"
-                                  ? "neutral"
-                                  : b.tone
-                                : "ok",
-                            };
+                            // ⛔ THE ROW VERDICT IS NOT FORMED HERE (S14.21). This panel used to read
+                            // `b ? b.label : "healthy"` — turning "no badge" into the CLAIM "healthy",
+                            // which is what put a green verdict on a revoked gateway. Deciding it here at
+                            // all was the defect; gatewayHealthRow owns it now.
+                            const v = gatewayHealthRow(n);
+                            return { id: n.id, name: n.name, label: v.label, tone: v.tone };
                           }),
                         ).map((g) => (
                           <ListItem key={g.id}>

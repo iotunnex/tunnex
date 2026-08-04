@@ -1,11 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { policyHealthBadge, siteLinkNote } from "../src/lib/healthview";
+import { gatewayHealthRow, policyHealthBadge, siteLinkNote } from "../src/lib/healthview";
 import type { Node } from "../src/lib/api";
 
-const node = (degraded: boolean, kind?: Node["policy_degraded_kind"]) =>
-  ({ policy_degraded: degraded, policy_degraded_kind: kind }) as Pick<
+// ⛔ `status` IS NOW PART OF THE VERDICT'S INPUT (S14.21), so the helper must supply it. This file did
+// not compile after the widening, which is the point: a caller that omits status no longer type-checks.
+const node = (
+  degraded: boolean,
+  kind?: Node["policy_degraded_kind"],
+  status: Node["status"] = "active",
+) =>
+  ({ status, policy_degraded: degraded, policy_degraded_kind: kind }) as Pick<
     Node,
-    "policy_degraded" | "policy_degraded_kind"
+    "status" | "policy_degraded" | "policy_degraded_kind"
   >;
 
 describe("policyHealthBadge — bool primary, kind refines, never less alarmed", () => {
@@ -101,10 +107,64 @@ describe("siteLinkNote — WF-B subordinate line, independent of the headline ba
   it("the note is INDEPENDENT of policy_degraded_kind — a healthy headline can still carry it (the walk's state)", () => {
     // The CP only sets the note when the headline is NOT site_link_down; the render shows both truths distinct.
     const healthyHeadline = {
+      status: "active",
       policy_degraded: false,
       policy_degraded_kind: "healthy",
-    } as Pick<Node, "policy_degraded" | "policy_degraded_kind">;
+    } as Pick<Node, "status" | "policy_degraded" | "policy_degraded_kind">;
     expect(policyHealthBadge(healthyHeadline)).toBeNull(); // headline healthy
     expect(siteLinkNote(n("aws-gw-1", true))).not.toBeNull(); // + a subordinate named line
+  });
+});
+
+// ⛔ THE DEFECT THIS FILE EXISTS TO PREVENT RECURRING — a FOURTH time.
+//
+// A revoked gateway rendered the literal word "healthy", in green, on the deployed dashboard. Fixed in
+// Gateways.tsx at EPIC 11 and in sitesview.ts at S13.1 — both at the site where it was SEEN, so it kept
+// coming back at the next consumer. The verdict is formed here; the guard belongs here.
+describe("⛔ a revoked gateway gets NO health verdict — not a healthy one, not a degraded one", () => {
+  it("revoked + not degraded → null (this is the one that rendered as green 'healthy')", () => {
+    expect(policyHealthBadge(node(false, undefined, "revoked"))).toBeNull();
+  });
+
+  it("revoked + degraded → STILL null — revoked outranks every kind", () => {
+    // "site link down" on a deliberately-revoked node instructs an operator to repair something that was
+    // decommissioned on purpose. The state IS revoked; a degradation badge beside it describes a machine
+    // that is no longer meant to work.
+    expect(policyHealthBadge(node(true, "site_link_down", "revoked"))).toBeNull();
+    expect(policyHealthBadge(node(true, undefined, "revoked"))).toBeNull();
+  });
+
+  it("an ACTIVE gateway is unaffected — the guard must not swallow real verdicts", () => {
+    expect(policyHealthBadge(node(true, "site_link_down", "active"))).not.toBeNull();
+    expect(policyHealthBadge(node(true, undefined, "active"))?.label).toBe("degraded");
+  });
+});
+
+// ⛔ THE LAST VERDICT THAT LIVED OUTSIDE THIS MODULE.
+//
+// The Dashboard panel read `b ? b.label : "healthy"` — turning "no badge" into the CLAIM "healthy". That is
+// how a revoked gateway rendered green on the deployed dashboard, and the widened signature could not have
+// stopped it: policyHealthBadge correctly returned null, and the CALLER invented the verdict from the absence.
+describe("⛔ gatewayHealthRow — 'no badge' is not 'healthy'", () => {
+  it("a revoked gateway reads REVOKED, neutral — never healthy, never degraded", () => {
+    expect(gatewayHealthRow(node(false, undefined, "revoked"))).toEqual({
+      label: "revoked",
+      tone: "neutral",
+    });
+    // revoked outranks a degraded kind: the machine is not meant to work at all.
+    expect(gatewayHealthRow(node(true, "site_link_down", "revoked"))).toEqual({
+      label: "revoked",
+      tone: "neutral",
+    });
+  });
+
+  it("an active, undegraded gateway is healthy — the guard must not swallow the ordinary case", () => {
+    expect(gatewayHealthRow(node(false))).toEqual({ label: "healthy", tone: "ok" });
+  });
+
+  it("an active, degraded gateway carries the badge's own label and tone", () => {
+    const v = gatewayHealthRow(node(true, "site_link_down"));
+    expect(v.label).not.toBe("healthy");
+    expect(v.tone).not.toBe("ok");
   });
 });

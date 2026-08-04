@@ -50,7 +50,8 @@ export function toGatewayRow(
     id: n.id,
     name: n.name,
     status: n.status,
-    health: n.status === "revoked" ? null : policyHealthBadge(n),
+    // S14.21: guard moved into policyHealthBadge — this line was the second copy of it.
+    health: policyHealthBadge(n),
     ovpnHealth: n.status === "revoked" ? null : (n.ovpn_health ?? null),
     agentVersion: n.agent_version,
     siteId: n.site_id ?? null,
