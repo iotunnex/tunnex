@@ -282,6 +282,7 @@ func (s apiServer) CreatePolicyRule(ctx context.Context, req api.CreatePolicyRul
 		SrcUserID:       req.Body.SrcUserId,
 		SrcSiteID:       req.Body.SrcSiteId, // S8.2: src_kind=site
 		SrcCIDR:         req.Body.SrcCidr,   // S8.7: src_kind=cidr
+		SrcNodeID:       req.Body.SrcNodeId, // S15.3: src_kind=agent
 		DstKind:         string(req.Body.DstKind),
 		DstResourceID:   req.Body.DstResourceId,
 		DstGroupID:      req.Body.DstGroupId,
@@ -502,6 +503,10 @@ func toAPIRule(r sqlc.PolicyRule, cidrOutside, k8sVanished bool) api.PolicyRule 
 	if r.SrcSiteID.Valid { // S8.2: src_kind=site
 		u := uuid.UUID(r.SrcSiteID.Bytes)
 		out.SrcSiteId = &u
+	}
+	if r.SrcNodeID.Valid { // S15.3: src_kind=agent
+		n := uuid.UUID(r.SrcNodeID.Bytes)
+		out.SrcNodeId = &n
 	}
 	if r.SrcCidr != nil { // S8.7: src_kind=cidr
 		out.SrcCidr = r.SrcCidr

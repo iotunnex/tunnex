@@ -408,6 +408,7 @@ describe("S8.2c D5 ruleBody — the Access builder now creates SITE-subject rule
     srcUser: "u1",
     srcSite: "s1",
     srcCidr: "172.31.17.64/32",
+    srcAgent: "",
     dstGroup: "g2",
     dstResource: "r1",
     dstSite: "s2",

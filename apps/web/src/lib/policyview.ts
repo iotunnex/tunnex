@@ -527,12 +527,13 @@ export function defaultSrcKind(i: {
 }
 
 export interface RuleBodyInput {
-  srcKind: "group" | "user" | "site" | "cidr";
+  srcKind: "group" | "user" | "site" | "cidr" | "agent";
   dstKind: "group" | "resource" | "site" | "k8s_service";
   src: string; // group id
   srcUser: string;
   srcSite: string;
   srcCidr: string; // S8.7: literal source CIDR (src_kind='cidr')
+  srcAgent: string; // S15.3: the agent node id (src_kind='agent')
   dstGroup: string;
   dstResource: string;
   dstSite: string;
@@ -549,7 +550,11 @@ export function ruleBody(i: RuleBodyInput): CreatePolicyRuleRequest {
         ? { src_kind: "site" as const, src_site_id: i.srcSite }
         : i.srcKind === "cidr" // S8.7: a literal source CIDR (free-text, server-validated)
           ? { src_kind: "cidr" as const, src_cidr: i.srcCidr }
-          : { src_kind: "group" as const, src_group_id: i.src };
+          : // S15.3: ONE agent's own /32. Not the node — the agent's device on it, resolved by the
+            // compiler, so a grant to an agent never becomes a grant to every device behind its gateway.
+            i.srcKind === "agent"
+            ? { src_kind: "agent" as const, src_node_id: i.srcAgent }
+            : { src_kind: "group" as const, src_group_id: i.src };
   const dstPart =
     i.dstKind === "group"
       ? { dst_kind: "group" as const, dst_group_id: i.dstGroup }

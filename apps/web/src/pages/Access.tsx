@@ -1076,7 +1076,27 @@ function RuleFormModal({
   // (empty group select) until BOTH dropdowns are flipped — a dead end. Default to the kind that's actually
   // available so a fresh site-to-site org can Create immediately.
   const hasGroups = groups.length > 0;
-  const [srcKind, setSrcKind] = useState<"group" | "user" | "site" | "cidr">(
+  // ⛔ S15.3 — agents enrolled in this org, offered as a policy SOURCE. Without this the AI-agents screen
+  // says an agent "reaches only what it is granted" and nothing could grant it anything: a capability the
+  // product had and the operator could not reach.
+  const [agents, setAgents] = useState<Array<{ node_id: string; name: string; enrolment_kind: string }>>([]);
+  const [srcAgent, setSrcAgent] = useState("");
+  // ⚠ Enterprise-only endpoint: a 403 is a SUCCESSFUL refusal, so the list simply stays empty and the
+  // "AI agent" option is never offered. It must not surface as an error in a rule dialog.
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .GET("/api/v1/organizations/{orgId}/agents", { params: { path: { orgId } } })
+      .then(({ data, error }) => {
+        if (cancelled || error || !data) return;
+        setAgents(data as Array<{ node_id: string; name: string; enrolment_kind: string }>);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId]);
+  const [srcKind, setSrcKind] = useState<"group" | "user" | "site" | "cidr" | "agent">(
     defaultSrcKind({
       editingKind:
         editing?.src_kind === "user"
@@ -1143,6 +1163,7 @@ function RuleFormModal({
       dstKind,
       src,
       srcUser,
+      srcAgent,
       srcSite,
       srcCidr,
       dstGroup,
@@ -1242,7 +1263,9 @@ function RuleFormModal({
             <Select
               value={srcKind}
               onChange={(e) =>
-                setSrcKind(e.target.value as "group" | "user" | "site" | "cidr")
+                setSrcKind(
+                  e.target.value as "group" | "user" | "site" | "cidr" | "agent",
+                )
               }
             >
               <option value="group">Group</option>
@@ -1251,8 +1274,29 @@ function RuleFormModal({
                 <option value="site">Site (a LAN behind a gateway)</option>
               )}
               <option value="cidr">CIDR (a specific host or subnet)</option>
+              {/* ⚠ OFFERED ONLY WHEN ONE EXISTS. An empty picker for a kind with no members is a control
+                  that can only fail — the same reasoning that keeps `site` conditional above. */}
+              {agents.length > 0 && (
+                <option value="agent">AI agent</option>
+              )}
             </Select>
           </Field>
+          {/* ⛔ ONLY DECLARED AGENTS ARE OFFERED. A node whose enrolment kind was never recorded is
+              UNDETERMINED — granting to it would assert it is an agent, which is the fact nobody has. */}
+          {srcKind === "agent" && (
+            <Field label="Source agent">
+              <Select value={srcAgent} onChange={(e) => setSrcAgent(e.target.value)}>
+                <option value="">Choose an agent…</option>
+                {agents
+                  .filter((a) => a.enrolment_kind === "agent")
+                  .map((a) => (
+                    <option key={a.node_id} value={a.node_id}>
+                      {a.name}
+                    </option>
+                  ))}
+              </Select>
+            </Field>
+          )}
           {srcKind === "cidr" && (
             <Field label="Source CIDR">
               <Input

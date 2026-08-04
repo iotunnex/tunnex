@@ -79,6 +79,7 @@ type Rule struct {
 	SrcUserID       uuid.UUID
 	SrcSiteID       uuid.UUID // S8.2: src_kind='site' — resolved to the SOURCE site's subnet CIDRs
 	SrcCIDR         string    // S8.7: src_kind='cidr' — a LITERAL source CIDR, placed on its containing site's gateway
+	SrcNodeID       uuid.UUID // S15.3: src_kind='agent' — the agent whose OWN /32 is the source
 	DstKind         string
 	DstResourceID   uuid.UUID
 	DstGroupID      uuid.UUID
@@ -143,6 +144,10 @@ type Device struct {
 	UserID     uuid.UUID
 	NodeID     uuid.UUID
 	AssignedIP string
+	// Kind (S15.3) — 'human' | 'agent'. Used ONLY to match a src_kind='agent' rule to the agent's own
+	// device. ⚠ It never enters the enforcement projection: the artifact still emits SrcIP/DstCIDR/
+	// Protocol/PortLow/PortHigh, and `hashAllow` is unchanged.
+	Kind string
 }
 
 // Snapshot is the full org policy state the compiler consumes.
@@ -393,7 +398,12 @@ func Compile(s Snapshot) map[uuid.UUID]policyspec.Compiled {
 			// owner IS that user; a "group" rule matches iff the owner is in the group
 			// (the pre-S7.5.4 path, and the default for legacy blank src_kind).
 			var matched bool
-			if r.SrcKind == "user" {
+			if r.SrcKind == "agent" {
+				// ⛔ AN AGENT RULE MATCHES EXACTLY ONE DEVICE: the agent's OWN row on the named node.
+				// Matching on node alone would also grant every HUMAN device homed on that gateway — a
+				// grant to an agent silently becoming a grant to everyone behind it.
+				matched = r.SrcNodeID == d.NodeID && d.Kind == "agent"
+			} else if r.SrcKind == "user" {
 				matched = r.SrcUserID == d.UserID
 			} else {
 				matched = owner[r.SrcGroupID]

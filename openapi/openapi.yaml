@@ -2767,11 +2767,12 @@ components:
         id: { type: string, format: uuid }
         org_id: { type: string, format: uuid }
         # S7.5.4: the SOURCE subject is a group or a single user; S8.2: or a site's LAN; S8.7: or a literal CIDR (exactly one src_* set).
-        src_kind: { type: string, enum: [group, user, site, cidr] }
+        src_kind: { type: string, enum: [group, user, site, cidr, agent] }
         src_group_id: { type: string, format: uuid, nullable: true }
         src_user_id: { type: string, format: uuid, nullable: true }
         src_site_id: { type: string, format: uuid, nullable: true }
         src_cidr: { type: string, nullable: true, description: "Set when src_kind=cidr (S8.7): a literal source CIDR (/32-precise)." }
+        src_node_id: { type: string, format: uuid, nullable: true, description: "S15.3 — set when src_kind=agent: the agent whose /32 is the source." }
         # S8.7 warn-not-refuse: true when src_cidr is not inside any current org range (site subnet / routed range / device pool) — a rule matching nothing (a silent no-op wearing a rule's face). DERIVED at read time from CURRENT ranges, so it sheds once the range lands. false for non-cidr sources.
         cidr_outside_org_ranges: { type: boolean }
         dst_kind: { type: string, enum: [resource, group, site, k8s_service] }
@@ -2791,11 +2792,12 @@ components:
       additionalProperties: false
       properties:
         # src_kind defaults to "group" when omitted (back-compat). user => src_user_id; site => src_site_id (S8.2); cidr => src_cidr (S8.7).
-        src_kind: { type: string, enum: [group, user, site, cidr] }
+        src_kind: { type: string, enum: [group, user, site, cidr, agent] }
         src_group_id: { type: string, format: uuid, nullable: true, description: Required when src_kind=group (or omitted). }
         src_user_id: { type: string, format: uuid, nullable: true, description: Required when src_kind=user (a current org member). }
         src_site_id: { type: string, format: uuid, nullable: true, description: "Required when src_kind=site (S8.2); the compiler resolves it to the source site's approved subnet CIDRs (the LAN source)." }
         src_cidr: { type: string, nullable: true, description: "Required when src_kind=cidr (S8.7): a literal source CIDR, e.g. 172.31.17.64/32. Validated well-formed; org-range meaningfulness is a read-time warning, not a creation refusal (warn-not-refuse)." }
+        src_node_id: { type: string, format: uuid, nullable: true, description: "Required when src_kind=agent (S15.3): the agent whose own /32 is the source. Resolves exactly as a user-source resolves to that user's device — an agent IS a device, and this names which one." }
         dst_kind: { type: string, enum: [resource, group, site, k8s_service] }
         dst_resource_id: { type: string, format: uuid, nullable: true, description: Required when dst_kind=resource. }
         dst_group_id: { type: string, format: uuid, nullable: true, description: Required when dst_kind=group. }

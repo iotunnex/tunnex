@@ -62,6 +62,7 @@ const (
 
 // Defines values for CreatePolicyRuleRequestSrcKind.
 const (
+	CreatePolicyRuleRequestSrcKindAgent CreatePolicyRuleRequestSrcKind = "agent"
 	CreatePolicyRuleRequestSrcKindCidr  CreatePolicyRuleRequestSrcKind = "cidr"
 	CreatePolicyRuleRequestSrcKindGroup CreatePolicyRuleRequestSrcKind = "group"
 	CreatePolicyRuleRequestSrcKindSite  CreatePolicyRuleRequestSrcKind = "site"
@@ -279,6 +280,7 @@ const (
 
 // Defines values for PolicyRuleSrcKind.
 const (
+	PolicyRuleSrcKindAgent PolicyRuleSrcKind = "agent"
 	PolicyRuleSrcKindCidr  PolicyRuleSrcKind = "cidr"
 	PolicyRuleSrcKindGroup PolicyRuleSrcKind = "group"
 	PolicyRuleSrcKindSite  PolicyRuleSrcKind = "site"
@@ -612,6 +614,9 @@ type CreatePolicyRuleRequest struct {
 	// SrcGroupId Required when src_kind=group (or omitted).
 	SrcGroupId *openapi_types.UUID             `json:"src_group_id"`
 	SrcKind    *CreatePolicyRuleRequestSrcKind `json:"src_kind,omitempty"`
+
+	// SrcNodeId Required when src_kind=agent (S15.3): the agent whose own /32 is the source. Resolves exactly as a user-source resolves to that user's device — an agent IS a device, and this names which one.
+	SrcNodeId *openapi_types.UUID `json:"src_node_id"`
 
 	// SrcSiteId Required when src_kind=site (S8.2); the compiler resolves it to the source site's approved subnet CIDRs (the LAN source).
 	SrcSiteId *openapi_types.UUID `json:"src_site_id"`
@@ -1336,8 +1341,11 @@ type PolicyRule struct {
 	SrcCidr    *string             `json:"src_cidr"`
 	SrcGroupId *openapi_types.UUID `json:"src_group_id"`
 	SrcKind    PolicyRuleSrcKind   `json:"src_kind"`
-	SrcSiteId  *openapi_types.UUID `json:"src_site_id"`
-	SrcUserId  *openapi_types.UUID `json:"src_user_id"`
+
+	// SrcNodeId S15.3 — set when src_kind=agent: the agent whose /32 is the source.
+	SrcNodeId *openapi_types.UUID `json:"src_node_id"`
+	SrcSiteId *openapi_types.UUID `json:"src_site_id"`
+	SrcUserId *openapi_types.UUID `json:"src_user_id"`
 }
 
 // PolicyRuleDstKind defines model for PolicyRule.DstKind.
