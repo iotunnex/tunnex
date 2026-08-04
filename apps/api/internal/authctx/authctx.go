@@ -46,11 +46,55 @@ type Principal struct {
 	// operator-chosen credential label surfaced in audit as the system actor "operator:<name>".
 	MachineID   uuid.UUID
 	MachineName string
+	// OwnerUserID (S15.1, D14) — the HUMAN a machine principal acts for. Set ONLY for a machine principal.
+	//
+	// ⛔ EVERY MACHINE PRINCIPAL SHIPPED BEFORE S15.1 WAS OWNERLESS, and that is what D14 ruled against: an
+	// ownerless agent is outside the per-user device cap (which keys on user_id), outside any delegation
+	// link, and still inside the org address pool — it costs the scarce thing and escapes both accountable
+	// ones. This field is the delegation link the audit layer never had: `actor_user_id` and `actor_system`
+	// are PARALLEL columns, so an event could be attributed to a human OR a subsystem, never "this system
+	// acting for that human".
+	//
+	// ⚠ It is NOT part of the identity-binding subject space — a machine still has no UserID, and D4's
+	// separation stands. This says whose accountability the credential rides on, not who it authenticates as.
+	OwnerUserID uuid.UUID
 	// Cause (S10.2 Slice 4, D2) — a machine-only, per-request OVERRIDE for the audit cause: the CR that drove
 	// the change (e.g. "tunnexcluster:default/prod"). Set ONLY from the X-Tunnex-Cause header on a machine
 	// principal (a human's principal never carries it), sanitized. Empty → AuditActor falls back to the
 	// credential identity. This is what makes a cascade delete name the CR, not just the operator (D2 cond 2).
 	Cause string
+}
+
+// NewMachinePrincipal is the ONLY way to build a machine-bearing Principal (S15.1).
+//
+// ⛔ THE OWNER IS A REQUIRED ARGUMENT, AND THAT IS THE WHOLE POINT. Principal is a struct literal, so every
+// field is optional by construction — which is exactly how `policyHealthBadge` came to be structurally
+// forbidden from forming the verdict it was named for, and why its revoked guard ended up copy-pasted into
+// callers instead of living in the callee. **A guard enforced by types beats one enforced by discipline**, and
+// this constructor was taken at the one moment it was available: before the field existed anywhere.
+//
+// ⚠ THE CENSUS IS WHAT LICENSED IT, NOT THE PATTERN. Measured by INPUT rather than by caller: `MachineID` has
+// exactly ONE construction site (http/machine_bearer.go) and `machine_credentials` has exactly ONE
+// authenticating query (GetMachineCredentialByHash). No second door — so a constructor is necessary AND
+// sufficient here. For `policyHealthBadge` it was neither: seven sites, four wrong, two of which never called
+// the function at all because they read the field raw. **Anyone reaching for a constructor must run that
+// census first; more than one door means necessary and NOT sufficient.**
+//
+// Returns nil when the owner is absent. A nil principal is an unauthenticated request at the seam — the same
+// shape the four existing fail-closed arms already return, so a NULL owner is refused exactly where a revoked
+// credential is, with no oracle distinguishing them.
+func NewMachinePrincipal(ownerUserID, machineID, orgID uuid.UUID, machineName, role, cause string) *Principal {
+	if ownerUserID == uuid.Nil || machineID == uuid.Nil {
+		return nil
+	}
+	return &Principal{
+		MachineID:   machineID,
+		MachineName: machineName,
+		OwnerUserID: ownerUserID,
+		AuthMethod:  AuthMachine,
+		Roles:       map[uuid.UUID]string{orgID: role},
+		Cause:       cause,
+	}
 }
 
 // IsMachine reports whether this is a non-user machine principal (S10.2).

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
@@ -38,16 +37,31 @@ func MachineAuth(q *sqlc.Queries) BearerAuthFunc {
 		if cred.RevokedAt.Valid {
 			return nil, nil // revoked — severs now, indistinguishable from unknown (no oracle)
 		}
+		// ⛔ S15.1 (D14/D19 step 3) — A NULL OWNER IS REFUSED AT USE, NOT MERELY UN-SET AT REST.
+		//
+		// `user_id` is nullable for the length of the expand/contract migration, and a nullable owner IS the
+		// grandfather clause unless something refuses it. This is that something, and it sits beside the four
+		// fail-closed arms above (unknown token, DB error, revoked, no-oracle) rather than being restated in
+		// any handler: a guard made the caller's responsibility is inherited by every new caller.
+		//
+		// ⚠ SAME `nil, nil` AS THE OTHERS — a generic 401 with no oracle. An unassigned credential must not be
+		// distinguishable on the wire from an unknown or revoked one.
+		//
+		// ⚠ AND THIS ARM RETIRES AT STEP 4, when the column contracts to NOT NULL. It cannot be removed before
+		// then: assignment is an operator action with no code date.
+		if !cred.UserID.Valid {
+			return nil, nil
+		}
 		_ = q.TouchMachineCredentialUsed(r.Context(), cred.ID) // best-effort telemetry
-		return &authctx.Principal{
-			MachineID:   cred.ID,
-			MachineName: cred.Name,
-			AuthMethod:  authctx.AuthMachine, // exempt from the MFA-enrollment gate by construction
-			Roles:       map[uuid.UUID]string{cred.OrgID: cred.Role},
+		// The constructor REFUSES to build a machine principal without an owner (authctx.NewMachinePrincipal).
+		// The check above and the constructor are not redundant: the check makes the ROW impossible to use,
+		// the constructor makes the PRINCIPAL impossible to build wrong.
+		return authctx.NewMachinePrincipal(
+			cred.UserID.Bytes, cred.ID, cred.OrgID, cred.Name, cred.Role,
 			// D2 (Slice 4): the operator may name the CR that drove this change as the audit cause. Honored
 			// ONLY here (a machine principal); a human's principal never carries it. Sanitized at the seam.
-			Cause: authctx.SanitizeCause(r.Header.Get("X-Tunnex-Cause")),
-		}, nil
+			authctx.SanitizeCause(r.Header.Get("X-Tunnex-Cause")),
+		), nil
 	}
 }
 
