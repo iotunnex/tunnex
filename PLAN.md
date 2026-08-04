@@ -64,6 +64,33 @@ expected to be rewritten before merge.
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
 **CURRENT (2026-07-31): EPIC 13 = GATEWAY RECOVERY — BUILD COMPLETE INCLUDING SLICE 7 on `story/S13.1-gateway-recovery` (tip `7c1a127`; Slice 7 = `120ff0c`, since then docs-only), NOT MERGED. Slice 7 (operator-initiated restore, `POST /nodes/{nodeId}/restore-devices`, new perm `device:restore`, re-homes onto a named LIVE gateway because a revoked node never returns) closed the reachability defect and is RED-PROVEN REACHABLE + UI-exposed. **REVIEW STATE POINTER = `docs/S13.1-review-state.md`** (pass 1 COMPLETE — 20 findings + F3, HELD, nothing folded, `docs/S13.1-review-pass1-findings.md`; pass 3 launched before pass 2 by ruling; pass 2 not started and must cover Slice 7). Earlier note: pass 1 was once interrupted — (run `wf_642e5fe8-1ed`: 8/8 finders done, 127/144 verifiers returned, Critic and Synthesize never ran — resumable from cache). The review remains a merge precondition. Next session = REVIEW → WALK → merge word, nothing in between.** The epic exists for one observed event: an AWS gateway went offline past its 48h cert lifetime and could not come back — `/agent/renew` lives behind the mTLS channel its expired cert can no longer authenticate to. Commit-one `docs/S13.1-decisions.md` (six walls, D1–D10 ruled). **SHIPPED:** agent precedence (`identity.Decide`, no network argument — a failed handshake structurally cannot trigger re-key; `Recover` ranked above `UseToken`) · **PoP re-key** on the public listener (RSA over `nonce ‖ CSR DER`; gate BEFORE crypto so timing is not a liveness oracle; **D3 amended: expiry authorizes, revocation REFUSES** — expiry is an absence of action, revocation is the presence of a decision) · its own path-scoped throttle + body cap (registered before `middleware.RealIP` — review #1 was exactly that) · **cascade restore** (`revoked_cause`, reclaim-first via the canonical oracle) · **Slice 6 `provisioned_ip`** (`needs_reexport` gains the ADDRESS cause for EVERY mode; ranges stay static-only; both contract rewrites + the label the census under-scoped) · **D10 second identifier** (key fingerprint: a LOST RESPONSE no longer bricks a gateway; ambiguity refuses; three implementations of one digest pinned to a golden vector; agent persists its pending key before submitting and reuses it so retries CONVERGE; migration guard forced expand/contract with both shim halves). Retroactive review pass 1 (leader election) folded — *leadership was a boolean that lies*; `ConfirmLeader` now matches `pg_locks`. **OWED BEFORE MERGE, IN ORDER: (1) the epic-end review pass — three passes by surface family (unauthenticated re-key surface · identity/cascade data path + migrations 0054–0061 · agent recovery loop), ~4.5–6M tokens, a merge precondition alongside CI and the walk, and a truncated pass is worse than none; (2) the walk per `docs/S13-boxwalk.md` — seven legs, TWO GATEWAYS MUST BE OFFLINE 48h+ BEFORE the session (`agentca.CertTTL` is a constant; the clock is the only way to make a cert expire); (3) the merge word.** **RULED — cascade-restore reachability: SLICE 7 (operator-initiated restore), built AFTER the review pass and BEFORE the walk; two conditions — authorized as a deliberate operator act (same class as minting a join token) and RED-PROVEN REACHABLE, not merely correct. Un-revoke PERMANENTLY REFUSED (it is the attack chain D3 exists to prevent); removing the mechanism refused (re-opens Wall 6). Walk Leg 4 stays a falsification attempt. The defect:** `RestoreCascadeRevokedDevices` has one caller (`Rekey`), devices are cascade-revoked in one place (`Revoke`), and `Rekey` refuses a revoked node — so the trigger may put the node into the one state that can never reach the restorer (dormant-machinery law). Four faces in the paper; walk Leg 4 is written as a falsification attempt. Retroactive **pass 2 (backup/restore)** still attaches to the next natural merge boundary. Registered: the 0061 contract migration (trigger = the release after this one) · no general rate limiting · body caps only on the two re-key routes · failover hysteresis persistence (beta-blocking, owned by the failover story).
+**S15.1 COMMIT-ONE (2026-08-04) — PR #84, content tip `43f5604` pre-merge. PAPER ONLY; NO PRODUCT CODE.**
+The owned machine principal, D14/D19 steps 1–3. `docs/S15.0-decisions.md` §8.
+
+⛔ **THE SEAM CENSUS SURVIVES, AND IT IS A MEASUREMENT NOT AN ASSUMPTION.** Censused **by the INPUT**, because
+two of the three broken `policyHealthBadge` sites never called the function. **Five queries touch
+`machine_credentials`; exactly ONE authenticates** (`machine_credentials.sql:14`). **`MachineID` has exactly
+ONE construction site** (`http/machine_bearer.go:43`); every other hit READS an already-built principal.
+**No second door — the constructor is necessary AND sufficient.** ⚠ The `policyHealthBadge` census found
+SEVEN sites and four were wrong; this found one. **That difference is why a constructor works here.**
+
+⚠ **`in use` IS NOT A FACT WE HAVE.** `last_used_at` is stamped on every successful auth — *"last
+authenticated at"*, nothing more. A credential idle a day may be an hourly GitOps reconcile or abandoned; the
+column cannot tell them apart. **The screen shows `last seen`, labelled `last seen`** — no in-use badge, no
+threshold. *A number that cannot carry that weight must not be dressed as one.* **Machine credentials have no
+liveness signal — registered, not built.**
+
+**CUT AS TWO, proposed not decided:** **S15.1a the guard** (nullable `user_id` · ⭐ **the constructor, taken now
+because the field does not exist yet and the moment does not return** · the seam refusal · **both reds — NULL
+refused AND owned still accepted**) · **S15.1b the surface** (owner-gated, three empty states, no suggested
+owner). ⛔ **Ordering is not arbitrary: guard first means the nullable column is NEVER a grandfather clause**,
+because it is refused at use from day one.
+
+⚠ **STEP 4 CARRIES ITS REASON:** contracting to `NOT NULL` needs every row assigned, and **assignment is an
+operator action with NO CODE DATE — a precondition nobody on this side controls, not deferred work.**
+
+---
+
 **S15.0 COMMIT-ONE MERGED (2026-08-04) — PR #80 then #81, content tip `1f78186` pre-merge. PAPER ONLY; **ALL SEVEN RULED**.** `docs/S15.0-decisions.md`. **Nothing under S15.1 is authorized.**
 
 **Scope argued in the paper itself with citations, so it is not re-derived later:** the destination half is
