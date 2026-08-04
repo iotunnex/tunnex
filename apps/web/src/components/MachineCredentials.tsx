@@ -1,5 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, apiErrorMessage, type MachineCredential } from "../lib/api";
+import {
+  api,
+  apiErrorMessage,
+  loadOne,
+  type Loaded,
+  type MachineCredential,
+  type Member,
+} from "../lib/api";
 import { relativeAge } from "../lib/format";
 import { Button, Card, ErrorText, Field, Input } from "./ui";
 import { OneTimeSecretModal } from "./OneTimeSecret";
@@ -16,27 +23,57 @@ export function MachineCredentials({
   orgId: string;
   canManage: boolean;
 }) {
-  const [creds, setCreds] = useState<MachineCredential[] | null>(null);
+  // ⛔ Loaded<T>, NOT `T[] | null`. A bare array cannot distinguish "no credentials" from "the list failed to
+  // load", and on THIS screen that difference is the whole point: an unreachable query rendering as an empty
+  // list is "migration complete" written by an error path.
+  const [creds, setCreds] = useState<Loaded<MachineCredential[]> | null>(null);
+  const [owner, setOwner] = useState<Record<string, string>>({});
+  // The org roster, for the owner picker. ⚠ A FAILED ROSTER IS NOT AN EMPTY ORG — if it cannot load, the
+  // picker offers nothing and the copy below says so, rather than implying there is nobody to choose.
+  const [members, setMembers] = useState<Member[]>([]);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [secret, setSecret] = useState<string | null>(null); // the tnxm_ token, in state ONLY, never re-fetched
 
+  // ⛔ ROUTED THROUGH loadOne. A raw api.GET was here, and it is review-refused on a list whose emptiness is
+  // user-meaningful: `error` and a network REJECTION are two different paths, and a component that reads only
+  // `data` renders a reassuring empty state for both.
   async function load() {
-    const { data, error } = await api.GET(
-      "/api/v1/organizations/{orgId}/machine-credentials",
-      {
-        params: { path: { orgId } },
-      },
+    setCreds(
+      await loadOne<MachineCredential[]>(() =>
+        api.GET("/api/v1/organizations/{orgId}/machine-credentials", {
+          params: { path: { orgId } },
+        }),
+      ),
     );
-    if (error)
-      return setErr(
-        apiErrorMessage(error, "Could not load machine credentials."),
-      );
-    setCreds((data as MachineCredential[]) ?? []);
+  }
+
+  // Assign the human this credential acts for. The admin CHOOSES — see the copy below.
+  async function assign(credentialId: string) {
+    const userId = owner[credentialId];
+    if (!userId) return;
+    setBusy(true);
+    setErr(null);
+    const { error } = await api.PUT(
+      "/api/v1/organizations/{orgId}/machine-credentials/{credentialId}",
+      { params: { path: { orgId, credentialId } }, body: { user_id: userId } },
+    );
+    setBusy(false);
+    if (error) return setErr(apiErrorMessage(error, "Could not assign an owner."));
+    setOwner((o) => ({ ...o, [credentialId]: "" }));
+    void load();
   }
   useEffect(() => {
     void load();
+    void (async () => {
+      const r = await loadOne<Member[]>(() =>
+        api.GET("/api/v1/organizations/{orgId}/members", {
+          params: { path: { orgId } },
+        }),
+      );
+      if (r.ok) setMembers(r.data);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
 
@@ -103,39 +140,112 @@ export function MachineCredentials({
         </form>
       )}
 
-      {creds && creds.length > 0 ? (
-        <ul className="mt-3 space-y-1">
-          {creds.map((c) => (
-            <li
-              key={c.id}
-              className="flex items-center justify-between rounded-md bg-white/5 px-3 py-2 text-sm"
-            >
-              <span className="text-slate-200">
-                {c.name}
-                <span className="ml-2 font-mono text-xs text-slate-500">
-                  {c.fingerprint}
-                </span>
-                <span className="ml-2 text-xs text-slate-500">
-                  created {relativeAge(c.created_at)}
-                  {c.last_used_at
-                    ? ` · used ${relativeAge(c.last_used_at)}`
-                    : " · never used"}
-                </span>
-              </span>
-              {canManage && (
-                <Button variant="ghost" onClick={() => revoke(c.id)}>
-                  Revoke
-                </Button>
-              )}
-            </li>
-          ))}
-        </ul>
+      {/* ⛔ THREE DISTINGUISHABLE STATES, AND THE THIRD IS THE REASON THIS SCREEN IS HARD.
+          none · all owned · THE LIST FAILED TO LOAD. An unreachable query rendering as an empty list is
+          "migration complete" written by an error path — and on a migration screen that is exactly the
+          reassurance that must be earned rather than defaulted to. */}
+      {creds === null ? (
+        <p className="mt-3 text-xs text-ink-secondary">Loading…</p>
+      ) : !creds.ok ? (
+        <p
+          data-state="load-failed"
+          className="mt-3 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-xs text-danger"
+        >
+          Could not load machine credentials — {creds.error}.{" "}
+          <strong>This is not the same as having none.</strong> Retry before concluding anything about
+          ownership.
+        </p>
+      ) : creds.data.length === 0 ? (
+        <p data-state="none" className="mt-3 text-xs text-ink-secondary">
+          No machine credentials exist in this organization — there is nothing to assign.
+        </p>
       ) : (
-        creds && (
-          <p className="mt-3 text-xs text-slate-500">
-            No machine credentials yet.
-          </p>
-        )
+        <>
+          {/* ⚠ ABOVE THE ROWS, DELIBERATELY. A qualifier under a list is read after the list is already
+              believed. */}
+          {creds.data.every((c) => c.owner_user_id) && (
+            <p data-state="all-owned" className="mt-3 rounded-md border border-ok/40 bg-ok/5 px-3 py-2 text-xs text-ok">
+              Every machine credential has an owner. The migration is complete for this organization.
+            </p>
+          )}
+          <ul className="mt-3 space-y-1">
+            {creds.data.map((c) => (
+              <li
+                key={c.id}
+                data-owned={c.owner_user_id ? "yes" : "no"}
+                className="flex items-center justify-between gap-3 rounded-md bg-white/5 px-3 py-2 text-sm"
+              >
+                <span className="min-w-0 text-slate-200">
+                  {c.name}
+                  <span className="ml-2 font-mono text-xs text-slate-500">
+                    {c.fingerprint}
+                  </span>
+                  <span className="ml-2 text-xs text-slate-500">
+                    created {relativeAge(c.created_at)}
+                    {/* ⛔ "last seen", LABELLED. `last_used_at` is stamped on every successful auth — it is
+                        LAST AUTHENTICATED AT and nothing more. A credential idle for a day may be an hourly
+                        GitOps reconcile or abandoned, and this column cannot tell them apart. The spec now
+                        says so explicitly; the UI must not re-invent what the spec refused. No in-use badge,
+                        no active/idle, no threshold. */}
+                    {c.last_used_at
+                      ? ` · last seen ${relativeAge(c.last_used_at)}`
+                      : " · never seen"}
+                  </span>
+                  {!c.owner_user_id && (
+                    <span className="ml-2 rounded border border-warn/40 px-1.5 py-0.5 text-[10px] text-warn">
+                      unassigned
+                    </span>
+                  )}
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  {canManage && !c.owner_user_id && (
+                    <>
+                      <label className="sr-only" htmlFor={`owner-${c.id}`}>
+                        Owner for {c.name}
+                      </label>
+                      {/* ⛔ NO SUGGESTED OWNER. `created_by` does not exist, so there is nothing to pre-select
+                          from — a default here would be a client-invented value sitting where a server fact
+                          belongs. The placeholder says the system does not know. */}
+                      <select
+                        id={`owner-${c.id}`}
+                        value={owner[c.id] ?? ""}
+                        onChange={(e) =>
+                          setOwner((o) => ({ ...o, [c.id]: e.target.value }))
+                        }
+                        className="rounded border border-line bg-surface-inset px-2 py-1 text-xs"
+                      >
+                        <option value="">Choose an owner…</option>
+                        {members.map((m) => (
+                          <option key={m.user_id} value={m.user_id}>
+                            {m.email}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        variant="ghost"
+                        disabled={busy || !owner[c.id]}
+                        onClick={() => void assign(c.id)}
+                      >
+                        Assign
+                      </Button>
+                    </>
+                  )}
+                  {canManage && (
+                    <Button variant="ghost" onClick={() => revoke(c.id)}>
+                      Revoke
+                    </Button>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {canManage && creds.data.some((c) => !c.owner_user_id) && (
+            <p className="mt-2 text-[11px] text-ink-secondary">
+              Tunnex does not record who minted a credential, so it cannot suggest an owner — choose the
+              person accountable for what this credential does. Unassigned credentials do not authenticate.
+            </p>
+          )}
+        </>
       )}
 
       {secret && (
