@@ -4566,3 +4566,64 @@ keeping them.
 - **Wrap it in a transaction, verify before `COMMIT`.** Add a predicate that makes the catastrophic case
   impossible rather than unlikely — `status = 'revoked'` alongside the id list, so a mistyped id cannot reach
   a live gateway.
+
+---
+
+# ⛔ THE SAFE STATE MUST NOT DEPEND ON REMEMBERING A REGISTRY — AND WHEN IT DOESN'T, THE ESCAPE IS THE HAZARD
+
+**S15.1, 2026-08-04.** A brand-new `PUT` endpoint answered a **sessionless** request with
+`400 validation_failed` instead of `401`. The OpenAPI request validator rejected the required body **before
+the auth layer ran**, so an unauthenticated caller learned the endpoint exists and what shape it expects.
+
+> ## **A NO-ORACLE VIOLATION ON AN ENDPOINT THAT WAS HOURS OLD, AND THE AUTHOR DID NOT FIND IT.**
+> ## `TestSessionlessRequestsAre401` did, on CI, doing exactly what it was built for.
+
+## THE GOOD HALF — the guard fails CLOSED, which is why this is not the usual entry
+
+Any new operation with a **required body** has this defect by default until it is registered in the walk's
+body map. **The obvious worry is that a new op can silently forget the registry.** Measured: **it cannot.**
+The walk enumerates every operation in the spec and skips only those the SPEC marks public
+(`security: []` — `authwalk_test.go:101-104`). **There is no exemption list and no opt-out.** Forgetting the
+entry produces a **failing test**, not a silent pass.
+
+**That is the shape we want and it should be said out loud, because this repo more often records the
+opposite:** the registry is the FIX, not the GUARD. Missing it is loud.
+
+## ⛔ AND THAT IS EXACTLY WHY THE ESCAPE IS THE HAZARD
+
+The red says *"sessionless status = 400, want 401"*. **There are two ways to make it green:**
+
+| fix | effect |
+|---|---|
+| register a valid body — the request reaches auth, and the 401 is the AUTH layer's answer | ✅ correct |
+| ⛔ **mark the op `security: []` in the spec** | the walk **skips it entirely**, the red disappears, **and the endpoint is now genuinely public** |
+
+**Both turn the test green. One of them ships an unauthenticated endpoint.** The second is *one line*, it is in
+a different file from the test, and its diff reads like a spec tidy-up rather than a security change.
+
+**MECHANICAL:**
+- **A red that can be cleared by widening the thing under test is not a red, it is a prompt.** When a guard
+  fails, enumerate the ways to make it green BEFORE picking one — and check whether any of them removes the
+  subject rather than fixing it.
+- **`security: []` in `openapi.yaml` deserves review attention proportional to what it disables**, because it
+  is simultaneously the way to declare a genuinely public endpoint and the way to delete a test.
+- A required body on a gated op is a **standing** shape, not a one-off: every future one starts defective and
+  is caught. **Keep it caught — never make the walk's skip list data-driven from anything but `security`.**
+
+---
+
+# ⚠ REGISTERED, NOT SOLVED — A LOCAL GATE THAT FAILS WHERE CI DOES NOT
+
+**S15.1, 2026-08-04.** `make test-editions` failed locally in `internal/agentca` (4 tests). The same tree
+passes `go test ./internal/agentca/`, and CI's `gates` log shows those tests **not failing at all** — only
+the 401-walk, which was a real defect.
+
+⛔ **FOUR IRRELEVANT LOCAL FAILURES MASKED THE ONE THAT MATTERED.** The real defect was found by reading the
+CI log, not the local run.
+
+> **A LOCAL GATE THAT PRODUCES FAILURES CI DOES NOT IS A GATE PEOPLE WILL LEARN TO IGNORE** — and the cost is
+> not the noise, it is the signal that arrives wearing the same colour.
+
+**NOT CHASED, DELIBERATELY.** Recording it beats a guess about docker/alpine/`-mod=readonly` differences.
+**TRIGGER: the next time `make test-editions` disagrees with CI on the same sha** — at that point there are
+two data points and the difference is worth naming.
