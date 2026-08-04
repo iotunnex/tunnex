@@ -731,7 +731,7 @@ ON CONFLICT (id) DO NOTHING;
 --
 -- The same owner as the demo org, so one login reaches both.
 INSERT INTO organizations (id, name, slug, pool_cidr)
-VALUES ('01900000-0000-7000-8000-0000000000a1', 'Demo — migration complete', 'demo-migrated', '10.98.0.0/24')
+VALUES ('01900000-0000-7000-8000-0000000000a1', 'Demo EU', 'demo-eu', '10.98.0.0/24')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO memberships (id, org_id, user_id, role)
