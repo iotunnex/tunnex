@@ -1703,42 +1703,143 @@ function GroupsResourcesSection({
     onSubjectsChanged();
   }
 
+  // ⛔ THE CASCADE CONFIRM MOVED WITH THE VERB. Deleting a group deletes every rule that names it, so the
+  // confirmation is not optional ceremony — and from a selection bar the same click can take several groups
+  // and all of their rules at once, which is strictly more consequential than the per-row version was.
+  const [deletingGroups, setDeletingGroups] = useState<UserGroup[]>([]);
+
   return (
     <Card className="mt-4">
       <h2 className="text-sm font-semibold text-slate-300">
         Groups &amp; resources
       </h2>
+      {deletingGroups.length > 0 && (
+        <CascadeDeleteModal
+          kind="group"
+          name={
+            deletingGroups.length === 1
+              ? deletingGroups[0].name
+              : `${deletingGroups.length} groups`
+          }
+          onCancel={() => setDeletingGroups([])}
+          onConfirm={() => {
+            const gs = deletingGroups;
+            setDeletingGroups([]);
+            void (async () => {
+              for (const g of gs) await delGroup(g.id);
+            })();
+          }}
+        />
+      )}
       <ErrorText>{err}</ErrorText>
-      <div className="mt-3 grid gap-4 sm:grid-cols-2">
+      {/* ⛔ STACKED, NOT SIDE BY SIDE. Two tables in a half-width column each render five columns in the
+          space of two — CIDR, protocol and ports would truncate exactly where an operator is comparing them
+          against a router config. Each table gets the full row. */}
+      <div className="mt-3 space-y-4">
+        {/* ⛔ GROUPS AS A TABLE. Name / members / type / created are the same five facts for every group, and
+            an org accumulates them — the list gave no way to search and no way to stop rendering all of them.
+
+            ⚠ WHAT SURVIVED THE CONVERSION, because each was earned: the DIRECTORY badge where the name is
+            (the reconciler owns that membership, so say it where the name is), the THREE-ARM member count
+            (unfetched renders NOTHING and must never become a 0 nobody asked for; 0 is the loudest state
+            here and is styled as a warning, not as metadata), and expansion to manage members. */}
         <div>
-          {/* WF-OVPN-walk-2: "Groups of users" makes membership honest — a group holds USERS, not
-              devices (a device inherits access from its owning user via a group/user rule). The old
-              "Groups (… device-to-device targets)" label read as "add devices here", which has no path. */}
-          <p className="text-xs font-medium text-slate-400">
-            Groups of users (rule sources / device-to-device targets)
-          </p>
           {groupsError ? (
             <LoadRetry error={groupsError} onRetry={load} />
           ) : (
             <>
-              <ul className="mt-2 space-y-1">
-                {groups.map((g) => (
-                  <GroupRow
-                    key={g.id}
+              <DataTable<UserGroup>
+                caption="Groups"
+                rows={groups}
+                rowKey={(g) => g.id}
+                failed={false}
+                pageSize={10}
+                empty="No groups yet."
+                rowActions={
+                  canManage
+                    ? [
+                        {
+                          key: "delete",
+                          label: "Delete",
+                          danger: true,
+                          // ⚠ A directory-managed group's MEMBERSHIP is owned by the reconciler; the group
+                          // itself is still deletable, so nothing is withheld here.
+                          run: (gs: UserGroup[]) => setDeletingGroups(gs),
+                        },
+                      ]
+                    : undefined
+                }
+                expandable={(g) => (
+                  <GroupMembersPanel
                     orgId={orgId}
                     group={g}
                     members={orgMembers}
-                    count={memberCounts.get(g.id)}
-                    onCount={noteCount}
                     canManage={canManage}
-                    onDelete={() => delGroup(g.id)}
+                    onCount={noteCount}
                     onMembershipChange={onSubjectsChanged}
                   />
-                ))}
-                {groups.length === 0 && (
-                  <li className="text-xs text-slate-500">No groups yet.</li>
                 )}
-              </ul>
+                columns={[
+                  {
+                    key: "name",
+                    header: "Group name",
+                    sortValue: (g) => g.name,
+                    cell: (g) => (
+                      <span className="flex items-center gap-2">
+                        <span className="text-slate-200">{g.name}</span>
+                        {isDirectoryManaged(g) && (
+                          <span className="rounded-full border border-accent-500/40 bg-accent-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-accent-400">
+                            {DIRECTORY_MANAGED_BADGE}
+                          </span>
+                        )}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: "members",
+                    header: "Members",
+                    sortValue: (g) => memberCounts.get(g.id) ?? -1,
+                    // ⛔ THE COUNT IS THE WAY IN. Making it the disclosure control means the number an
+                    // operator is already looking at is the thing they click, rather than a chevron in a
+                    // column that means nothing until used.
+                    cell: (g, { expanded, toggle }) => {
+                      const count = memberCounts.get(g.id);
+                      return (
+                        <button
+                          type="button"
+                          onClick={toggle}
+                          aria-expanded={expanded}
+                          className="text-xs underline-offset-2 hover:underline"
+                        >
+                          {/* `undefined` = not yet asked, and renders as a prompt rather than as a 0
+                              nobody fetched. */}
+                          {count === undefined ? (
+                            <span className="text-slate-500">view members</span>
+                          ) : count === null ? (
+                            <span className="text-warn">members could not be loaded</span>
+                          ) : count === 0 ? (
+                            <span className="font-semibold text-warn">0 members</span>
+                          ) : (
+                            <span className="text-slate-400">
+                              {count === 1 ? "1 member" : `${count} members`}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    },
+                  },
+                  {
+                    key: "type",
+                    header: "Type",
+                    sortValue: (g) => (isDirectoryManaged(g) ? "directory group" : "user group"),
+                    cell: (g) => (
+                      <span className="text-xs text-slate-500">
+                        {isDirectoryManaged(g) ? "Directory group" : "User group"}
+                      </span>
+                    ),
+                  },
+                ]}
+              />
               {canManage && (
                 <div className="mt-2 flex gap-2">
                   <Input
@@ -1760,43 +1861,79 @@ function GroupsResourcesSection({
             <LoadRetry error={resourcesError} onRetry={load} />
           ) : (
             <>
-              <ul className="mt-2 space-y-1">
-                {resources.map((r) => (
-                  <li
-                    key={r.id}
-                    className="flex items-center justify-between rounded-md bg-white/5 px-3 py-1.5 text-sm text-slate-200"
-                  >
-                    <span>
-                      {r.name}{" "}
-                      <span className="text-slate-500">
-                        {r.cidr} · {r.protocol}/
+              {/* ⛔ RESOURCES AS A TABLE, with CIDR / protocol / ports in COLUMNS OF THEIR OWN. They were
+                  concatenated into one muted string — "10.20.4.0/24 · tcp/5432" — which cannot be sorted,
+                  cannot be scanned down, and put the three facts that decide what a rule actually permits
+                  into the typography of an afterthought. */}
+              <DataTable<Resource>
+                caption="Resources"
+                rows={resources}
+                rowKey={(r) => r.id}
+                failed={false}
+                pageSize={10}
+                empty="No resources yet."
+                rowActions={
+                  canManage
+                    ? [
+                        {
+                          key: "delete",
+                          label: "Delete",
+                          danger: true,
+                          run: (rs: Resource[]) =>
+                            setConfirmRes({ id: rs[0].id, name: rs[0].name }),
+                          // ⚠ ONE AT A TIME, deliberately. The confirm names the resource and lists the
+                          // rules that will go with it; a multi-resource cascade would need a different
+                          // dialog, and shipping the verb before that dialog exists would mean confirming
+                          // a deletion whose consequences were not shown.
+                          arity: "single",
+                        },
+                      ]
+                    : undefined
+                }
+                columns={[
+                  {
+                    key: "name",
+                    header: "Resource",
+                    sortValue: (r) => `${r.name} ${r.label ?? ""}`,
+                    cell: (r) => (
+                      <span className="flex items-center gap-2">
+                        <span className="text-slate-200">{r.name}</span>
+                        {/* ⛔ THE OPERATOR'S OWN NOTE (S15.3), RENDERED AS WRITTEN. An ASSERTION, never an
+                            inference — the product cannot detect what a destination speaks, and a label the
+                            system generated would claim a capability it does not have.
+                            ⚠ Only when set: the field is optional and must LOOK optional. */}
+                        {r.label && (
+                          <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-secondary">
+                            {r.label}
+                          </span>
+                        )}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: "cidr",
+                    header: "CIDR",
+                    sortValue: (r) => r.cidr,
+                    cell: (r) => <span className="font-mono text-xs text-slate-500">{r.cidr}</span>,
+                  },
+                  {
+                    key: "protocol",
+                    header: "Protocol",
+                    sortValue: (r) => r.protocol,
+                    cell: (r) => <span className="font-mono text-xs text-slate-500">{r.protocol}</span>,
+                  },
+                  {
+                    key: "ports",
+                    header: "Ports",
+                    sortValue: (r) => r.port_low ?? -1,
+                    cell: (r) => (
+                      <span className="font-mono text-xs text-slate-500">
                         {portLabel(r.port_low, r.port_high)}
                       </span>
-                      {/* ⛔ THE OPERATOR'S OWN NOTE (S15.3), RENDERED AS WRITTEN. It is an ASSERTION, never
-                          an inference — the product cannot detect what a destination speaks, and a label
-                          the system generated would claim a capability it does not have.
-                          ⚠ Rendered only when set, so an unlabelled resource shows nothing rather than an
-                          empty chip: the field is optional and must LOOK optional. */}
-                      {r.label && (
-                        <span className="ml-2 rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-secondary">
-                          {r.label}
-                        </span>
-                      )}
-                    </span>
-                    {canManage && (
-                      <Button
-                        variant="danger"
-                        onClick={() => setConfirmRes({ id: r.id, name: r.name })}
-                      >
-                        Delete
-                      </Button>
-                    )}
-                  </li>
-                ))}
-                {resources.length === 0 && (
-                  <li className="text-xs text-slate-500">No resources yet.</li>
-                )}
-              </ul>
+                    ),
+                  },
+                ]}
+              />
               {canManage && (
                 <div className="mt-2 space-y-2">
                   <Input
@@ -2331,23 +2468,26 @@ function CascadeDeleteModal({
 //
 // ⛔ AND LAZY COUNTS LOSE THE VISIBLY-EMPTY PROPERTY, which is why `src_group_empty` exists on the RULE ROW —
 // it restores it where the operator's attention already is, at no request cost. Two decisions, one problem.
-function GroupRow({
-  orgId, group, members, canManage, count, onCount, onDelete, onMembershipChange,
+/**
+ * The MEMBERS panel for one group — what used to be the expanded half of a list row.
+ *
+ * ⛔ IT NO LONGER OWNS `open`. The table owns expansion, so this component only exists while the row is
+ * expanded and therefore fetches ON MOUNT. That removes the "expanded but never asked" state entirely
+ * rather than leaving two places that both think they know whether the members have been loaded.
+ */
+function GroupMembersPanel({
+  orgId, group, members, canManage, onCount, onMembershipChange,
 }: {
   orgId: string;
   group: UserGroup;
   members: Member[];
   canManage: boolean;
-  count: number | null | undefined;
   onCount: (groupId: string, n: number | null) => void;
-  onDelete: () => void;
   onMembershipChange: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   // THREE ARMS, as everywhere else: null = not asked, {ok:false} = asked and failed, {ok:true} = the answer.
   const [loaded, setLoaded] = useState<Loaded<GroupMember[]> | null>(null);
   const [busy, setBusy] = useState(false);
-  const [confirming, setConfirming] = useState(false);
 
   const fetchMembers = useCallback(async () => {
     const r = (await loadOne(() =>
@@ -2359,11 +2499,10 @@ function GroupRow({
     onCount(group.id, r.ok ? r.data.length : null); // keep the row's cached count in step with a mutation
   }, [orgId, group.id, onCount]);
 
-  const toggle = () => {
-    const next = !open;
-    setOpen(next);
-    if (next && loaded === null) void fetchMembers();
-  };
+  // Mounted means expanded, so ask immediately.
+  useEffect(() => {
+    void fetchMembers();
+  }, [fetchMembers]);
 
   async function mutateMembership(fn: () => Promise<{ error?: unknown }>) {
     setBusy(true);
@@ -2385,46 +2524,9 @@ function GroupRow({
   const addable = members.filter((m) => !inGroup.has(m.user_id));
 
   return (
-    <li className="rounded-md bg-white/5 px-3 py-1.5 text-sm text-slate-200">
-      <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={open}
-          className="flex-1 text-left hover:text-white"
-        >
-          {group.name}
-          {/* The reconciler owns this group's membership — say so where the name is, not only
-              where the (now absent) controls used to be. */}
-          {directoryManaged && (
-            <span className="ml-2 rounded-full border border-accent-500/40 bg-accent-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-accent-400">
-              {DIRECTORY_MANAGED_BADGE}
-            </span>
-          )}
-          {/* ⛔ RENDERED ON EVERY ROW, collapsed or not — but only once ASKED. `undefined` (not yet fetched)
-              renders NOTHING; it must never become a 0 nobody fetched. A count of 0 is the loudest thing
-              here, so it is styled as a warning rather than as metadata. */}
-          {count === 0 && (
-            <span className="ml-2 text-xs font-semibold text-warn">0 members</span>
-          )}
-          {typeof count === "number" && count > 0 && (
-            <span className="ml-2 text-xs text-slate-500">
-              {count === 1 ? "1 member" : `${count} members`}
-            </span>
-          )}
-          {count === null && (
-            <span className="ml-2 text-xs text-warn">members could not be loaded</span>
-          )}
-        </button>
-        {canManage && (
-          <Button variant="danger" onClick={() => setConfirming(true)}>
-            Delete
-          </Button>
-        )}
-      </div>
-
-      {open && (
-        <div className="mt-2 border-t border-white/5 pt-2">
+    <div className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2">
+      {(
+        <div>
           {loaded === null && <p className="text-xs text-slate-500">Loading members…</p>}
           {loaded && !loaded.ok && <LoadRetry error={loaded.error} onRetry={fetchMembers} />}
           {loaded?.ok && rows.length === 0 && (
@@ -2487,17 +2589,6 @@ function GroupRow({
           )}
         </div>
       )}
-      {confirming && (
-        <CascadeDeleteModal
-          kind="group"
-          name={group.name}
-          onCancel={() => setConfirming(false)}
-          onConfirm={() => {
-            setConfirming(false);
-            onDelete();
-          }}
-        />
-      )}
-    </li>
+    </div>
   );
 }
