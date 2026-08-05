@@ -96,7 +96,9 @@ describe("⛔ the three empty states are distinguishable", () => {
     );
     // ⚠ ORDER IS THE ASSERTION. A qualifier under a list is read after the list is already believed.
     const banner = container.querySelector('[data-state="all-owned"]')!;
-    const list = container.querySelector("ul")!;
+    // ⚠ The panel is a DataTable now, not a <ul>. The claim is unchanged — the refusal banner sits ABOVE
+    // the rows — only the element carrying "the rows" is different.
+    const list = container.querySelector("table")!;
     expect(banner.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     // ⛔ IT IS A CLAIM ABOUT OWNERSHIP, NOT ABOUT HEALTH. It knows one predicate — nothing is refused
@@ -116,7 +118,7 @@ describe("⛔ the three empty states are distinguishable", () => {
       [MEMBERS]: [],
     });
     const { container } = render(<MachineCredentials orgId={ORG} canManage />);
-    await waitFor(() => expect(container.querySelectorAll("li").length).toBe(2));
+    await waitFor(() => expect(container.querySelectorAll("tbody tr").length).toBe(2));
     expect(container.querySelector('[data-state="all-owned"]')).toBeNull();
   });
 });
@@ -128,10 +130,10 @@ describe("the row tells the truth about what it knows", () => {
       [MEMBERS]: [{ user_id: "u1", email: "a@example.com", role: "owner", status: "active" }],
     });
     const { container } = render(<MachineCredentials orgId={ORG} canManage />);
-    await waitFor(() => expect(container.querySelectorAll("li").length).toBe(2));
+    await waitFor(() => expect(container.querySelectorAll("tbody tr").length).toBe(2));
     // Asserting only the unowned row would make this a test about a constant.
-    expect(container.querySelector('li[data-owned="yes"]')).not.toBeNull();
-    expect(container.querySelector('li[data-owned="no"]')).not.toBeNull();
+    expect(container.querySelector('tr[data-owned="yes"]')).not.toBeNull();
+    expect(container.querySelector('tr[data-owned="no"]')).not.toBeNull();
     // The picker exists for the unassigned one only.
     expect(screen.getByRole("combobox", { name: /owner for orphan/i })).toBeTruthy();
     expect(screen.queryByRole("combobox", { name: /owner for owned-one/i })).toBeNull();
@@ -148,7 +150,7 @@ describe("the row tells the truth about what it knows", () => {
     });
     const { container } = render(<MachineCredentials orgId={ORG} canManage />);
     const row = await waitFor(() => {
-      const li = container.querySelector('li[data-owned="yes"]');
+      const li = container.querySelector('tr[data-owned="yes"]');
       expect(li).not.toBeNull();
       return li as HTMLElement;
     });
@@ -167,7 +169,7 @@ describe("the row tells the truth about what it knows", () => {
     });
     const { container } = render(<MachineCredentials orgId={ORG} canManage />);
     const row = await waitFor(() => {
-      const li = container.querySelector('li[data-owned="yes"]');
+      const li = container.querySelector('tr[data-owned="yes"]');
       expect(li).not.toBeNull();
       return li as HTMLElement;
     });
@@ -209,7 +211,7 @@ describe("the row tells the truth about what it knows", () => {
       [MEMBERS]: [{ user_id: "u1", email: "owner@demo.tunnex.local", role: "owner", status: "active" }],
     });
     const { container } = render(<MachineCredentials orgId={ORG} canManage />);
-    await waitFor(() => expect(container.querySelectorAll("li").length).toBe(2));
+    await waitFor(() => expect(container.querySelectorAll("tbody tr").length).toBe(2));
     expect(container.querySelector('[data-state="some-refused"]')).toBeNull();
     expect(container.querySelector('[data-badge="refused"]')).toBeNull();
   });

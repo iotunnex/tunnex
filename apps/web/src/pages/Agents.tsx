@@ -185,6 +185,10 @@ export default function Agents() {
               caption="AI agents"
               rows={sortAgents(rows.data)}
               rowKey={(a) => a.device_id}
+              rowAttrs={(a) => ({
+                "data-unattributable": a.unattributable ? "yes" : "no",
+                "data-liveness": agentLiveness(a),
+              })}
               failed={false}
               empty={NO_AGENTS}
               columns={[
@@ -195,11 +199,7 @@ export default function Agents() {
                   cell: (a) => {
                     const live = livenessLabel(a);
                     return (
-                      <span
-                        className="inline-flex items-center gap-2"
-                        data-unattributable={a.unattributable ? "yes" : "no"}
-                        data-liveness={agentLiveness(a)}
-                      >
+                      <span className="inline-flex items-center gap-2">
                         {/* ⛔ THE DOT IS NEVER GREEN ON AN INFERENCE WE DO NOT HAVE. `unknown` and `never`
                             are muted/amber, not a red that claims a fault we cannot attribute. */}
                         <StatusDot tone={live.tone === "ok" ? "on" : live.tone === "warn" ? "warn" : "off"} />

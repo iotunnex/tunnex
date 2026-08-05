@@ -506,6 +506,7 @@ export function DataTable<T>({
   toolbar,
   bulkActions,
   rowActions,
+  rowAttrs,
 }: {
   caption: string;
   columns: Array<Column<T>>;
@@ -586,6 +587,16 @@ export function DataTable<T>({
    * way to choose what they act on is not a feature.
    */
   rowActions?: Array<RowAction<T>>;
+  /**
+   * Data attributes for the `<tr>` — e.g. `{ "data-owned": "yes" }`.
+   *
+   * ⛔ THE ROW IS THE UNIT A TEST SCOPES TO, and without this the state has to be stamped on a span inside
+   * some cell instead. That reads as equivalent and is not: `row.textContent` then covers ONE column, so an
+   * assertion like "the owned row names its owner" silently checks the wrong half of the row and passes for
+   * the wrong reason. Converting a list to a table is exactly when that breaks, because `<li>` was the row
+   * and a cell is not.
+   */
+  rowAttrs?: (row: T) => Record<string, string>;
 }) {
   const searchable = columns.some((c) => c.sortValue);
   const showFilter = filterable ?? searchable;
@@ -847,6 +858,7 @@ export function DataTable<T>({
             {pageRows.map((r: T, i: number) => (
               <tr
                 key={rowKey(r)}
+                {...(rowAttrs?.(r) ?? {})}
                 // Zebra + hover: scanning across a wide row is where the eye loses its line, and this is
                 // presentation only — never the carrier of a state the row needs to announce in words.
                 className={`border-b border-white/5 hover:bg-white/[0.06] ${i % 2 ? "bg-white/[0.02]" : ""}`}

@@ -117,7 +117,10 @@ export default function Settings() {
   const canMachines = can(myRole, "machine:manage"); // owner-only — the GitOps operator credential panel
 
   return (
-    <div>
+    // ⛔ CAPPED, AND THE CAP IS THE POINT. On a 32" display an uncapped settings page stretches every card to
+    // 2000px wide to hold a slug and a checkbox — the text line-length collapses into something unreadable
+    // and the eye has to travel the full width for each field. A maximum turns extra viewport into MARGIN.
+    <div className="mx-auto max-w-[110rem]">
       <h1 className="text-xl font-semibold text-white">Settings</h1>
       <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
       <ErrorText>{error}</ErrorText>
@@ -128,9 +131,15 @@ export default function Settings() {
 
       {/* Self-service 2FA is per-USER (OPEN, every edition), so it shows for every signed-in user
           regardless of org role — unlike the org-level enforce toggle below (enterprise, admin). */}
-      <div className="mt-6">
+      {/* ⛔ ONE GRID, AUTO-FILLED — and `auto-fill` with a MINIMUM is what stops the stretch. A fixed
+          `lg:grid-cols-3` would widen every card to a third of whatever the screen is; this fills the row
+          with as many ~24rem columns as fit and leaves the rest as margin. Adding a section later drops it
+          into the flow and reflows the row — it does not change the width of anything already there.
+
+          ⚠ THE CARDS ARE `items-start`, NOT STRETCHED TO THE TALLEST IN THE ROW. A three-line card padded
+          to the height of a twenty-line neighbour reads as a card with something missing from it. */}
+      <div className="mt-6 grid items-start gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(24rem,1fr))]">
         <MfaSettings />
-      </div>
 
       {/* Directory sync renders OUTSIDE the `isAdmin` block, on purpose but NOT because of a
           live defect — the honest version, after a mutation survivor sent me to measure.
@@ -182,7 +191,7 @@ export default function Settings() {
           {meta?.edition === "enterprise" ? (
             <SsoSettings orgId={org.id} canEdit={emailVerified} />
           ) : (
-            <Card className="mt-4">
+            <Card>
               <h2 className="text-sm font-semibold text-slate-300">
                 Single sign-on
               </h2>
@@ -203,7 +212,7 @@ export default function Settings() {
           {meta?.edition === "enterprise" ? (
             <OrgMfaEnforce orgId={org.id} canEdit={emailVerified} />
           ) : (
-            <Card className="mt-4">
+            <Card>
               <h2 className="text-sm font-semibold text-slate-300">
                 Require two-factor authentication
               </h2>
@@ -218,14 +227,18 @@ export default function Settings() {
             canEdit={emailVerified}
             onSaved={(o) => setOrg(o)}
           />
-          {/* GitOps operator credentials — owner-only (machine:manage). S10.2 registered follow-up. */}
+          {/* ⛔ FULL WIDTH, BECAUSE IT CONTAINS A TABLE. A data table in a 24rem column is a data table with
+              every column truncated — the one section whose content genuinely needs the row. `col-span-full`
+              keeps it in the same grid rather than breaking it out into a second layout that would then
+              drift from this one. */}
           {canMachines && (
-            <div className="mt-4">
+            <div className="col-span-full">
               <MachineCredentials orgId={org.id} canManage={canMachines} />
             </div>
           )}
         </>
       )}
+      </div>
     </div>
   );
 }
@@ -279,7 +292,7 @@ function OrgMfaEnforce({
   }
 
   return (
-    <Card className="mt-4">
+    <Card>
       <h2 className="text-sm font-semibold text-slate-300">
         Require two-factor authentication
       </h2>
@@ -356,7 +369,7 @@ function OrgOVPNToggle({
   }
 
   return (
-    <Card className="mt-4">
+    <Card>
       <h2 className="text-sm font-semibold text-slate-300">OpenVPN</h2>
       <p className="mt-1 text-xs text-slate-400">
         OpenVPN is <span className="text-slate-300">off by default</span>.
@@ -592,7 +605,7 @@ function IdpSyncSection({
   if (gate.kind === "hidden") return null;
   if (gate.kind === "upsell")
     return (
-      <Card className="mt-4">
+      <Card>
         <h2 className="text-sm font-semibold text-slate-300">
           Directory sync — {providerLabel(provider)}
         </h2>
@@ -682,7 +695,7 @@ function IdpSyncSection({
   const copy = tier ? tierCopy(tier) : null;
 
   return (
-    <Card className="mt-4">
+    <Card>
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="text-sm font-semibold text-slate-300">
           Directory sync — {providerLabel(provider)}
@@ -989,7 +1002,7 @@ function DomainSection({
   if (gate.kind === "hidden") return null;
   if (gate.kind === "upsell")
     return (
-      <Card className="mt-4">
+      <Card>
         <h2 className="text-sm font-semibold text-slate-300">Domain capture</h2>
         <p className="mt-1 text-xs text-slate-500">
           Capturing an email domain so new signups auto-join this organization
@@ -1036,7 +1049,7 @@ function DomainSection({
   }
 
   return (
-    <Card className="mt-4">
+    <Card>
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="text-sm font-semibold text-slate-300">Domain capture</h2>
         {/* ⛔ EXACTLY ONE CHIP IS EVER "CURRENT". Three equal chips are a legend with no
