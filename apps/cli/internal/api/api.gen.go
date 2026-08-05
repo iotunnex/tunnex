@@ -426,18 +426,29 @@ type Agent struct {
 	// Address The agent's own /32 on the tunnel — what a grant matches on, and what a flow event is attributed by.
 	Address *string `json:"address"`
 
-	// Connected The agent has a WireGuard key registered, i.e. its config was issued and it can connect. ⚠ NOT a liveness claim — it does not mean traffic is flowing now.
-	Connected *bool              `json:"connected,omitempty"`
-	DeviceId  openapi_types.UUID `json:"device_id"`
+	// ConfigIssued A WireGuard key is registered — the connect command was issued. ⛔ RENAMED FROM `connected`, WHICH WAS A LIE: it reported a row's shape, not a connection, so an agent that had never once handshaked read as connected. It is a statement about ISSUANCE and carries no time component at all.
+	ConfigIssued *bool              `json:"config_issued,omitempty"`
+	DeviceId     openapi_types.UUID `json:"device_id"`
 
 	// GatewayName The gateway this agent connects THROUGH. Its traffic is forwarded there, which is why the policy chain sees it.
-	GatewayName string              `json:"gateway_name"`
-	Name        string              `json:"name"`
-	NodeId      *openapi_types.UUID `json:"node_id,omitempty"`
+	GatewayName string `json:"gateway_name"`
+
+	// GatewayReporting ⛔ THE FIELD THAT STOPS THE UI BLAMING THE AGENT FOR THE GATEWAY'S SILENCE. Peer liveness reaches the control plane ONLY through the gateway's status push, so a dead gateway and a dead agent produce an identical absence of handshakes. When this is false, `online` says nothing about the agent and the surface must render liveness as UNKNOWN, not as offline.
+	GatewayReporting *bool `json:"gateway_reporting,omitempty"`
+
+	// LastHandshakeAt Last WireGuard handshake, as reported by the gateway. `null` means NO handshake has ever been recorded — with `config_issued` true that is "never connected", which is a different fact from "was connected, now stale".
+	LastHandshakeAt *time.Time          `json:"last_handshake_at"`
+	Name            string              `json:"name"`
+	NodeId          *openapi_types.UUID `json:"node_id,omitempty"`
+
+	// Online DERIVED from handshake recency against the same window as `Device.online` — WireGuard has no connection state. ⚠ Only meaningful when `gateway_reporting` is true; the gateway is the sole reporter of peer liveness, so its silence makes every agent on it read offline.
+	Online *bool `json:"online,omitempty"`
 
 	// OwnerEmail The human who enrolled this agent. Resolved from `users`, so it survives them leaving the org.
 	OwnerEmail *string `json:"owner_email"`
+	RxBytes    *int64  `json:"rx_bytes"`
 	Status     string  `json:"status"`
+	TxBytes    *int64  `json:"tx_bytes"`
 
 	// Unattributable No owner is recorded, so activity cannot be tied to a person. ⛔ A statement about the AUDIT TRAIL, never about permission — an unattributable agent is not less authorized.
 	Unattributable bool `json:"unattributable"`

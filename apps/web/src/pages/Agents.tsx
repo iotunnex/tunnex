@@ -3,9 +3,9 @@ import { Link } from "react-router-dom";
 import { api, loadOne, type Loaded } from "../lib/api";
 import {
   agentConnectCommand, AGENT_PREREQ, attributionNote, NO_AGENTS,
-  sortAgents, type AgentRow,
+  sortAgents, livenessLabel, agentLiveness, formatTraffic, type AgentRow,
 } from "../lib/agentview";
-import { Badge, Button, Card, Field, Input, Select } from "../components/ui";
+import { Badge, Button, Card, Field, Input, Select, StatusDot } from "../components/ui";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
 
 type Node = { id: string; name: string; status: string; endpoint?: string | null; last_seen_at?: string };
@@ -183,23 +183,35 @@ export default function Agents() {
           <ul className="mt-3 space-y-1">
             {sortAgents(rows.data).map((a) => {
               const note = attributionNote(a);
+              const live = livenessLabel(a);
+              const traffic = formatTraffic(a.rx_bytes, a.tx_bytes);
               return (
                 <li
                   key={a.device_id}
                   data-unattributable={a.unattributable ? "yes" : "no"}
+                  data-liveness={agentLiveness(a)}
                   className="flex items-center justify-between gap-3 rounded-md bg-white/5 px-3 py-2 text-sm"
                 >
                   <span className="min-w-0 text-slate-200">
-                    {a.name}
+                    {/* ⛔ THE DOT IS NEVER GREEN ON AN INFERENCE WE DO NOT HAVE. `unknown` and `never` are
+                        muted/amber, not a red that claims a fault we cannot attribute. */}
+                    <StatusDot tone={live.tone === "ok" ? "on" : live.tone === "warn" ? "warn" : "off"} />
+                    <span className="ml-2">{a.name}</span>
                     <span className="ml-2 font-mono text-xs text-slate-500">{a.address ?? "no address"}</span>
                     <span className="ml-2 text-xs text-ink-secondary">
                       · via {a.gateway_name}
                       {a.owner_email
                         ? <> · authorised by <span className="text-slate-300">{a.owner_email}</span></>
                         : " · no owner recorded"}
+                      {traffic && <> · <span className="font-mono">{traffic}</span></>}
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-2">
+                    {/* The liveness word carries its own explanation on hover — an operator seeing
+                        "liveness unknown" must be able to learn WHY without leaving the row. */}
+                    <span title={live.detail}>
+                      <Badge tone={live.tone}>{live.label}</Badge>
+                    </span>
                     {note && (
                       <span title={note.detail}><Badge tone="warn">{note.label}</Badge></span>
                     )}

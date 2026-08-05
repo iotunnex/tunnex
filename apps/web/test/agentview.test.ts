@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  agentConnectCommand, agentSummary, attributionNote, NO_AGENTS, sortAgents, type AgentRow,
+  agentConnectCommand, agentSummary, attributionNote, NO_AGENTS, sortAgents,
+  agentLiveness, livenessLabel, formatTraffic, type AgentRow,
 } from "../src/lib/agentview";
 
 describe("the agent surface — S15.3", () => {
@@ -111,5 +112,95 @@ describe("the connect command — S15.3", () => {
 
   it("⚠ the config is chmod 600 — a private key must not be world-readable", () => {
     expect(agentConnectCommand(conf)).toMatch(/chmod 600/);
+  });
+});
+
+/**
+ * ⛔ AGENT LIVENESS — the five states, and the precedence between two of them.
+ *
+ * The whole point of this block is the ONE ordering rule: `unknown` outranks `offline`. Everything else is
+ * a straightforward mapping; that rule is the one a refactor silently breaks, and breaking it produces a
+ * screen that confidently blames an agent for its gateway's silence.
+ */
+describe("agent liveness — S15.3", () => {
+  const now = new Date("2026-08-05T12:00:00Z");
+  const ago = (s: number) => new Date(now.getTime() - s * 1000).toISOString();
+  const live = (o: Partial<AgentRow> = {}): AgentRow => ({
+    device_id: "d1", name: "agent-a", owner_email: "o@x.com", unattributable: false,
+    address: "10.99.0.2", gateway_name: "gw-1", status: "active",
+    config_issued: true, gateway_reporting: true, ...o,
+  });
+
+  it("online when the gateway reports a recent handshake", () => {
+    const a = live({ online: true, last_handshake_at: ago(20) });
+    expect(agentLiveness(a)).toBe("online");
+    expect(livenessLabel(a, now).label).toBe("connected");
+    expect(livenessLabel(a, now).tone).toBe("ok");
+  });
+
+  it("⛔ NEVER-CONNECTED IS NOT OFFLINE — a command issued and never run is a different fact", () => {
+    const a = live({ online: false, last_handshake_at: null });
+    expect(agentLiveness(a)).toBe("never");
+    expect(livenessLabel(a, now).label).toBe("never connected");
+    // ⚠ And it must be ACTIONABLE. This is the most likely state for a new agent, so the detail has to
+    // tell the operator what to do rather than merely restate the badge.
+    expect(livenessLabel(a, now).detail).toMatch(/Run the command on the agent host/);
+  });
+
+  it("offline, with honest recency rather than a bare word", () => {
+    const a = live({ online: false, last_handshake_at: ago(600) });
+    expect(agentLiveness(a)).toBe("offline");
+    expect(livenessLabel(a, now).label).toBe("last seen 10m ago");
+  });
+
+  it("⭐ UNKNOWN OUTRANKS OFFLINE — a silent gateway must never be reported as a dead agent", () => {
+    // Same row as the offline case in every respect EXCEPT the reporter's own liveness. If the precedence
+    // were reversed this would read "last seen 10m ago" — a confident claim about an agent nobody has
+    // heard from OR about, sending an operator to debug the wrong machine.
+    const a = live({ online: false, last_handshake_at: ago(600), gateway_reporting: false });
+    expect(agentLiveness(a)).toBe("unknown");
+    expect(livenessLabel(a, now).label).toBe("liveness unknown");
+    // ⛔ AND IT NAMES THE GATEWAY AS THE SUSPECT.
+    expect(livenessLabel(a, now).detail).toContain("gw-1");
+    expect(livenessLabel(a, now).detail).toMatch(/Check the gateway first/);
+  });
+
+  it("⛔ AND UNKNOWN OUTRANKS ONLINE-LOOKING DATA TOO — a stale `online` must not survive a dead reporter", () => {
+    // The server derives `online` from a handshake it may have recorded before the gateway went quiet.
+    // If the reporter is silent, that derivation is stale by construction and must not be rendered as fact.
+    const a = live({ online: true, last_handshake_at: ago(10), gateway_reporting: false });
+    expect(agentLiveness(a)).toBe("unknown");
+  });
+
+  it("no config issued is distinct from never connected", () => {
+    // ⚠ Nothing was handed over, so there is no command to re-run — the "never connected" advice would be
+    // wrong here, which is why these are two states and not one.
+    const a = live({ config_issued: false });
+    expect(agentLiveness(a)).toBe("not-issued");
+    expect(livenessLabel(a, now).label).toBe("no config issued");
+  });
+
+  it("⛔ NO LIVENESS STATE IS `danger` — a down agent is not a security event", () => {
+    // Fail-closed means a disconnected agent reaches NOTHING. Painting it red claims an incident that has
+    // not occurred, and over-alarming is the same defect as under-alarming, facing the other way.
+    for (const a of [
+      live({ online: true, last_handshake_at: ago(5) }),
+      live({ online: false, last_handshake_at: null }),
+      live({ online: false, last_handshake_at: ago(9999) }),
+      live({ gateway_reporting: false }),
+      live({ config_issued: false }),
+    ]) {
+      expect(livenessLabel(a, now).tone).not.toBe("danger");
+    }
+  });
+
+  it("traffic: an unreported counter renders as absent, never as zero", () => {
+    // ⛔ A device the gateway has never reported has NULL counters. Rendering "0 B" would claim we measured
+    // no traffic, when in fact we measured nothing at all.
+    expect(formatTraffic(null, null)).toBeNull();
+    expect(formatTraffic(undefined, undefined)).toBeNull();
+    expect(formatTraffic(0, 0)).toBe("↓ 0 B · ↑ 0 B");
+    expect(formatTraffic(2048, 1048576)).toBe("↓ 2.0 KB · ↑ 1.0 MB");
+    expect(formatTraffic(15_728_640, 0)).toBe("↓ 15 MB · ↑ 0 B");
   });
 });

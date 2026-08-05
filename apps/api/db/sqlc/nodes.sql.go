@@ -627,23 +627,30 @@ const listAgentsForOrg = `-- name: ListAgentsForOrg :many
 SELECT d.id AS device_id, d.name, d.assigned_ip AS address, d.status,
        d.public_key,
        u.email AS owner_email,
-       n.id AS node_id, n.name AS gateway_name
+       n.id AS node_id, n.name AS gateway_name,
+       ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
+       n.last_seen_at AS gateway_last_seen_at
 FROM devices d
 JOIN nodes n ON n.id = d.node_id
 LEFT JOIN users u ON u.id = d.user_id
+LEFT JOIN device_status ds ON ds.device_id = d.id
 WHERE d.org_id = $1 AND d.kind = 'agent' AND d.deleted_at IS NULL
 ORDER BY (u.email IS NULL) DESC, d.name
 `
 
 type ListAgentsForOrgRow struct {
-	DeviceID    uuid.UUID `json:"device_id"`
-	Name        string    `json:"name"`
-	Address     *string   `json:"address"`
-	Status      string    `json:"status"`
-	PublicKey   string    `json:"public_key"`
-	OwnerEmail  *string   `json:"owner_email"`
-	NodeID      uuid.UUID `json:"node_id"`
-	GatewayName string    `json:"gateway_name"`
+	DeviceID          uuid.UUID          `json:"device_id"`
+	Name              string             `json:"name"`
+	Address           *string            `json:"address"`
+	Status            string             `json:"status"`
+	PublicKey         string             `json:"public_key"`
+	OwnerEmail        *string            `json:"owner_email"`
+	NodeID            uuid.UUID          `json:"node_id"`
+	GatewayName       string             `json:"gateway_name"`
+	LastHandshakeAt   pgtype.Timestamptz `json:"last_handshake_at"`
+	RxBytes           *int64             `json:"rx_bytes"`
+	TxBytes           *int64             `json:"tx_bytes"`
+	GatewayLastSeenAt pgtype.Timestamptz `json:"gateway_last_seen_at"`
 }
 
 // S15.3 — the agent surface's one query.
@@ -654,6 +661,11 @@ type ListAgentsForOrgRow struct {
 //
 // lint:allow-deleted — resolves a RECORDED IDENTITY for display: filtering u.deleted_at would blank the
 // owner of an agent whose owner was soft-deleted.
+// ⛔ LIVENESS COMES FROM `device_status`, WHICH THE GATEWAY WRITES — NOT FROM ANYTHING THE AGENT SENDS.
+// An agent runs plain wg-quick: it has no control-plane channel and reports nothing about itself, ever. The
+// gateway's 30s status push is the ONLY source of a peer's handshake, which is why `n.last_seen_at` is
+// selected alongside it: without the reporter's own clock, a silent gateway and a dead agent are the same
+// row, and the surface would blame the agent for the gateway's silence.
 func (q *Queries) ListAgentsForOrg(ctx context.Context, orgID uuid.UUID) ([]ListAgentsForOrgRow, error) {
 	rows, err := q.db.Query(ctx, listAgentsForOrg, orgID)
 	if err != nil {
@@ -672,6 +684,10 @@ func (q *Queries) ListAgentsForOrg(ctx context.Context, orgID uuid.UUID) ([]List
 			&i.OwnerEmail,
 			&i.NodeID,
 			&i.GatewayName,
+			&i.LastHandshakeAt,
+			&i.RxBytes,
+			&i.TxBytes,
+			&i.GatewayLastSeenAt,
 		); err != nil {
 			return nil, err
 		}
