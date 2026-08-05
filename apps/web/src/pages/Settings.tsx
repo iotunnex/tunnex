@@ -138,8 +138,21 @@ export default function Settings() {
 
           ⚠ THE CARDS ARE `items-start`, NOT STRETCHED TO THE TALLEST IN THE ROW. A three-line card padded
           to the height of a twenty-line neighbour reads as a card with something missing from it. */}
-      <div className="mt-6 grid items-start gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(24rem,1fr))]">
-        <MfaSettings />
+      {/* ⛔ COLUMNS, NOT A GRID — and the previous attempt is why. A CSS grid ALIGNS ROWS: put the
+          twenty-line Entra card beside the three-line 2FA card and every short card in that row is followed
+          by a hole the height of the tallest one. The screen filled with vertical gaps.
+
+          Multi-column flow packs each card under the previous one in its column and never aligns across
+          columns, so height differences cost nothing. It also answers the original constraint the same way
+          the grid was meant to: more width adds a COLUMN, it does not widen a card.
+
+          ⚠ EVERY CHILD NEEDS `break-inside-avoid`, or the browser will split a card down the middle across
+          a column boundary — which looks exactly like a rendering bug and is the one hazard this layout has.
+          The wrapper carries it so no section has to remember. */}
+      <div className="mt-6 columns-1 gap-3.5 lg:columns-2 2xl:columns-3">
+        <div className="mb-3.5 break-inside-avoid">
+          <MfaSettings />
+        </div>
 
       {/* Directory sync renders OUTSIDE the `isAdmin` block, on purpose but NOT because of a
           live defect — the honest version, after a mutation survivor sent me to measure.
@@ -154,14 +167,15 @@ export default function Settings() {
       {org && (
         <>
           {PROVIDERS.map((pv) => (
+            <div key={pv} className="mb-3.5 break-inside-avoid">
             <IdpSyncSection
-              key={pv}
               orgId={org.id}
               provider={pv}
               role={myRole}
               isEnterprise={meta?.edition === "enterprise"}
               canEdit={emailVerified}
             />
+            </div>
           ))}
         </>
       )}
@@ -176,69 +190,72 @@ export default function Settings() {
 
       {org && isAdmin && (
         <>
-          <OrgSection
-            org={org}
-            canEdit={emailVerified}
-            onSaved={(o) => setOrg(o)}
-          />
-          <PoolSection
-            org={org}
-            canEdit={emailVerified}
-            onResized={(o) => setOrg(o)}
-          />
+<div className="mb-3.5 break-inside-avoid">
+            <OrgSection org={org} canEdit={emailVerified} onSaved={(o) => setOrg(o)} />
+          </div>
+<div className="mb-3.5 break-inside-avoid">
+            <PoolSection org={org} canEdit={emailVerified} onResized={(o) => setOrg(o)} />
+          </div>
           {/* SSO config is enterprise-only; hidden in the open edition per /meta
               (watch-item b), with a muted note rather than a dead form. */}
           {meta?.edition === "enterprise" ? (
-            <SsoSettings orgId={org.id} canEdit={emailVerified} />
+            <div className="mb-3.5 break-inside-avoid">
+              <SsoSettings orgId={org.id} canEdit={emailVerified} />
+            </div>
           ) : (
-            <Card>
+            <div className="mb-3.5 break-inside-avoid"><Card>
               <h2 className="text-sm font-semibold text-slate-300">
                 Single sign-on
               </h2>
               <p className="mt-1 text-xs text-slate-500">
                 SSO (Google / Microsoft) is a Tunnex Enterprise feature.
               </p>
-            </Card>
+            </Card></div>
           )}
           {/* Domain capture. The gate is PERMISSION-then-EDITION (domainGate), matching
               CreateDomainClaim's own ordering — authorize at sso_handlers.go:180, edition at :183. */}
-          <DomainSection
-            orgId={org.id}
-            role={myRole}
-            isEnterprise={meta?.edition === "enterprise"}
-            canEdit={emailVerified}
-            myEmail={myEmail}
-          />
+<div className="mb-3.5 break-inside-avoid">
+            <DomainSection
+              orgId={org.id}
+              role={myRole}
+              isEnterprise={meta?.edition === "enterprise"}
+              canEdit={emailVerified}
+              myEmail={myEmail}
+            />
+          </div>
           {meta?.edition === "enterprise" ? (
-            <OrgMfaEnforce orgId={org.id} canEdit={emailVerified} />
+<div className="mb-3.5 break-inside-avoid"><OrgMfaEnforce orgId={org.id} canEdit={emailVerified} /></div>
           ) : (
-            <Card>
+            <div className="mb-3.5 break-inside-avoid"><Card>
               <h2 className="text-sm font-semibold text-slate-300">
                 Require two-factor authentication
               </h2>
               <p className="mt-1 text-xs text-slate-500">
                 Org-wide MFA enforcement is a Tunnex Enterprise feature.
               </p>
-            </Card>
+            </Card></div>
           )}
           {/* OpenVPN is OPEN (every edition) but OFF by default — unlock-then-opt-in (D-S9.5-OPTIN). */}
-          <OrgOVPNToggle
-            org={org}
-            canEdit={emailVerified}
-            onSaved={(o) => setOrg(o)}
-          />
+<div className="mb-3.5 break-inside-avoid">
+            <OrgOVPNToggle org={org} canEdit={emailVerified} onSaved={(o) => setOrg(o)} />
+          </div>
           {/* ⛔ FULL WIDTH, BECAUSE IT CONTAINS A TABLE. A data table in a 24rem column is a data table with
               every column truncated — the one section whose content genuinely needs the row. `col-span-full`
               keeps it in the same grid rather than breaking it out into a second layout that would then
               drift from this one. */}
-          {canMachines && (
-            <div className="col-span-full">
-              <MachineCredentials orgId={org.id} canManage={canMachines} />
-            </div>
-          )}
         </>
       )}
       </div>
+
+      {/* ⛔ OUTSIDE THE COLUMNS, BECAUSE A TABLE CANNOT LIVE IN ONE. Multi-column flow has no equivalent of
+          `col-span-full` — a wide child inside a column region is simply a child of one column, so the table
+          would be squeezed to a third of the page with every column truncated. It sits below, full width,
+          which is also where the mockup puts it. */}
+      {org && isAdmin && canMachines && (
+        <div className="mt-3.5">
+          <MachineCredentials orgId={org.id} canManage={canMachines} />
+        </div>
+      )}
     </div>
   );
 }
@@ -1240,8 +1257,13 @@ function OrgSection({
 
 function SsoSettings({ orgId, canEdit }: { orgId: string; canEdit: boolean }) {
   return (
-    <div className="mt-4 space-y-3">
-      <h2 className="text-sm font-semibold text-slate-300">Single sign-on</h2>
+    // ⚠ A SECTION LABEL, NOT A LOOSE HEADING. This block renders TWO provider cards, so the heading names
+    // the pair — but outside a card it read as text floating on the page background, which is what the
+    // founder saw. Given its own muted, uppercase treatment it reads as a label for the cards beneath it.
+    <div className="space-y-3">
+      <h2 className="px-1 font-mono text-[10px] uppercase tracking-wide text-ink-tertiary">
+        Single sign-on
+      </h2>
       {PROVIDERS.map((p) => (
         <SsoProvider key={p} orgId={orgId} provider={p} canEdit={canEdit} />
       ))}

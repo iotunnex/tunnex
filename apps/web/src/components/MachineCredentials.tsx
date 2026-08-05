@@ -300,7 +300,9 @@ export function MachineCredentials({
                           id={`owner-${c.id}`}
                           value={owner[c.id] ?? ""}
                           onChange={(e) => setOwner((o) => ({ ...o, [c.id]: e.target.value }))}
-                          className="rounded border border-line bg-surface-inset px-2 py-1 text-xs"
+                          // ⚠ CAPPED. An unconstrained <select> in a table cell takes whatever width is left, which pushed
+                          // Assign/Revoke off to the far edge and made the row impossible to scan back across.
+                          className="max-w-[14rem] rounded border border-line bg-surface-inset px-2 py-1 text-xs"
                         >
                           <option value="">Choose an owner…</option>
                           {/* ⛔ UNVERIFIED ACCOUNTS ARE NOT OFFERED (D21). An account that cannot perform
