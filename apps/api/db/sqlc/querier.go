@@ -593,6 +593,11 @@ type Querier interface {
 	//
 	// lint:allow-deleted — resolves a RECORDED IDENTITY for display: filtering u.deleted_at would blank the
 	// owner of an agent whose owner was soft-deleted.
+	// ⛔ LIVENESS COMES FROM `device_status`, WHICH THE GATEWAY WRITES — NOT FROM ANYTHING THE AGENT SENDS.
+	// An agent runs plain wg-quick: it has no control-plane channel and reports nothing about itself, ever. The
+	// gateway's 30s status push is the ONLY source of a peer's handshake, which is why `n.last_seen_at` is
+	// selected alongside it: without the reporter's own clock, a silent gateway and a dead agent are the same
+	// row, and the surface would blame the agent for the gateway's silence.
 	ListAgentsForOrg(ctx context.Context, orgID uuid.UUID) ([]ListAgentsForOrgRow, error)
 	// Org-scoped audit feed with optional filters (actor / action / date range) and
 	// KEYSET pagination on (created_at, id) DESC. Every filter + cursor param is

@@ -36,8 +36,126 @@ export interface AgentRow {
   /** The gateway this agent connects THROUGH — why its traffic is forwarded and therefore policed. */
   gateway_name: string;
   node_id?: string;
-  connected?: boolean;
+  /** A key is registered — the connect command was issued. Says NOTHING about the network. */
+  config_issued?: boolean;
+  online?: boolean;
+  last_handshake_at?: string | null;
+  /** Whether the gateway — the only reporter of this agent's liveness — is itself reporting. */
+  gateway_reporting?: boolean;
+  rx_bytes?: number | null;
+  tx_bytes?: number | null;
   status: string;
+}
+
+/**
+ * ⛔ AN AGENT'S LIVENESS HAS FIVE STATES AND A BOOLEAN CAN CARRY TWO OF THEM.
+ *
+ * The gateway is the ONLY reporter of a peer's handshake — an agent runs plain `wg-quick` and has no
+ * control-plane channel of its own. So an absent handshake has three different causes that look identical
+ * in the data:
+ *
+ *  · the agent was never brought up,
+ *  · the agent was brought up and has since stopped,
+ *  · **the gateway stopped reporting, and we know nothing about the agent either way.**
+ *
+ * > **AN EMPTY LIVENESS SIGNAL READS IDENTICALLY TO A DEAD AGENT AND TO A DEAD REPORTER.** That is the same
+ * > three-states-one-appearance failure that nearly made the EPIC 15 walk report "attribution does not work"
+ * > about a collector that was switched off.
+ *
+ * ⚠ `unknown` OUTRANKS `offline`, ALWAYS. Rendering a confident "offline" while the reporter is silent
+ * blames the agent for the gateway's fault and sends an operator to debug the wrong box.
+ */
+export type AgentLiveness = "online" | "offline" | "never" | "unknown" | "not-issued";
+
+export function agentLiveness(a: AgentRow): AgentLiveness {
+  // No config was ever issued: there is no tunnel to be up or down. Distinct from "never connected",
+  // which means we DID hand over a command and it was never run.
+  if (a.config_issued === false) return "not-issued";
+  // ⛔ THE REPORTER FIRST. Every state below is inferred from handshake data the gateway supplies; if the
+  // gateway is silent, that data is absent for a reason that has nothing to do with the agent.
+  if (a.gateway_reporting === false) return "unknown";
+  if (a.online) return "online";
+  if (!a.last_handshake_at) return "never";
+  return "offline";
+}
+
+/**
+ * The words for each state, and the tone.
+ *
+ * ⚠ NO STATE IS `danger`. An agent being down is not a security event — the fail-closed direction means a
+ * disconnected agent reaches nothing at all. Painting it red claims an incident that has not occurred.
+ */
+export function livenessLabel(
+  a: AgentRow,
+  now: Date = new Date(),
+): { label: string; tone: "ok" | "warn" | "unknown" | "neutral"; detail: string } {
+  switch (agentLiveness(a)) {
+    case "online":
+      return {
+        label: "connected",
+        tone: "ok",
+        // ⚠ HONEST ABOUT WHAT "CONNECTED" MEANS. WireGuard has no connection state; this is handshake
+        // recency, and saying so costs one clause and prevents a wrong bug report.
+        detail: `Handshaked with ${a.gateway_name} ${relAge(a.last_handshake_at, now)}. WireGuard has no connection state — this is derived from handshake recency.`,
+      };
+    case "offline":
+      return {
+        label: `last seen ${relAge(a.last_handshake_at, now)}`,
+        tone: "warn",
+        detail: `This agent has connected before but has not handshaked with ${a.gateway_name} recently. Its tunnel is down, so it can reach nothing — access rules are unaffected.`,
+      };
+    case "never":
+      return {
+        label: "never connected",
+        tone: "warn",
+        // ⛔ THE ACTIONABLE ONE. The connect command was issued and never run — the single most likely
+        // state for a new agent, and the one an operator can actually fix.
+        detail:
+          "The connect command was issued but this agent has never handshaked. Run the command on the agent host; if it was already run, check that wireguard-tools is installed and the gateway's endpoint is reachable from there.",
+      };
+    case "unknown":
+      return {
+        label: "liveness unknown",
+        // ⚠ `unknown` IS ITS OWN TONE, not a quiet grey. An operator must be able to tell "we do not know"
+        // apart from "nothing here" at a glance — the desync_unknown honest-state convention.
+        tone: "unknown",
+        // ⛔ THIS NAMES THE GATEWAY AS THE SUSPECT, NOT THE AGENT.
+        detail: `${a.gateway_name} is not reporting to the control plane, and it is the only source of this agent's liveness. The agent may be perfectly healthy — we cannot tell. Check the gateway first.`,
+      };
+    case "not-issued":
+      return {
+        label: "no config issued",
+        tone: "neutral",
+        detail:
+          "No WireGuard key is registered for this agent, so no connect command has been handed over yet.",
+      };
+  }
+}
+
+/** Coarse recency, matching the Devices page's honest-precision convention. */
+function relAge(at: string | null | undefined, now: Date): string {
+  if (!at) return "never";
+  const secs = Math.max(0, Math.floor((now.getTime() - new Date(at).getTime()) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  return `${Math.floor(secs / 86400)}d ago`;
+}
+
+/** Bytes as the operator reads them. Null stays null — an unreported counter is not zero. */
+export function formatTraffic(rx?: number | null, tx?: number | null): string | null {
+  if (rx == null && tx == null) return null;
+  const h = (n: number) => {
+    const u = ["B", "KB", "MB", "GB", "TB"];
+    let i = 0;
+    let v = n;
+    while (v >= 1024 && i < u.length - 1) {
+      v /= 1024;
+      i++;
+    }
+    return `${v < 10 && i > 0 ? v.toFixed(1) : Math.round(v)} ${u[i]}`;
+  };
+  return `↓ ${h(rx ?? 0)} · ↑ ${h(tx ?? 0)}`;
 }
 
 /**

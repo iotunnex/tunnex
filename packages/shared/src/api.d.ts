@@ -2634,8 +2634,21 @@ export interface components {
             node_id?: string;
             /** @description No owner is recorded, so activity cannot be tied to a person. ⛔ A statement about the AUDIT TRAIL, never about permission — an unattributable agent is not less authorized. */
             unattributable: boolean;
-            /** @description The agent has a WireGuard key registered, i.e. its config was issued and it can connect. ⚠ NOT a liveness claim — it does not mean traffic is flowing now. */
-            connected?: boolean;
+            /** @description A WireGuard key is registered — the connect command was issued. ⛔ RENAMED FROM `connected`, WHICH WAS A LIE: it reported a row's shape, not a connection, so an agent that had never once handshaked read as connected. It is a statement about ISSUANCE and carries no time component at all. */
+            config_issued?: boolean;
+            /** @description DERIVED from handshake recency against the same window as `Device.online` — WireGuard has no connection state. ⚠ Only meaningful when `gateway_reporting` is true; the gateway is the sole reporter of peer liveness, so its silence makes every agent on it read offline. */
+            online?: boolean;
+            /**
+             * Format: date-time
+             * @description Last WireGuard handshake, as reported by the gateway. `null` means NO handshake has ever been recorded — with `config_issued` true that is "never connected", which is a different fact from "was connected, now stale".
+             */
+            last_handshake_at?: string | null;
+            /** @description ⛔ THE FIELD THAT STOPS THE UI BLAMING THE AGENT FOR THE GATEWAY'S SILENCE. Peer liveness reaches the control plane ONLY through the gateway's status push, so a dead gateway and a dead agent produce an identical absence of handshakes. When this is false, `online` says nothing about the agent and the surface must render liveness as UNKNOWN, not as offline. */
+            gateway_reporting?: boolean;
+            /** Format: int64 */
+            rx_bytes?: number | null;
+            /** Format: int64 */
+            tx_bytes?: number | null;
             status: string;
         };
         Node: {

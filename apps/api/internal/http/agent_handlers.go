@@ -40,8 +40,34 @@ func (s apiServer) ListAgents(ctx context.Context, req api.ListAgentsRequestObje
 		}
 		a.OwnerEmail = r.OwnerEmail
 		a.Address = r.Address
-		connected := r.PublicKey != ""
-		a.Connected = &connected
+
+		// ⛔ `config_issued` IS NOT LIVENESS AND NO LONGER PRETENDS TO BE. It was named `connected` and
+		// computed exactly this way, so an agent that had never once handshaked reported connected: the
+		// field described the row's shape and was read as a statement about the network.
+		configIssued := r.PublicKey != ""
+		a.ConfigIssued = &configIssued
+
+		if r.LastHandshakeAt.Valid {
+			hs := r.LastHandshakeAt.Time
+			a.LastHandshakeAt = &hs
+		}
+		a.RxBytes = r.RxBytes
+		a.TxBytes = r.TxBytes
+
+		// ⛔ THE SAME HELPER AND THEREFORE THE SAME WINDOW AS A HUMAN DEVICE. An agent is a peer; if its
+		// online-ness were derived here against a locally-chosen threshold, the two surfaces would disagree
+		// about the same handshake and neither would be wrong on its own terms.
+		online := deviceOnline(a.LastHandshakeAt)
+		a.Online = &online
+
+		// ⛔ AND WHETHER THE REPORTER ITSELF IS ALIVE, because a silent gateway and a dead agent produce an
+		// IDENTICAL absence of handshakes. The agent has no control-plane channel of its own — it runs
+		// wg-quick — so the gateway's status push is the only thing that can ever say an agent is up.
+		// Without this field the UI would render a confident "offline" about an agent it has no information
+		// on, which is the three-states-one-appearance failure the EPIC 15 walk was nearly ruined by.
+		gwReporting := r.GatewayLastSeenAt.Valid && deviceOnline(&r.GatewayLastSeenAt.Time)
+		a.GatewayReporting = &gwReporting
+
 		out = append(out, a)
 	}
 	return api.ListAgents200JSONResponse{Body: out, Headers: api.ListAgents200ResponseHeaders{XRequestId: reqID(ctx)}}, nil
