@@ -473,7 +473,15 @@ export default function Users() {
           <li> blocks the tier could only find a member by matching their email as free text. The role control
           and the action buttons keep their own accessible names, so they stay queryable INSIDE a cell. */}
       <div className="mt-6">
+        {/* ⛔ NO SECOND FILTER BOX. This page has its OWN "Filter members" control above, backed by the
+            tested `filterMembers` helper, and it had it long before the table grew one. Two search inputs on
+            one screen compose SILENTLY: an operator narrows with the first, narrows again with the second,
+            and the empty result names neither of them. The page's filter stays because it is the one that
+            already existed and is pinned by tests.
+
+            ⚠ Sorting is UNAFFECTED — `sortValue` still orders the columns; only the redundant input goes. */}
         <DataTable
+          filterable={false}
           caption="Members"
           rows={shown}
           rowKey={(m) => m.user_id}
