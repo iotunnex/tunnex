@@ -87,6 +87,10 @@ export default function Devices() {
   const [kind, setKind] = useState<ExportKind>("wireguard");
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
+  // ⛔ THE DIALOG'S OWN ERROR. A create failure was written to the PAGE-level error, which renders behind
+  // the modal — the operator sees a dialog that did nothing, with the explanation on the obscured page. A
+  // message about a dialog belongs in the dialog.
+  const [createError, setCreateError] = useState<string | null>(null);
   const ovpnEnabled = org?.ovpn_enabled === true;
 
   async function loadDevices(orgId: string) {
@@ -173,7 +177,7 @@ export default function Devices() {
     const target = chosen ?? defaultDeviceNode(nodes);
     if (!org || !target) return;
     setBusy(true);
-    setError(null);
+    setCreateError(null);
     setSecret(null);
     if (kind === "openvpn") {
       // OpenVPN export: mint an OVPN device + its one-time .ovpn (opt-in gated server-side).
@@ -186,7 +190,7 @@ export default function Devices() {
       );
       setBusy(false);
       if (error || !data) {
-        setError(
+        setCreateError(
           apiErrorMessage(error, "Could not create the OpenVPN profile."),
         );
         return;
@@ -214,7 +218,7 @@ export default function Devices() {
     );
     setBusy(false);
     if (error || !data) {
-      setError(apiErrorMessage(error, "Could not create the device."));
+      setCreateError(apiErrorMessage(error, "Could not create the device."));
       return;
     }
     setCreating(false);
@@ -238,7 +242,6 @@ export default function Devices() {
       setError(apiErrorMessage(error, "Could not revoke the device."));
       return;
     }
-    await loadDevices(org.id);
   }
 
   /**
@@ -265,7 +268,27 @@ export default function Devices() {
       setError(apiErrorMessage(error, `Could not ${action} the device.`));
       return;
     }
-    await loadDevices(org.id);
+  }
+
+  /**
+   * ⛔ ONE REFETCH AFTER THE BATCH, NOT ONE PER ROW — this is the "I have to reload the page" defect.
+   *
+   * Each mutation used to refetch on its own, so a bulk action on N rows fired N identical GETs
+   * CONCURRENTLY. They resolve in arbitrary order and the LAST to land wins — which may be a snapshot taken
+   * before the later mutations committed. The list then shows a state that was briefly true and is not any
+   * more, and the only way out is a manual reload.
+   *
+   * > **N CONCURRENT READS OF A CHANGING RESOURCE DO NOT CONVERGE ON THE NEWEST ONE.** They converge on
+   * > whichever the network happened to deliver last.
+   *
+   * ⚠ THE SELECTION IS DELIBERATELY *NOT* CLEARED. It self-corrects: once the rows are approved, `Approve`
+   * reports "only a device awaiting approval can be approved" and disables itself. Force-clearing would mean
+   * remounting the table, which would also discard the operator's filter, sort and page — throwing away
+   * three things to fix one that was not broken.
+   */
+  async function runBatch(fn: () => Promise<unknown>) {
+    await fn();
+    if (org) await loadDevices(org.id);
   }
 
   function download() {
@@ -298,7 +321,7 @@ export default function Devices() {
             four-control card sitting between the page title and the roster — the roster is what this screen
             is FOR, and it began below a form most visits do not use. A trigger costs one click on the rare
             visit and gives the list the top of the page on every other one. */}
-        <Button onClick={() => setCreating(true)}>Add device</Button>
+        <Button onClick={() => { setCreateError(null); setCreating(true); }}>Add device</Button>
       </div>
 
       <ErrorText>{error}</ErrorText>
@@ -407,6 +430,11 @@ export default function Devices() {
             </p>
           )}
       </form>
+          {/* ⛔ IN THE DIALOG, WHERE THE ACTION WAS TAKEN. This is the exact message the founder saw
+              rendered on the page BEHIND the modal — "this gateway can't route full-tunnel internet traffic
+              yet; use split tunnel" — a refusal the operator could not read without dismissing the thing
+              that caused it. */}
+          <ErrorText>{createError}</ErrorText>
         </Modal>
       )}
 
@@ -514,7 +542,7 @@ export default function Devices() {
               unavailable: (d) =>
                 d.status === "pending" ? null : "Only a device awaiting approval can be approved.",
               run: (ds) => {
-                void Promise.all(ds.map((d) => decide(d.id, "approve")));
+                void runBatch(() => Promise.all(ds.map((d) => decide(d.id, "approve"))));
               },
             },
             {
@@ -524,7 +552,7 @@ export default function Devices() {
               unavailable: (d) =>
                 d.status === "pending" ? null : "Only a device awaiting approval can be rejected.",
               run: (ds) => {
-                void Promise.all(ds.map((d) => decide(d.id, "reject")));
+                void runBatch(() => Promise.all(ds.map((d) => decide(d.id, "reject"))));
               },
             },
             {
@@ -536,7 +564,7 @@ export default function Devices() {
               unavailable: (d) =>
                 d.status === "active" ? null : `A ${d.status} device cannot be revoked.`,
               run: (ds) => {
-                void Promise.all(ds.map((d) => revoke(d.id)));
+                void runBatch(() => Promise.all(ds.map((d) => revoke(d.id))));
               },
             },
           ]}

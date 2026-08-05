@@ -17,6 +17,9 @@ import { MemoryRouter } from "react-router-dom";
 // item, not a retroactive suite for the whole app.
 
 const posts: Array<{ path: string; body: Record<string, unknown> }> = [];
+// ⚠ A failure switch: the mock had no way to make a create FAIL, so no test could reach the error path —
+// which is exactly the path the founder hit and found rendering behind the dialog.
+let createFails = false;
 
 vi.mock("../src/lib/api", () => ({
   apiErrorMessage: (_e: unknown, fallback: string) => fallback,
@@ -36,6 +39,7 @@ vi.mock("../src/lib/api", () => ({
     }),
     POST: vi.fn(async (path: string, opts: { body: Record<string, unknown> }) => {
       posts.push({ path, body: opts.body });
+      if (createFails) return { error: { error: { message: "refused" } } };
       return { data: { device: { status: "active" }, config: "wg-conf" } };
     }),
   },
@@ -120,5 +124,35 @@ describe("Devices — creation is a dialog, not a permanent form", () => {
   it("⛔ THE MIGRATION BANNER IS GONE — a first-time reader is not owed a note about where something USED to be", () => {
     render(<MemoryRouter><Devices /></MemoryRouter>);
     expect(screen.queryByText(/Gateways moved to their own screen/i)).toBeNull();
+  });
+});
+
+/**
+ * ⛔ A DIALOG'S REFUSAL BELONGS IN THE DIALOG.
+ *
+ * Ticking "Full tunnel" on a gateway that cannot route it returns
+ * `this gateway can't route full-tunnel internet traffic yet; use split tunnel`. That message was written to
+ * the PAGE-level error and rendered BEHIND the open modal — the founder saw a dialog that had visibly done
+ * nothing, with the explanation on the obscured page underneath it.
+ */
+describe("Devices — a create failure is readable where it happened", () => {
+  it("⛔ THE ERROR RENDERS INSIDE THE DIALOG, AND THE DIALOG STAYS OPEN", async () => {
+    createFails = true;
+    try {
+    render(<MemoryRouter><Devices /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "Add device" }));
+    fireEvent.change(screen.getByPlaceholderText("my-laptop"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: /create device|export openvpn profile/i }));
+
+    // ⚠ The mock's apiErrorMessage returns the FALLBACK, so this asserts the string the component renders.
+    // The claim is unchanged: the refusal is readable without dismissing the thing that caused it.
+    const msg = await screen.findByText(/Could not create the device/i);
+    expect(msg).toBeTruthy();
+    // ⛔ And the dialog is STILL OPEN with the typed name intact: dismissing on error would discard the
+    // operator's input and hide the message explaining why.
+    expect((screen.getByPlaceholderText("my-laptop") as HTMLInputElement).value).toBe("x");
+    } finally {
+      createFails = false; // a module-level switch left set would fail every later test in this file
+    }
   });
 });
