@@ -131,6 +131,36 @@ func (s apiServer) CreateDevice(ctx context.Context, req api.CreateDeviceRequest
 
 // RevokeDevice POST /api/v1/organizations/{orgId}/devices/{deviceId}/revoke. A
 // user may revoke their own device; an admin may revoke any.
+// RemoveDevice DELETE /organizations/{orgId}/devices/{deviceId} — take a REVOKED device off the roster.
+//
+// ⛔ SOFT, AND THE `ovpn_client_certs` CASCADE IS THE REASON. The OpenVPN CRL is built from that table, and
+// every FK into `devices` is ON DELETE CASCADE — so a hard delete would drop the device's serial out of the
+// CRL and UN-REVOKE the credential on the wire. A tidy-up that silently restores access.
+//
+// > **A DELETE THAT CASCADES INTO A REVOCATION LIST IS AN UN-REVOKE WEARING A HOUSEKEEPING VERB.**
+//
+// ⚠ THE SAME OWNERSHIP GATE AS REVOKE, deliberately: removing is strictly less powerful (the credential is
+// already dead), so anyone who could revoke this device may tidy it away, and nobody else.
+func (s apiServer) RemoveDevice(ctx context.Context, req api.RemoveDeviceRequestObject) (api.RemoveDeviceResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgView); err != nil {
+		return nil, err
+	}
+	p, _ := authctx.PrincipalFrom(ctx)
+	role, _ := p.RoleIn(req.OrgId)
+
+	dev, err := s.devices.Get(ctx, req.OrgId, req.DeviceId)
+	if err != nil {
+		return nil, err
+	}
+	if dev.UserID != p.UserID && !rbac.Can(role, rbac.PermMemberManage) {
+		return nil, apierr.New(403, "forbidden", "you may not remove this device")
+	}
+	if err := s.devices.RemoveRevoked(ctx, req.OrgId, p.UserID, req.DeviceId); err != nil {
+		return nil, err
+	}
+	return api.RemoveDevice204Response{Headers: api.RemoveDevice204ResponseHeaders{XRequestId: reqID(ctx)}}, nil
+}
+
 func (s apiServer) RevokeDevice(ctx context.Context, req api.RevokeDeviceRequestObject) (api.RevokeDeviceResponseObject, error) {
 	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgView); err != nil {
 		return nil, err

@@ -930,6 +930,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/devices/{deviceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                deviceId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a REVOKED device from the roster (soft delete)
+         * @description ⛔ SOFT, AND THE CASCADE IS WHY. Every foreign key into `devices` is ON DELETE CASCADE, including `ovpn_client_certs` — and the OpenVPN CRL is built from that table. A hard delete would drop the device's serial out of the CRL and thereby UN-REVOKE the credential on the wire: a tidy-up that silently restores access. It would also destroy the device's posture history, its telemetry and any policy rule naming it as an agent source.
+         *     ⚠ REVOKED ONLY. Removing an ACTIVE device would leave a live credential with no surface to revoke it from — invisible and still working. A device that is not revoked answers 409.
+         */
+        delete: operations["removeDevice"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/devices/pending": {
         parameters: {
             query?: never;
@@ -4371,6 +4395,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    removeDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                deviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed from the roster. The revocation record and the CRL entry are untouched. */
+            204: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The device is not revoked. Revoke it first. */
+            409: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             default: components["responses"]["Error"];
         };
