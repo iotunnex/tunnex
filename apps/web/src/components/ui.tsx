@@ -391,6 +391,40 @@ export interface Column<T> {
 
 
 /**
+ * ONE ACTION, DECLARED ONCE, APPLIED TO A SELECTION.
+ *
+ * ⛔ THE PROBLEM THIS REPLACES: every row carrying its own Edit / Disable / Delete. On a fifteen-row table
+ * that is forty-five buttons, the same three verbs re-drawn fifteen times, and the row's actual CONTENT — who
+ * may reach what — is squeezed into whatever space they leave. It also makes acting on five rows five separate
+ * gestures with five separate confirmations.
+ *
+ * The verbs move to ONE bar. What makes that safe rather than merely tidier is `unavailable`.
+ */
+export interface RowAction<T> {
+  key: string;
+  label: string;
+  /**
+   * `single` — the verb only makes sense on exactly one row (Edit a rule; you cannot edit five at once).
+   * `many` (default) — it applies across the selection.
+   */
+  arity?: "single" | "many";
+  danger?: boolean;
+  /**
+   * ⛔ THE FIELD THAT MAKES A BULK VERB HONEST. Return a reason and this row cannot take this action.
+   *
+   * A selection is almost never uniform: five rules where one is GitOps-managed, or three devices where one
+   * is already revoked. Without this, a bulk action has two bad options — silently skip the ineligible rows,
+   * or silently attempt them. Both leave the operator believing they did something they did not do.
+   *
+   * > **THE SET AN ACTION APPLIES TO MUST BE STATED BEFORE IT RUNS, NOT DISCOVERED AFTERWARDS.** The bar
+   * > says "3 of 5 selected" and names the reason for the other two.
+   */
+  unavailable?: (row: T) => string | null;
+  /** Receives ONLY the eligible rows — the same set the bar counted out loud. */
+  run: (rows: T[]) => void;
+}
+
+/**
  * The page numbers to render, with `null` marking an elided run.
  *
  * ⛔ ALWAYS FIRST AND LAST, ALWAYS THE CURRENT ONE AND ITS NEIGHBOURS. A pager that elides the last page
@@ -461,6 +495,7 @@ export function DataTable<T>({
   onSelectionChange,
   toolbar,
   bulkActions,
+  rowActions,
 }: {
   caption: string;
   columns: Array<Column<T>>;
@@ -536,6 +571,11 @@ export function DataTable<T>({
   toolbar?: ReactNode;
   /** Rendered in the selection footer. Receives the selected keys and a clear callback. */
   bulkActions?: (selected: string[], clear: () => void) => ReactNode;
+  /**
+   * Declarative verbs for the selection bar. Supplying these IMPLIES `selectable` — a set of actions with no
+   * way to choose what they act on is not a feature.
+   */
+  rowActions?: Array<RowAction<T>>;
 }) {
   const searchable = columns.some((c) => c.sortValue);
   const showFilter = filterable ?? searchable;
@@ -549,6 +589,7 @@ export function DataTable<T>({
 
   // The first column is the name column by convention here; using it keeps the checkbox's name meaningful
   // without every call site having to remember a prop.
+  const showSelect = selectable || !!rowActions?.length;
   const labelFor = (r: T) =>
     rowLabel?.(r) ?? (columns[0]?.sortValue ? String(columns[0].sortValue(r)) : rowKey(r));
 
@@ -645,7 +686,7 @@ export function DataTable<T>({
             {/* Sticky: on a long roster the header is the only thing telling you what a column means, and
                 scrolling past it turns every cell into an unlabelled string. */}
             <tr className="sticky top-0 z-10 bg-surface-1 text-[11px] uppercase tracking-wide text-slate-500">
-              {selectable && (
+              {showSelect && (
                 <th scope="col" className="w-8 border-b border-white/10 py-1.5 pr-2">
                   {/* ⛔ THIS BOX SELECTS THE PAGE, AND ITS LABEL SAYS SO. A header checkbox that quietly
                       means "all 500 matches" is how a bulk revoke becomes an outage — the operator sees ten
@@ -717,7 +758,7 @@ export function DataTable<T>({
                 // presentation only — never the carrier of a state the row needs to announce in words.
                 className={`border-b border-white/5 hover:bg-white/[0.06] ${i % 2 ? "bg-white/[0.02]" : ""}`}
               >
-                {selectable && (
+                {showSelect && (
                   <td className="w-8 py-1.5 pr-2 align-middle">
                     <input
                       type="checkbox"
@@ -818,7 +859,7 @@ export function DataTable<T>({
       {/* THE SELECTION BAR. Always present when the table is selectable — an empty-state bar that says
           "0 selected" teaches where the count will appear, and a bar that only materialises on the first
           click moves the layout under the operator's cursor. */}
-      {selectable && (
+      {showSelect && (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-xs">
           <span className="text-ink-secondary">
             <span className="tabular-nums text-slate-300">{selected.size}</span> selected
@@ -854,7 +895,45 @@ export function DataTable<T>({
             {selected.size === 0 ? (
               <span className="text-ink-tertiary">Select one or more rows to act on them</span>
             ) : (
-              bulkActions?.([...selected], () => setSel(new Set()))
+              <>
+                {rowActions?.map((a) => {
+                  const chosen = rows.filter((r) => selected.has(rowKey(r)));
+                  const eligible = chosen.filter((r) => !a.unavailable?.(r));
+                  const arityOK = a.arity === "single" ? chosen.length === 1 : chosen.length > 0;
+                  // ⛔ THE FIRST REASON WINS AND IS SHOWN. A disabled control with no explanation is a
+                  // dead end an operator cannot reason about — they cannot tell "not allowed" from "broken".
+                  const reason = chosen.map((r) => a.unavailable?.(r)).find(Boolean) ?? undefined;
+                  const blocked = !arityOK || eligible.length === 0;
+                  return (
+                    <span key={a.key} className="flex items-center gap-1">
+                      {/* ⚠ THE PARTIAL COUNT, SAID BEFORE THE CLICK. A selection is almost never uniform,
+                          and an action that quietly applies to a subset leaves the operator believing they
+                          did something they did not do. */}
+                      {!blocked && eligible.length < chosen.length && (
+                        <span className="text-warn" title={reason}>
+                          {eligible.length} of {chosen.length}
+                        </span>
+                      )}
+                      <Button
+                        size="sm"
+                        variant={a.danger ? "danger" : "ghost"}
+                        disabled={blocked}
+                        title={
+                          !arityOK && a.arity === "single"
+                            ? `${a.label} applies to exactly one row at a time`
+                            : eligible.length === 0
+                              ? reason
+                              : undefined
+                        }
+                        onClick={() => a.run(eligible)}
+                      >
+                        {a.label}
+                      </Button>
+                    </span>
+                  );
+                })}
+                {bulkActions?.([...selected], () => setSel(new Set()))}
+              </>
             )}
           </span>
         </div>

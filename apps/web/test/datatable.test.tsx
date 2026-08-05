@@ -375,3 +375,103 @@ describe("pageWindow — always first, last, and the neighbourhood", () => {
     expect(w).toContain(11);
   });
 });
+
+/**
+ * ⛔ ONE BAR INSTEAD OF THREE BUTTONS PER ROW — and the thing that makes it safe is `unavailable`.
+ *
+ * Moving verbs off the rows is a layout win. The RISK it introduces is that a selection is almost never
+ * uniform: five rules where one is GitOps-managed, three devices where one is already revoked. A bulk verb
+ * then has two bad options — silently skip the ineligible rows, or silently attempt them — and both leave
+ * the operator believing they did something they did not do.
+ *
+ * > **THE SET AN ACTION APPLIES TO MUST BE STATED BEFORE IT RUNS, NOT DISCOVERED AFTERWARDS.**
+ */
+describe("DataTable — row actions in one bar", () => {
+  const ROWS3: Row[] = [
+    { id: "1", name: "alpha", owner: "a@x.com", state: "active" },
+    { id: "2", name: "bravo", owner: "b@x.com", state: "locked" },
+    { id: "3", name: "cocoa", owner: "c@x.com", state: "active" },
+  ];
+
+  let ran: string[][] = [];
+  function acts(rows: Row[] = ROWS3) {
+    ran = [];
+    render(
+      <DataTable<Row>
+        caption="Widgets"
+        rows={rows}
+        failed={false}
+        rowKey={(r) => r.id}
+        empty="none"
+        rowActions={[
+          { key: "edit", label: "Edit", arity: "single", run: (rs) => ran.push(rs.map((r) => r.name)) },
+          {
+            key: "del",
+            label: "Delete",
+            danger: true,
+            unavailable: (r) => (r.state === "locked" ? "This widget is locked." : null),
+            run: (rs) => ran.push(rs.map((r) => r.name)),
+          },
+        ]}
+        columns={[{ key: "name", header: "Name", sortValue: (r) => r.name, cell: (r) => <span>{r.name}</span> }]}
+      />,
+    );
+  }
+
+  const pick = (name: string) => fireEvent.click(screen.getByRole("checkbox", { name: `Select ${name}` }));
+
+  it("⚠ rowActions IMPLIES selectable — a set of verbs with no way to choose what they act on is not a feature", () => {
+    acts();
+    expect(screen.getAllByRole("checkbox").length).toBeGreaterThan(0);
+    expect(screen.getByText("Select one or more rows to act on them")).toBeTruthy();
+  });
+
+  it("a `single` verb is disabled for two rows, and says why", () => {
+    acts();
+    pick("alpha");
+    expect(screen.getByRole("button", { name: "Edit" }).hasAttribute("disabled")).toBe(false);
+    pick("cocoa");
+    const edit = screen.getByRole("button", { name: "Edit" });
+    expect(edit.hasAttribute("disabled")).toBe(true);
+    // ⛔ A disabled control with no explanation is a dead end: the operator cannot tell "not allowed" from
+    // "broken", and will click it again.
+    expect(edit.getAttribute("title")).toMatch(/exactly one row/);
+  });
+
+  it("⭐ A MIXED SELECTION SAYS HOW MANY THE VERB WILL ACTUALLY TOUCH, BEFORE THE CLICK", () => {
+    acts();
+    pick("alpha");
+    pick("bravo"); // locked — ineligible for Delete
+    expect(screen.getByText("1 of 2")).toBeTruthy();
+    expect(screen.getByText("1 of 2").getAttribute("title")).toBe("This widget is locked.");
+  });
+
+  it("⭐ …AND IT RUNS ON EXACTLY THE SET IT COUNTED", () => {
+    // The count would be theatre if `run` still received the ineligible row. This is the assertion that
+    // makes the warning mean something.
+    acts();
+    pick("alpha");
+    pick("bravo");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(ran).toEqual([["alpha"]]);
+  });
+
+  it("a verb no selected row can take is DISABLED and carries the reason", () => {
+    acts();
+    pick("bravo");
+    const del = screen.getByRole("button", { name: "Delete" });
+    expect(del.hasAttribute("disabled")).toBe(true);
+    expect(del.getAttribute("title")).toBe("This widget is locked.");
+  });
+
+  it("⚠ AND THE ORDINARY CASE STILL WORKS — an all-eligible selection shows no partial count", () => {
+    // Without this, "always disabled" or "always warn" would satisfy every assertion above while making the
+    // bar useless.
+    acts();
+    pick("alpha");
+    pick("cocoa");
+    expect(screen.queryByText(/^\d+ of \d+$/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(ran).toEqual([["alpha", "cocoa"]]);
+  });
+});
