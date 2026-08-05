@@ -112,7 +112,21 @@ describe("⛔ THE CHIP COUNTS AND THE GROUPING ARE ONE DERIVATION", () => {
     expect(
       applyGatewayFilter(g, "healthy").flatMap((x) => x.rows.map((r) => r.name)),
     ).toEqual(["ok"]);
-    expect(applyGatewayFilter(g, "all")).toHaveLength(3);
+    // ⛔ "ALL" MEANS EVERY GROUP THAT HAS ROWS, NOT EVERY GROUP. An empty group under All is a heading and
+    // a sentence saying nothing is here, costing a screen of scrolling between the groups that do have
+    // rows — and the CHIP already reports "Healthy (0)". Rendering a card to repeat the count is the answer
+    // twice, the second time in the space where content should be.
+    expect(applyGatewayFilter(g, "all").map((x) => x.key)).toEqual(["degraded", "healthy"]);
+
+    // ⚠ AND THE EXCEPTION, WHICH IS WHY THIS IS NOT A ONE-LINE FILTER: an EXPLICITLY SELECTED group renders
+    // even when empty. Its emptiness is the answer to the question the operator just asked, and a chosen
+    // filter that produces a blank page is indistinguishable from a page that failed to load.
+    //
+    // ⚠ `revoked` is deliberately NOT a value of GatewayFilter — only All / Healthy / Needs attention are
+    // selectable — so the exception is exercised through `healthy` on a fleet with none.
+    const noneHealthy = groupGateways([node({ id: "b", name: "bad", policy_degraded: true })]);
+    expect(applyGatewayFilter(noneHealthy, "healthy").map((x) => x.key)).toEqual(["healthy"]);
+    expect(applyGatewayFilter(noneHealthy, "healthy")[0].rows).toEqual([]);
   });
 });
 
