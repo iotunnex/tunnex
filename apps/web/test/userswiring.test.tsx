@@ -554,3 +554,33 @@ describe("Users — the ACTIONS column follows the same rule as Devices", () => 
     expect(within(table).getByRole("columnheader", { name: "Devices" })).toBeTruthy();
   });
 });
+
+/**
+ * ⛔ ONE FILTER PER SCREEN. Users has had its own "Filter members" control, backed by the tested
+ * `filterMembers` helper, since long before the shared table grew a filter of its own. When the table gained
+ * one, this page rendered BOTH — and two search inputs on one screen compose silently: an operator narrows
+ * with the first, narrows again with the second, and the empty result names neither.
+ *
+ * > **A DUPLICATED CONTROL IS NOT MERELY UNTIDY — IT IS A SECOND, INVISIBLE PREDICATE** on a list whose
+ * > emptiness the operator will read as a fact about the org.
+ *
+ * Found by the founder on screen. This pins it, because the collision arrives from a SHARED component's
+ * default and would return the moment another page adopts the table without checking.
+ */
+describe("Users — exactly one filter control", () => {
+  it("⛔ the page renders ONE search input, not the table's as well", async () => {
+    withAuth(<Users />);
+    await waitFor(() => screen.getByRole("table", { name: "Members" }));
+    expect(screen.getAllByRole("searchbox")).toHaveLength(1);
+  });
+
+  it("⚠ and the one that survived is the PAGE's — sorting is untouched by its removal", async () => {
+    // The negative half: turning the table's filter off must not also disable its sorting, which is a
+    // different affordance that happens to be configured next door.
+    withAuth(<Users />);
+    await waitFor(() => screen.getByRole("table", { name: "Members" }));
+    expect(screen.getByLabelText("Filter members")).toBeTruthy();
+    const roleHeader = screen.getByRole("columnheader", { name: "Role" });
+    expect(within(roleHeader).queryByRole("button")).not.toBeNull();
+  });
+});
