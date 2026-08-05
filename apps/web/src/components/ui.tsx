@@ -264,6 +264,52 @@ export function Modal({
 // primitive that ships while its consumers keep the workaround has only half landed.
 
 /** A named region. `aria-labelledby` is the point: an unnamed region cannot be found by role + name. */
+/**
+ * A labelled region with NO ENCLOSURE — the dashboard's default container.
+ *
+ * ⛔ EIGHTEEN BORDERED CONTAINERS ON ONE SCREEN, ALL WEIGHING THE SAME, IS WHY THIS EXISTS. `GLASS` is a good
+ * material applied to everything, so it distinguished nothing: "Needs attention" was panel 10 of 11 and
+ * looked exactly like "Kubernetes". The eye had no entry point and had to filter all eighteen.
+ *
+ * > **A BORDER IS THE MOST EXPENSIVE WAY TO SAY "THESE THINGS ARE DIFFERENT" AND THE LEAST INFORMATIVE** —
+ * > it says only *different*, never *how*, and never *which matters*.
+ *
+ * So separation moves to space and typography: a small muted label (which says WHAT the group is, something
+ * a border cannot) over content, with a hairline only between vertical neighbours. `Panel` stays for the one
+ * or two things that must be looked at first — **scarcity is what makes material read as emphasis**, and
+ * spending `GLASS` on one element is the condition under which the aesthetic works, not a compromise of it.
+ *
+ * ⚠ THE ACCESSIBLE NAME SURVIVES THE BORDER'S REMOVAL. `Panel` named its region via `aria-labelledby`;
+ * dropping the box must not drop that, or "quieter" would mean "unnavigable by anything that is not an eye".
+ */
+export function Section({
+  title,
+  actions,
+  className = "",
+  children,
+}: {
+  title: string;
+  actions?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  const id = useId();
+  return (
+    <section aria-labelledby={id} className={`flex flex-col gap-2 ${className}`}>
+      <div className="flex items-baseline justify-between gap-2">
+        <h2
+          id={id}
+          className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-tertiary"
+        >
+          {title}
+        </h2>
+        {actions}
+      </div>
+      <div className="flex-1">{children}</div>
+    </section>
+  );
+}
+
 export function Panel({
   title,
   actions,

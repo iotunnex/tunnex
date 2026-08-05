@@ -1,6 +1,4 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Icon, type IconName } from "../components/Icon";
-import { GLASS } from "../components/ui";
 import { isEnterprise, type Edition } from "../lib/edition";
 import { HealthStatus } from "../components/HealthStatus";
 import { formatBytes, hubSetView } from "../lib/hubsetview";
@@ -37,6 +35,7 @@ import {
   ListItem,
   Loading,
   Panel,
+  Section,
 } from "../components/ui";
 import { attributionBadge, gatewayHealthRow, policyHealthBadge } from "../lib/healthview";
 import { agentSummary, type AgentRow } from "../lib/agentview";
@@ -385,7 +384,6 @@ export default function Dashboard() {
                 >
                   <Stat
                     label="Members"
-                    icon="users"
                     value={members}
                     sub={
                       pendingInvites === null
@@ -395,7 +393,6 @@ export default function Dashboard() {
                   />
                   <Stat
                     label="Devices"
-                    icon="laptop"
                     value={devices}
                     sub={
                       pending.state === "ok"
@@ -405,7 +402,6 @@ export default function Dashboard() {
                   />
                   <Stat
                     label="Gateways"
-                    icon="server"
                     value={gateways}
                     sub={
                       degraded === null
@@ -419,7 +415,6 @@ export default function Dashboard() {
                       the safer of two honest compositions. A render-floor violation in a WORD is still one. */}
                   <Stat
                     label="Seen in last 3 min"
-                    icon="waves"
                     value={seen}
                     sub="derived from WireGuard handshake liveness"
                     tone={
@@ -428,7 +423,6 @@ export default function Dashboard() {
                   />
                   <Stat
                     label="Sites"
-                    icon="network"
                     value={sites}
                     sub={siteSub}
                   />
@@ -439,7 +433,6 @@ export default function Dashboard() {
                   {enterprise && (
                     <Stat
                       label="Access Rules"
-                      icon="shield"
                       value={rules}
                       sub={zeroTrust === null ? null : zeroTrust}
                     />
@@ -449,7 +442,6 @@ export default function Dashboard() {
                   {enterprise && (
                     <Stat
                       label="Pending approvals"
-                      icon="user-plus"
                       value={pending}
                       sub="awaiting an admin"
                     />
@@ -458,7 +450,7 @@ export default function Dashboard() {
 
                 {/* Not in a grid — a sibling in the page column, so a `col-span-*` here would be a dead class. */}
                 {fresh && (
-                  <Panel title="Get started">
+                  <Section title="Get started">
                     {/* The floating "Get started" widget is CUT — it becomes this. Rendered only when we KNOW
                         the org is empty: showing it because a fetch failed would tell a founder with a working
                         fleet that they have nothing. */}
@@ -475,7 +467,7 @@ export default function Dashboard() {
                     >
                       Enroll a gateway →
                     </Link>
-                  </Panel>
+                  </Section>
                 )}
 
                 {/* ⛔ THE BENTO: ONE grid, and EVERY ROW SUMS TO 12. A ragged row is the tell that a panel
@@ -493,8 +485,52 @@ export default function Dashboard() {
                 {/* README panel spans on the 12-column base: rows 4+4+4, 4+4+4, 8+4. */}
                 {/* One column until there is room for twelve. A `col-span-4` panel on a 12-column grid at
                     390px is ~100px wide, and a 120px donut inside it pushes the page sideways. */}
-                <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
-                  <Panel
+                {/* ⛔ THE ONE CARD, AND IT IS FIRST. This was panel TEN of eleven, wearing the same glass
+                    as Kubernetes — the only thing on the page that asks for a DECISION, ranked below
+                    everything that merely reports. Material is now spent here and nowhere else on this
+                    screen: scarcity is what makes it read as emphasis.
+
+                    ⚠ At zero it must render ONE LINE, never an empty card — an enclosure that exists to say
+                    nothing is here is the emptiness-repeating-a-count defect already fixed on Gateways. */}
+                  <Panel title="Needs Attention" className="mb-3">
+                    {attention === null ? (
+                      <Loading />
+                    ) : attention.length === 0 ? (
+                      <EmptyState>Nothing needs attention.</EmptyState>
+                    ) : (
+                      <List label="Needs attention">
+                        {attention.map((a) => (
+                          <ListItem key={a.key}>
+                            <span className="flex items-center justify-between gap-2">
+                              <span className="text-cell text-ink-body">
+                                {a.text}
+                              </span>
+                              <Link
+                                to={a.to}
+                                className="shrink-0 text-mono text-ink-emphasis hover:text-ink-heading"
+                              >
+                                Review
+                              </Link>
+                            </span>
+                          </ListItem>
+                        ))}
+                      </List>
+                    )}
+                    <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
+                      Server refusals are shown verbatim. No client-side
+                      re-validation.
+                    </p>
+                  </Panel>
+
+                {/* ⛔ SEPARATION BY SPACE AND A HAIRLINE, NOT BY ENCLOSURE. The gap is larger than any
+                    section's own line-height, which is already a boundary; the hairline above each section
+                    makes it explicit for one low-contrast pixel instead of a border on four sides.
+
+                    ⚠ `[&>*]:border-t` targets the CHILDREN, and the first row's rule is removed with
+                    `first:border-t-0` per column — a rule under the heading of the first section would read
+                    as a divider from the card above it, which is a boundary that is not there. */}
+                <div className="grid grid-cols-1 gap-x-8 gap-y-7 lg:grid-cols-12 [&>*]:border-t [&>*]:border-white/[.06] [&>*]:pt-5">
+                  <Section
                     title="Peer Connection Status"
                     className="lg:col-span-4"
                   >
@@ -516,7 +552,7 @@ export default function Dashboard() {
                       Status derived from WireGuard handshake liveness. Never
                       green while dead.
                     </p>
-                  </Panel>
+                  </Section>
 
                   {/* ⛔ AI AGENTS — COUNTS AND ONE NAMED GAP, NOTHING ELSE (S15.3).
                       A card is where copy gets shortened until it implies things, so the render floor
@@ -526,7 +562,7 @@ export default function Dashboard() {
                       ⚠ Absent in the open edition: the endpoint answers 403 edition_required, which is a
                       SUCCESSFUL refusal, and agentsRes stays null rather than becoming an error. */}
                   {agentsRes?.ok && agentsRes.data.length > 0 && (
-                    <Panel title="AI Agents" className="lg:col-span-4">
+                    <Section title="AI Agents" className="lg:col-span-4">
                       {(() => {
                         const sum = agentSummary(agentsRes.data);
                         return (
@@ -546,10 +582,10 @@ export default function Dashboard() {
                           </div>
                         );
                       })()}
-                    </Panel>
+                    </Section>
                   )}
 
-                  <Panel title="Gateway Health" className="lg:col-span-4">
+                  <Section title="Gateway Health" className="lg:col-span-4">
                     {nodesRes === null ? (
                       <Loading />
                     ) : !nodesRes.ok ? (
@@ -597,9 +633,9 @@ export default function Dashboard() {
                         ))}
                       </List>
                     )}
-                  </Panel>
+                  </Section>
 
-                  <Panel title="Recent Activity" className="lg:col-span-4">
+                  <Section title="Recent Activity" className="lg:col-span-4">
                     {data.recent_activity.length === 0 ? (
                       <EmptyState>No activity yet.</EmptyState>
                     ) : (
@@ -654,7 +690,7 @@ export default function Dashboard() {
                         ))}
                       </List>
                     )}
-                  </Panel>
+                  </Section>
 
                   {/* ⛔ KUBERNETES ON OVERVIEW, AND ITS COUNTS DO NOT COME FROM `OrgOverview`.
                       Measured: that schema is `members, devices, nodes, online, recent_activity` and carries
@@ -664,7 +700,7 @@ export default function Dashboard() {
                       THREE STATES, NOT TWO. `null` = still loading · `{ok:false}` = we could not look ·
                       `[]` = there are genuinely none. A zero standing in for the middle case would claim an
                       org has no clusters on the strength of a failed request. */}
-                  <Panel title="Kubernetes" className="lg:col-span-4">
+                  <Section title="Kubernetes" className="lg:col-span-4">
                     {k8sClustersRes === null || k8sServicesRes === null ? (
                       <Loading />
                     ) : !k8sClustersRes.ok ? (
@@ -719,9 +755,9 @@ export default function Dashboard() {
                         </Link>
                       </>
                     )}
-                  </Panel>
+                  </Section>
 
-                  <Panel title="Site-Link Traffic" className="lg:col-span-4">
+                  <Section title="Site-Link Traffic" className="lg:col-span-4">
                     {/* ⛔ THE PANEL IS CATEGORY ONE. THE WIREFRAME'S CHART IS CATEGORY TWO.
                         The counters exist; the TIME SERIES does not. `rx_bytes` is "a raw gauge since the
                         last handshake (display only, never summed as monotonic)" — it RESETS at every
@@ -807,9 +843,9 @@ export default function Dashboard() {
                         );
                       })()
                     )}
-                  </Panel>
+                  </Section>
 
-                  <Panel title="Device Posture" className="lg:col-span-4">
+                  <Section title="Device Posture" className="lg:col-span-4">
                     {devicesRes === null ? (
                       <Loading />
                     ) : !devicesRes.ok ? (
@@ -866,9 +902,9 @@ export default function Dashboard() {
                         );
                       })()
                     )}
-                  </Panel>
+                  </Section>
 
-                  <Panel title="HA Hub Set" className="lg:col-span-4">
+                  <Section title="HA Hub Set" className="lg:col-span-4">
                     {/* ⚠ THIS PANEL WAS CUT ON A WRONG MEASUREMENT. The audit checked the `Site` schema for
                         hub/generation/pin fields, found none, and declared the data absent — but the hub set
                         is its OWN endpoint and schema, and `hubsetview.ts` already projects it. An absence
@@ -934,9 +970,9 @@ export default function Dashboard() {
                         );
                       })()
                     )}
-                  </Panel>
+                  </Section>
 
-                  <Panel title="Network map" className="lg:col-span-4">
+                  <Section title="Network map" className="lg:col-span-4">
                     {/* ⚠ ALSO A RETRACTED CUT. Cut as "no SiteLink schema" — true, and beside the point:
                         `assembleTopology()` already projects sites + their gateways from data this screen
                         fetches. CATEGORY ONE, not category three: the capability exists and has no data yet,
@@ -975,39 +1011,10 @@ export default function Dashboard() {
                         empty="No sites configured yet. Bind a gateway to a site to build the mesh."
                       />
                     )}
-                  </Panel>
+                  </Section>
 
-                  <Panel title="Needs Attention" className="lg:col-span-4">
-                    {attention === null ? (
-                      <Loading />
-                    ) : attention.length === 0 ? (
-                      <EmptyState>Nothing needs attention.</EmptyState>
-                    ) : (
-                      <List label="Needs attention">
-                        {attention.map((a) => (
-                          <ListItem key={a.key}>
-                            <span className="flex items-center justify-between gap-2">
-                              <span className="text-cell text-ink-body">
-                                {a.text}
-                              </span>
-                              <Link
-                                to={a.to}
-                                className="shrink-0 text-mono text-ink-emphasis hover:text-ink-heading"
-                              >
-                                Review
-                              </Link>
-                            </span>
-                          </ListItem>
-                        ))}
-                      </List>
-                    )}
-                    <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
-                      Server refusals are shown verbatim. No client-side
-                      re-validation.
-                    </p>
-                  </Panel>
 
-                  <Panel title="System Health" className="lg:col-span-4">
+                  <Section title="System Health" className="lg:col-span-4">
                     <List label="System health">
                       <ListItem>
                         <span className="flex items-center justify-between gap-2">
@@ -1028,7 +1035,7 @@ export default function Dashboard() {
                       Liveness only. The control plane does not probe its
                       dependencies, so nothing else is claimed here.
                     </p>
-                  </Panel>
+                  </Section>
                 </div>
               </div>
             );
@@ -1056,13 +1063,11 @@ export default function Dashboard() {
  */
 function Stat({
   label,
-  icon,
   value,
   sub,
   tone,
 }: {
   label: string;
-  icon: IconName;
   value: StatState;
   /** The qualification. `null` when there is nothing honest to say — never filler. */
   sub?: ReactNode;
@@ -1082,19 +1087,15 @@ function Stat({
     // Re-pointing the xpath would preserve the coupling. A NAMED GROUP survives any internal rearrangement,
     // which is the same fix the DataTable conversion needed and the same lesson: when adding semantics breaks
     // a query, the query was weak (docs/laws.md).
-    <div
-      role="group"
-      aria-label={label}
-      className={`${GLASS} flex flex-col gap-2 p-3.5`}
-    >
-      <div className="flex items-center gap-[9px]">
-        <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-inset border border-white/[.2] bg-white/[.09] text-ink-emphasis">
-          <Icon name={icon} size={15} />
-        </span>
-        <span className="text-cell font-medium text-ink-secondary">
-          {label}
-        </span>
-      </div>
+    // ⛔ NO BOX. Seven bordered stat cards above eleven bordered panels was eighteen containers of equal
+    // weight; a figure and its label, separated by space, carry the same information and compete for none of
+    // the attention. The icon goes with the box: at 15px beside a label it was decoration, and decoration is
+    // what a dashboard has least room for.
+    //
+    // ⚠ `role="group"` + `aria-label` STAY. The e2e reads a stat BY NAME because an xpath keyed to sibling
+    // order broke the last time this row was rearranged — the fix then was a named group, and removing the
+    // name now would re-open exactly that coupling.
+    <div role="group" aria-label={label} className="flex flex-col gap-1">
       {text === null ? (
         <span
           className="text-stat font-bold leading-none text-ink-secondary"
@@ -1111,13 +1112,21 @@ function Stat({
           {text}
         </span>
       )}
-      <span className="text-mono font-medium text-ink-tertiary">
-        {value.state === "failed" ? (
-          <span className="text-danger">could not load</span>
-        ) : (
-          sub
-        )}
+      {/* ⛔ THE LABEL, UNDER THE FIGURE. Removing the card briefly removed this with it — the icon row held
+          both the icon and the word, and cutting the row cut the word. A column of unlabelled numbers is not
+          a quieter dashboard, it is an unreadable one: CHROME MAY GO, INFORMATION MAY NOT. */}
+      <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-tertiary">
+        {label}
       </span>
+      {(sub || value.state === "failed") && (
+        <span className="text-mono font-medium text-ink-tertiary">
+          {value.state === "failed" ? (
+            <span className="text-danger">could not load</span>
+          ) : (
+            sub
+          )}
+        </span>
+      )}
     </div>
   );
 }
