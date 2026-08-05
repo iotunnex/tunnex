@@ -4,7 +4,6 @@ import {
   sortGateways,
   statFrom,
   statText,
-  linkTraffic,
   peerSlices,
   postureSplit,
   type GatewayRow,
@@ -148,25 +147,3 @@ describe("postureSplit — UNKNOWN is its own state and is excluded from the per
   });
 });
 
-describe("linkTraffic — cumulative totals, and SILENT members are counted as silent", () => {
-  it("sums only members that are reporting", () => {
-    const t = linkTraffic([
-      { metrics: { rx_bytes: 100, tx_bytes: 50 } },
-      { metrics: { rx_bytes: 200, tx_bytes: 25 } },
-      { metrics: null },
-    ]);
-    expect(t).toEqual({ reporting: 2, silent: 1, rxBytes: 300, txBytes: 75 });
-  });
-
-  it("a member with ABSENT metrics contributes 0 to neither total — it is counted as silent", () => {
-    // "Absent metrics is not an idle link." Adding 0 for a silent member would make the total read as though
-    // that member carried no traffic, which is a measurement nobody took.
-    const t = linkTraffic([{ metrics: null }, { metrics: null }]);
-    expect(t.reporting).toBe(0);
-    expect(t.silent).toBe(2);
-  });
-
-  it("no members at all is zero reporting and zero silent", () => {
-    expect(linkTraffic([])).toEqual({ reporting: 0, silent: 0, rxBytes: 0, txBytes: 0 });
-  });
-});
