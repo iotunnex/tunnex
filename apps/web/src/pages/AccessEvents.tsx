@@ -176,7 +176,7 @@ export default function AccessEvents() {
                     className={
                       "rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold " +
                       (tone === "ok"
-                        ? "bg-accent-500/10 text-accent-300"
+                        ? "bg-accent-500/10 text-accent-400"
                         : tone === "bad"
                           ? "bg-danger/10 text-danger"
                           : tone === "gap"

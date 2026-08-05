@@ -255,7 +255,7 @@ export default function AuditLog() {
                       (actor.gap
                         ? "text-warn"
                         : actor.kind === "system"
-                          ? "font-mono text-accent-300"
+                          ? "font-mono text-accent-400"
                           : "text-slate-500")
                     }
                   >

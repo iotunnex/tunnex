@@ -693,7 +693,7 @@ function IdpSyncSection({
             className={
               "rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold " +
               (tier === "ok"
-                ? "border-accent-500/40 bg-accent-500/10 text-accent-300"
+                ? "border-accent-500/40 bg-accent-500/10 text-accent-400"
                 : tier === "degraded"
                   ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
                   : "border-danger/50 bg-danger/10 text-danger")
@@ -1062,7 +1062,7 @@ function DomainSection({
                       (tone === "done"
                         ? "border-accent-500/30 bg-accent-500/5 text-accent-400/70"
                         : tone === "current"
-                          ? "border-accent-400 bg-accent-500/20 text-accent-200 ring-1 ring-accent-400/50"
+                          ? "border-accent-400 bg-accent-500/20 text-accent-400 ring-1 ring-accent-400/50"
                           : "border-slate-800 bg-slate-900 text-slate-600")
                     }
                   >

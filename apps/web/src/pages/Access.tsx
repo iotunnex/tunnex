@@ -1398,6 +1398,7 @@ function RuleFormModal({
   return (
     <Modal
       title={editing ? "Edit rule" : "Add rule"}
+      size="wide"
       onDismiss={onClose}
       actions={
         <>
@@ -2358,7 +2359,7 @@ function GroupRow({
           {/* The reconciler owns this group's membership — say so where the name is, not only
               where the (now absent) controls used to be. */}
           {directoryManaged && (
-            <span className="ml-2 rounded-full border border-accent-500/40 bg-accent-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-accent-300">
+            <span className="ml-2 rounded-full border border-accent-500/40 bg-accent-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-accent-400">
               {DIRECTORY_MANAGED_BADGE}
             </span>
           )}
