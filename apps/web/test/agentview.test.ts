@@ -131,6 +131,27 @@ describe("agent liveness — S15.3", () => {
     config_issued: true, gateway_reporting: true, ...o,
   });
 
+  it("⭐ REVOKED OUTRANKS EVERYTHING — a dead credential must never be told to reconnect", () => {
+    // ⛔ THE EXACT ROW THE LIVE RIG PRODUCED. Revocation keeps the row and the key (config_issued stays
+    // true) and SWEEPS the telemetry (last_handshake_at goes null) — which lands a revoked agent in
+    // `never`, whose copy sends the operator to run the connect command on a machine that is fine, for a
+    // credential that was deliberately destroyed.
+    const a = live({ status: "revoked", online: false, last_handshake_at: null });
+    expect(agentLiveness(a)).toBe("revoked");
+    expect(livenessLabel(a, now).label).toBe("revoked");
+    expect(livenessLabel(a, now).detail).not.toMatch(/Run the command/);
+    // ⚠ And it outranks the reporter check too: a revoked agent on a silent gateway is still revoked,
+    // not unknown — that fact does not depend on anyone reporting.
+    expect(agentLiveness(live({ status: "revoked", gateway_reporting: false }))).toBe("revoked");
+    // ⚠ NOT `danger`. A revoked credential is the system doing what it was told.
+    expect(livenessLabel(a, now).tone).not.toBe("danger");
+  });
+
+  it("an ACTIVE agent with the same shape still reads never-connected — revoked is doing the work", () => {
+    // Without this, the assertion above would pass on a function that returned "revoked" for everything.
+    expect(agentLiveness(live({ status: "active", online: false, last_handshake_at: null }))).toBe("never");
+  });
+
   it("online when the gateway reports a recent handshake", () => {
     const a = live({ online: true, last_handshake_at: ago(20) });
     expect(agentLiveness(a)).toBe("online");

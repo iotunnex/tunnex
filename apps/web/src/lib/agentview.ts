@@ -65,9 +65,17 @@ export interface AgentRow {
  * ⚠ `unknown` OUTRANKS `offline`, ALWAYS. Rendering a confident "offline" while the reporter is silent
  * blames the agent for the gateway's fault and sends an operator to debug the wrong box.
  */
-export type AgentLiveness = "online" | "offline" | "never" | "unknown" | "not-issued";
+export type AgentLiveness = "revoked" | "online" | "offline" | "never" | "unknown" | "not-issued";
 
 export function agentLiveness(a: AgentRow): AgentLiveness {
+  // ⛔ REVOKED OUTRANKS EVERY OTHER STATE, AND GETTING THIS ORDER WRONG PRODUCED THE WORST STRING ON THE
+  // SCREEN. A revoked agent keeps its row and its key, so `config_issued` stays true — and revocation
+  // SWEEPS ITS TELEMETRY, so `last_handshake_at` goes null. Those two facts together land a dead credential
+  // in `never`, whose copy tells the operator to go and run the connect command on the agent host.
+  //
+  // > **THE MOST ACTIONABLE-SOUNDING STATE IS THE MOST DANGEROUS ONE TO FALL INTO BY DEFAULT.** It sends
+  // > someone to fix a machine that is working, for a credential that was deliberately destroyed.
+  if (a.status === "revoked") return "revoked";
   // No config was ever issued: there is no tunnel to be up or down. Distinct from "never connected",
   // which means we DID hand over a command and it was never run.
   if (a.config_issued === false) return "not-issued";
@@ -90,6 +98,14 @@ export function livenessLabel(
   now: Date = new Date(),
 ): { label: string; tone: "ok" | "warn" | "unknown" | "neutral"; detail: string } {
   switch (agentLiveness(a)) {
+    case "revoked":
+      return {
+        label: "revoked",
+        // ⚠ NOT `danger`. A revoked credential is the system working as instructed, not an incident.
+        tone: "neutral",
+        detail:
+          "This agent's credential was revoked. Its peer has been removed from the gateway and it can reach nothing. Enrol a new agent to replace it — the old connect command will never work again.",
+      };
     case "online":
       return {
         label: "connected",
@@ -291,6 +307,16 @@ export function agentConnectCommand(conf: string, ifaceName = "tunnex"): string 
  *
  * ⚠ STATED, NOT ASSUMED. `wg-quick` is not installed by default on most images, and a command that fails
  * with "command not found" reads as a broken product rather than a missing package.
+ *
+ * ⛔ AND `resolvconf` IS NAMED BECAUSE ITS ABSENCE IS SILENT AND TOTAL. The config carries a `DNS =` line, so
+ * `wg-quick` shells out to `resolvconf` — and on ANY failure there it ROLLS THE WHOLE INTERFACE BACK
+ * (`ip link delete dev tunnex`). The tunnel comes up and deletes itself, mid-output, after several lines that
+ * all look like success. On a minimal container or slim VM — **exactly the host an AI agent runs on** — the
+ * operator is left with no interface, no route, and a command that appeared to work.
+ *
+ * ⚠ Found on the wire, and it concealed itself twice: with no tunnel route the agent's own subnet reached the
+ * destination DIRECTLY over the host network, so a request still returned 200 and the rig read as healthy.
+ * A successful request is not proof the tunnel carried it — only a counter delta on the peer is.
  */
 export const AGENT_PREREQ =
-  "Requires wireguard-tools on the agent host (apt install wireguard-tools / yum install wireguard-tools).";
+  "Requires wireguard-tools AND a resolvconf implementation on the agent host (apt install wireguard-tools openresolv / yum install wireguard-tools openresolv).";
