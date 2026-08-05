@@ -197,7 +197,7 @@ describe("AuditLog — it pages what it has, and can fetch more", () => {
     expect(within(table).getAllByRole("row")).toHaveLength(26);
     // 50, not 51: the page fetches PAGE+1 purely to probe for more and displays PAGE. The count
     // describes what is SHOWN, never the probe row.
-    expect(screen.getByText("Showing 1–25 of 50")).toBeTruthy();
+    expect(screen.getByText("1–25 of 50")).toBeTruthy();
   });
 
   it("⚠ AND BOTH CONTROLS ARE PRESENT AND DISTINGUISHABLE", async () => {
@@ -206,7 +206,7 @@ describe("AuditLog — it pages what it has, and can fetch more", () => {
     // original defect, and the server control's absence would cap the log at one fetch forever.
     withAuth(<AuditLog />);
     await waitFor(() => screen.getByRole("table", { name: "Audit events" }));
-    expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Next page" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Load more from server" })).toBeTruthy();
   });
 });
