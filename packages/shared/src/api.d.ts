@@ -2643,7 +2643,7 @@ export interface components {
              * @description Last WireGuard handshake, as reported by the gateway. `null` means NO handshake has ever been recorded — with `config_issued` true that is "never connected", which is a different fact from "was connected, now stale".
              */
             last_handshake_at?: string | null;
-            /** @description ⛔ THE FIELD THAT STOPS THE UI BLAMING THE AGENT FOR THE GATEWAY'S SILENCE. Peer liveness reaches the control plane ONLY through the gateway's status push, so a dead gateway and a dead agent produce an identical absence of handshakes. When this is false, `online` says nothing about the agent and the surface must render liveness as UNKNOWN, not as offline. */
+            /** @description ⛔ THE FIELD THAT STOPS THE UI BLAMING THE AGENT FOR THE GATEWAY'S SILENCE. Peer liveness reaches the control plane ONLY through the gateway's status push, so a dead gateway and a dead agent produce an identical absence of handshakes. When this is false, `online` says nothing about the agent and the surface must render liveness as UNKNOWN, not as offline. ⚠ Measured from the freshness of the STATUS channel itself (`device_status.updated_at`), not from the gateway's separate `/agent/report` clock — a freshness claim must be stamped by the channel it vouches for. */
             gateway_reporting?: boolean;
             /** Format: int64 */
             rx_bytes?: number | null;

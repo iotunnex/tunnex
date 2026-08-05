@@ -595,9 +595,19 @@ type Querier interface {
 	// owner of an agent whose owner was soft-deleted.
 	// ⛔ LIVENESS COMES FROM `device_status`, WHICH THE GATEWAY WRITES — NOT FROM ANYTHING THE AGENT SENDS.
 	// An agent runs plain wg-quick: it has no control-plane channel and reports nothing about itself, ever. The
-	// gateway's 30s status push is the ONLY source of a peer's handshake, which is why `n.last_seen_at` is
-	// selected alongside it: without the reporter's own clock, a silent gateway and a dead agent are the same
-	// row, and the surface would blame the agent for the gateway's silence.
+	// gateway's 30s status push is the ONLY source of a peer's handshake, which is why the REPORTER'S OWN CLOCK
+	// is selected alongside it: without it, a silent gateway and a dead agent are the same row, and the surface
+	// would blame the agent for the gateway's silence.
+	//
+	// ⛔ AND THE CLOCK MUST BE THE ONE ON *THIS* CHANNEL. The gateway runs TWO independent loops on the same
+	// 30s cadence: `/agent/report` (which bumps `nodes.last_seen_at`) and `/agent/status` (which carries peer
+	// handshakes). Reading `last_seen_at` alone would mean watching the wrong loop — if the status push failed
+	// by itself, the gateway would look healthy while no handshake data flowed at all, and every agent would
+	// read a confident "never connected". `device_status.updated_at` is stamped by the status upsert itself, so
+	// it is the freshness of the channel the handshake actually travels on.
+	//
+	// `n.last_seen_at` is kept for ONE case the status clock cannot cover: an agent so newly created that no
+	// push has mentioned it yet has no `device_status` row at all.
 	ListAgentsForOrg(ctx context.Context, orgID uuid.UUID) ([]ListAgentsForOrgRow, error)
 	// Org-scoped audit feed with optional filters (actor / action / date range) and
 	// KEYSET pagination on (created_at, id) DESC. Every filter + cursor param is

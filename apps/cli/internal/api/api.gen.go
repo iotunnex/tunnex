@@ -433,7 +433,7 @@ type Agent struct {
 	// GatewayName The gateway this agent connects THROUGH. Its traffic is forwarded there, which is why the policy chain sees it.
 	GatewayName string `json:"gateway_name"`
 
-	// GatewayReporting ⛔ THE FIELD THAT STOPS THE UI BLAMING THE AGENT FOR THE GATEWAY'S SILENCE. Peer liveness reaches the control plane ONLY through the gateway's status push, so a dead gateway and a dead agent produce an identical absence of handshakes. When this is false, `online` says nothing about the agent and the surface must render liveness as UNKNOWN, not as offline.
+	// GatewayReporting ⛔ THE FIELD THAT STOPS THE UI BLAMING THE AGENT FOR THE GATEWAY'S SILENCE. Peer liveness reaches the control plane ONLY through the gateway's status push, so a dead gateway and a dead agent produce an identical absence of handshakes. When this is false, `online` says nothing about the agent and the surface must render liveness as UNKNOWN, not as offline. ⚠ Measured from the freshness of the STATUS channel itself (`device_status.updated_at`), not from the gateway's separate `/agent/report` clock — a freshness claim must be stamped by the channel it vouches for.
 	GatewayReporting *bool `json:"gateway_reporting,omitempty"`
 
 	// LastHandshakeAt Last WireGuard handshake, as reported by the gateway. `null` means NO handshake has ever been recorded — with `config_issued` true that is "never connected", which is a different fact from "was connected, now stale".
