@@ -206,7 +206,13 @@ export default function AuditLog() {
       )}
 
       <div className="mt-4">
-        <DataTable
+        {/* ⛔ NO CLIENT PAGER HERE: this page ALREADY pages server-side with a keyset cursor behind
+                "Load more". Two paging controls on one screen disagree — "Load more" appends rows the
+                operator cannot see without advancing a second pager, and the count then describes neither
+                the fetch nor the view. The server's cursor is the one that must win, because it is the one
+                that bounds the query. */}
+            <DataTable
+              pageSize={0}
           caption="Audit events"
           rows={entries}
           rowKey={(a) => a.id}

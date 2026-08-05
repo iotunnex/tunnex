@@ -131,3 +131,117 @@ describe("DataTable — scannability", () => {
     expect(rows.map((r) => r.name)).toEqual(["zebra", "alpha", "mango"]);
   });
 });
+
+/**
+ * ⛔ PAGINATION IS THREE MORE WAYS TO RENDER AN EMPTY TABLE OVER A FULL DATA SET, and every one of them
+ * arrives by arithmetic rather than by a failed load — which is what makes them easy to ship. Narrowing
+ * while deep in the list, resizing the page, and rows shrinking underneath all point the page index past
+ * the end of the array.
+ */
+describe("DataTable — pagination", () => {
+  const many = (n: number): Row[] =>
+    Array.from({ length: n }, (_, i) => ({
+      id: String(i),
+      name: `row-${String(i).padStart(3, "0")}`,
+      owner: i % 2 ? "ana@ex.com" : "bo@ex.com",
+      state: "active",
+    }));
+
+  function paged(rows: Row[], pageSize?: number) {
+    return render(
+      <DataTable<Row>
+        caption="Widgets"
+        rows={rows}
+        failed={false}
+        rowKey={(r) => r.id}
+        empty="No widgets exist."
+        {...(pageSize === undefined ? {} : { pageSize })}
+        columns={[
+          { key: "name", header: "Name", sortValue: (r) => `${r.name} ${r.owner}`, cell: (r) => <span>{r.name}</span> },
+        ]}
+      />,
+    );
+  }
+
+  it("shows one page, not everything, and says which page it is showing", () => {
+    paged(many(60));
+    expect(screen.getAllByRole("row")).toHaveLength(26); // 25 + the header
+    expect(screen.getByText("Showing 1–25 of 60")).toBeTruthy();
+    expect(screen.getByText("Page 1 of 3")).toBeTruthy();
+  });
+
+  it("pages forward and back, and the boundary buttons are disabled at the boundaries", () => {
+    paged(many(60));
+    expect(screen.getByRole("button", { name: "Previous" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(bodyNames()[0]).toBe("row-025");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Page 3 of 3")).toBeTruthy();
+    // ⚠ The last page is SHORT, and that is not an empty page — 60 rows over 25 leaves 10.
+    expect(screen.getAllByRole("row")).toHaveLength(11);
+    expect(screen.getByRole("button", { name: "Next" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    expect(screen.getByText("Page 2 of 3")).toBeTruthy();
+  });
+
+  it("⭐ FILTERING FROM A DEEP PAGE RETURNS TO PAGE ONE — the operator's own search must not read as empty", () => {
+    // Without the reset: page 3 of a 60-row list, filter down to 30 matches, and slice(50, 75) is EMPTY.
+    // A full result set renders as nothing, and the thing that produced it was the search itself.
+    paged(many(60));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Page 3 of 3")).toBeTruthy();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter Widgets" }), {
+      target: { value: "ana@ex.com" },
+    });
+    expect(bodyNames().length).toBeGreaterThan(0);
+    expect(screen.getByText("Showing 1–25 of 30 (filtered from 60)")).toBeTruthy();
+  });
+
+  it("⭐ ROWS SHRINKING UNDER A DEEP PAGE CLAMPS INSTEAD OF RENDERING NOTHING", () => {
+    // A revoke, a refetch, a sweep — the page index that was valid a moment ago now points past the end.
+    // Clamped at RENDER, so there is no frame in which the stale index is used.
+    const { rerender } = paged(many(60));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Page 3 of 3")).toBeTruthy();
+    rerender(
+      <DataTable<Row>
+        caption="Widgets"
+        rows={many(30)}
+        failed={false}
+        rowKey={(r) => r.id}
+        empty="No widgets exist."
+        columns={[
+          { key: "name", header: "Name", sortValue: (r) => r.name, cell: (r) => <span>{r.name}</span> },
+        ]}
+      />,
+    );
+    expect(bodyNames().length).toBeGreaterThan(0);
+    expect(screen.getByText("Page 2 of 2")).toBeTruthy();
+  });
+
+  it("⚠ NO PAGER WHEN EVERYTHING ALREADY FITS — a control that can only no-op implies there is more", () => {
+    paged(many(5));
+    expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+    expect(screen.queryByText(/^Page /)).toBeNull();
+    expect(screen.getAllByRole("row")).toHaveLength(6);
+  });
+
+  it("⛔ pageSize={0} DISABLES PAGING ENTIRELY — for surfaces that already page server-side", () => {
+    // AuditLog and AccessEvents fetch behind a keyset cursor. A second pager there would append rows the
+    // operator cannot see and report a count describing neither the fetch nor the view.
+    paged(many(60), 0);
+    expect(screen.getAllByRole("row")).toHaveLength(61);
+    expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+  });
+
+  it("changing rows-per-page returns to the first page", () => {
+    paged(many(60));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(bodyNames()[0]).toBe("row-025");
+    fireEvent.change(screen.getByRole("combobox", { name: "Rows per page" }), { target: { value: "50" } });
+    expect(bodyNames()[0]).toBe("row-000");
+    expect(screen.getByText("Showing 1–50 of 60")).toBeTruthy();
+  });
+});
