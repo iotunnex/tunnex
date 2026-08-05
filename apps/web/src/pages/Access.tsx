@@ -32,6 +32,7 @@ import {
   Input,
   Modal,
   Select,
+  DataTable,
 } from "../components/ui";
 import { ComposeGate } from "../components/ComposeGate";
 import { LoadRetry } from "../components/LoadRetry";
@@ -732,98 +733,195 @@ function RulesSection({
               </div>
             );
           })()}
-          <ul className="mt-3 space-y-1">
-            {rules.map((r) => {
-              const row = ruleRow(
-                r,
-                groups,
-                resources,
-                members,
-                sites,
-                loaded,
-                services,
-              );
-              const exp = grantExpiry(r, Date.now());
-              return (
-                <li
-                  key={r.id}
-                  className={`flex items-center justify-between rounded-md bg-white/5 px-3 py-2 text-sm ${r.enabled ? "" : "opacity-50"}`}
+          {/* ⛔ THE RULES TABLE. Converted from a <ul> so it can be searched, sorted and paged like every
+              other roster — 15 rules already overflowed a screen, and the list gave no way to find one.
+
+              ⚠ THE BADGE COLOURS STAY. The founder asked for the mockup's SHAPE without its palette, and
+              these are not palette: OUTSIDE RANGES, VANISHED, SOURCE GROUP EMPTY and TEMP are the four
+              warn-kinds, each meaning "this rule renders as active and compiles to NOTHING". Draining their
+              colour would remove the only thing that distinguishes them from decoration. What did go is the
+              mockup's decorative green/blue/purple on Active and Managed-by-GitOps, which carried no state
+              this product does not already say in words. */}
+          {/* ⛔ THE FAILED COPY IS THE PAGE'S JOB, NOT THE TABLE'S — and forgetting it was one edit away.
+              DataTable renders NOTHING when `failed`, deliberately, because only the page knows what to
+              retry. Converting this list without this block would have replaced "Rules could not be loaded"
+              with a blank area: the screen would say nothing at all about a read that failed, which is the
+              reassuring-empty defect wearing its quietest possible face. */}
+          {rulesEmptyState({ rulesResult, modeResult, renderedCount: rules.length }).kind === "failed" && (
+            <p className="mt-3 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-xs text-danger">
+              {rulesEmptyCopy(rulesEmptyState({ rulesResult, modeResult, renderedCount: rules.length })).text}
+            </p>
+          )}
+          <div className="mt-3">
+            <DataTable<PolicyRule>
+              caption="Rules"
+              rows={rules}
+              rowKey={(r) => r.id}
+              // ⛔ THE PAGE OWNS THE EMPTY COPY, because it distinguishes states this component cannot see:
+              // an ENFORCING org with zero rules is a lockout warning, not an emptiness.
+              failed={rulesEmptyState({ rulesResult, modeResult, renderedCount: rules.length }).kind === "failed"}
+              empty={
+                <span
+                  className={
+                    rulesEmptyState({ rulesResult, modeResult, renderedCount: rules.length }).kind ===
+                    "enforcing_empty"
+                      ? "text-xs font-semibold text-warn"
+                      : "text-xs text-slate-500"
+                  }
                 >
-                  <span className="text-slate-200">
-                    <RefText
-                      label={row.src.label}
-                      broken={row.src.state !== "ok"}
-                    />{" "}
-                    <span className="text-slate-500">→</span>{" "}
-                    <RefText
-                      label={row.dst.label}
-                      broken={row.dst.state !== "ok"}
-                    />
-                    {/* S10.2 D2 cond 1: a GitOps-managed grant is badged; its mutation controls are withheld below. */}
-                    {row.managedByOperator && <ManagedBadge />}
-                    {/* ⛔ src_group_empty (S14.12) — the FOURTH warn kind, in the VANISHED / OUTSIDE-RANGES
-                        family. Measured at compiler.go:399 (`matched = owner[r.SrcGroupID]`): a group with
-                        zero members matches NO device, so this rule COMPILES TO NOTHING while rendering
-                        ACTIVE. Derived from the member COUNT, never from group existence, and it does NOT
-                        fire while the count is unfetched or failed — "could not check" is not "empty". */}
-                    {(r.src_kind ?? "group") === "group" &&
-                      r.src_group_id &&
-                      srcGroupEmptyBadge(
-                        srcGroupEmptyWarn(srcGroupCounts.get(r.src_group_id)),
-                      ) && (
-                        <span
-                          className="ml-2 rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-warn"
-                          title={
-                            srcGroupEmptyExplain(
-                              srcGroupEmptyWarn(srcGroupCounts.get(r.src_group_id)),
-                            ) ?? undefined
-                          }
-                        >
-                          {srcGroupEmptyBadge(
-                            srcGroupEmptyWarn(srcGroupCounts.get(r.src_group_id)),
-                          )}
-                        </span>
-                      )}
-                    {/* F3: a disabled rule is shown DISTINCTLY, never hidden — the list must not lie about what's enforcing. */}
-                    {!r.enabled && (
-                      <span className="ml-2 rounded-full border border-slate-700 bg-slate-800/80 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-400">
+                  {rulesEmptyCopy(rulesEmptyState({ rulesResult, modeResult, renderedCount: rules.length })).text}
+                </span>
+              }
+              columns={[
+                {
+                  key: "src",
+                  header: "Source",
+                  sortValue: (r) =>
+                    ruleRow(r, groups, resources, members, sites, loaded, services).src.label,
+                  cell: (r) => {
+                    const row = ruleRow(r, groups, resources, members, sites, loaded, services);
+                    return <RefText label={row.src.label} broken={row.src.state !== "ok"} />;
+                  },
+                },
+                {
+                  key: "arrow",
+                  header: "",
+                  cell: () => <span aria-hidden className="text-slate-600">→</span>,
+                },
+                {
+                  key: "dst",
+                  header: "Destination",
+                  sortValue: (r) =>
+                    ruleRow(r, groups, resources, members, sites, loaded, services).dst.label,
+                  cell: (r) => {
+                    const row = ruleRow(r, groups, resources, members, sites, loaded, services);
+                    return <RefText label={row.dst.label} broken={row.dst.state !== "ok"} />;
+                  },
+                },
+                {
+                  key: "status",
+                  header: "Status",
+                  // ⛔ THE WORD, NOT THE STYLING. A disabled rule used to be signalled by opacity on the
+                  // whole row; opacity is invisible to a search and to anyone who cannot see it.
+                  sortValue: (r) => (r.enabled ? "active" : "disabled"),
+                  cell: (r) =>
+                    r.enabled ? (
+                      <span className="text-xs text-slate-400">active</span>
+                    ) : (
+                      /* F3: a disabled rule is shown DISTINCTLY, never hidden — the list must not lie
+                         about what is enforcing. */
+                      <span className="rounded-full border border-slate-700 bg-slate-800/80 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-400">
                         disabled
                       </span>
-                    )}
-                    {/* S8.7 warn-not-refuse (D1): the SERVER's read-time judgment, rendered verbatim — a CIDR
-                        rule matching no current org range (a reassuring-rule). Self-clears when a range lands. */}
-                    {row.cidrOutsideRanges && (
+                    ),
+                },
+                {
+                  key: "type",
+                  header: "Type",
+                  sortValue: (r) => {
+                    const row = ruleRow(r, groups, resources, members, sites, loaded, services);
+                    if (row.managedByOperator) return "managed by gitops";
+                    return grantExpiry(r, Date.now()).state === "permanent" ? "standard" : "temporary";
+                  },
+                  cell: (r) => {
+                    const row = ruleRow(r, groups, resources, members, sites, loaded, services);
+                    /* S10.2 D2 cond 1: a GitOps-managed grant is badged; its mutation controls are
+                       withheld in the actions column. */
+                    if (row.managedByOperator) return <ManagedBadge />;
+                    const exp = grantExpiry(r, Date.now());
+                    return exp.state === "permanent" ? (
+                      <span className="text-xs text-slate-600">standard</span>
+                    ) : (
+                      /* S7.5.4 linger model: a temporary grant shows its window; an EXPIRED grant stays
+                         visible (audit history), rendered distinctly — never hidden. */
                       <span
-                        className="ml-2 rounded-full border border-amber-800/50 bg-amber-950/40 px-2 py-0.5 font-mono text-[10px] font-semibold text-amber-400"
-                        title="This CIDR is inside no current site subnet. the rule matches nothing until the range is declared."
-                      >
-                        OUTSIDE RANGES
-                      </span>
-                    )}
-                    {/* S10.3 warn-not-refuse: the SERVER's read-time judgment — the dst Service was unexposed
-                        or its cluster deregistered, so the grant compiles to nothing. Self-clears if it returns. */}
-                    {row.k8sServiceVanished && (
-                      <span
-                        className="ml-2 rounded-full border border-rose-800/50 bg-rose-950/40 px-2 py-0.5 font-mono text-[10px] font-semibold text-rose-400"
-                        title="The Kubernetes Service this rule reaches is no longer exposed. the grant matches nothing until it is re-exposed."
-                      >
-                        VANISHED
-                      </span>
-                    )}
-                    {/* S7.5.4 linger model: a temporary grant shows its window; an EXPIRED grant
-                        stays visible (audit-history), rendered distinctly — never hidden. */}
-                    {exp.state !== "permanent" && (
-                      <span
-                        className={`ml-2 rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold ${exp.state === "expired" ? "border-rose-800/50 bg-rose-950/40 text-rose-400" : "border-amber-800/50 bg-amber-950/40 text-amber-300"}`}
+                        className={`rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold ${exp.state === "expired" ? "border-rose-800/50 bg-rose-950/40 text-rose-400" : "border-amber-800/50 bg-amber-950/40 text-amber-300"}`}
                       >
                         TEMP · {exp.label}
                       </span>
-                    )}
-                  </span>
-                  {canManage &&
-                    (grantControls(row).withheld ? (
+                    );
+                  },
+                },
+                {
+                  key: "notes",
+                  header: "Notes",
+                  // ⚠ EVERY WARN KIND IS SEARCHABLE BY ITS OWN WORDS. These are the states an operator most
+                  // needs to find — each one means a rule that reads ACTIVE and compiles to NOTHING — and a
+                  // badge contributes no text, so without this they would be the least findable rows here.
+                  sortValue: (r) => {
+                    const row = ruleRow(r, groups, resources, members, sites, loaded, services);
+                    const empty =
+                      (r.src_kind ?? "group") === "group" && r.src_group_id
+                        ? srcGroupEmptyBadge(srcGroupEmptyWarn(srcGroupCounts.get(r.src_group_id)))
+                        : null;
+                    return [
+                      row.cidrOutsideRanges ? "outside ranges" : "",
+                      row.k8sServiceVanished ? "vanished" : "",
+                      empty ?? "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ");
+                  },
+                  cell: (r) => {
+                    const row = ruleRow(r, groups, resources, members, sites, loaded, services);
+                    const emptyBadge =
+                      (r.src_kind ?? "group") === "group" && r.src_group_id
+                        ? srcGroupEmptyBadge(srcGroupEmptyWarn(srcGroupCounts.get(r.src_group_id)))
+                        : null;
+                    return (
+                      <span className="flex flex-wrap items-center gap-1">
+                        {/* S8.7 warn-not-refuse (D1): the SERVER's read-time judgment, rendered verbatim —
+                            a CIDR rule matching no current org range. Self-clears when a range lands. */}
+                        {row.cidrOutsideRanges && (
+                          <span
+                            className="rounded-full border border-amber-800/50 bg-amber-950/40 px-2 py-0.5 font-mono text-[10px] font-semibold text-amber-400"
+                            title="This CIDR is inside no current site subnet. the rule matches nothing until the range is declared."
+                          >
+                            OUTSIDE RANGES
+                          </span>
+                        )}
+                        {/* S10.3 warn-not-refuse: the dst Service was unexposed or its cluster
+                            deregistered, so the grant compiles to nothing. Self-clears if it returns. */}
+                        {row.k8sServiceVanished && (
+                          <span
+                            className="rounded-full border border-rose-800/50 bg-rose-950/40 px-2 py-0.5 font-mono text-[10px] font-semibold text-rose-400"
+                            title="The Kubernetes Service this rule reaches is no longer exposed. the grant matches nothing until it is re-exposed."
+                          >
+                            VANISHED
+                          </span>
+                        )}
+                        {/* ⛔ src_group_empty (S14.12) — measured at compiler.go:399: a group with zero
+                            members matches NO device, so this rule COMPILES TO NOTHING while rendering
+                            ACTIVE. Derived from the member COUNT, never from group existence, and it does
+                            NOT fire while the count is unfetched or failed — "could not check" is not
+                            "empty". */}
+                        {emptyBadge && (
+                          <span
+                            className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-warn"
+                            title={
+                              srcGroupEmptyExplain(
+                                srcGroupEmptyWarn(srcGroupCounts.get(r.src_group_id as string)),
+                              ) ?? undefined
+                            }
+                          >
+                            {emptyBadge}
+                          </span>
+                        )}
+                      </span>
+                    );
+                  },
+                },
+                {
+                  key: "actions",
+                  header: "",
+                  cell: (r) => {
+                    if (!canManage) return null;
+                    const row = ruleRow(r, groups, resources, members, sites, loaded, services);
+                    const exp = grantExpiry(r, Date.now());
+                    return grantControls(row).withheld ? (
                       // D2 cond 1: withhold EVERY dashboard mutation (extend/edit/disable/delete) on a
-                      // GitOps-managed grant — warn at the point of editing, never silently revert on reconcile.
+                      // GitOps-managed grant — warn at the point of editing, never silently revert on
+                      // reconcile.
                       <span
                         className="text-xs text-amber-400/90"
                         title={managedGrantWarning()}
@@ -832,55 +930,38 @@ function RulesSection({
                         edit the CR
                       </span>
                     ) : (
-                      <span className="flex gap-2">
+                      <span className="flex justify-end gap-1.5">
                         {exp.extendable && (
-                          <Button
-                            variant="ghost"
-                            onClick={() => setExtendingGrant(r)}
-                          >
+                          <Button size="sm" variant="ghost" onClick={() => setExtendingGrant(r)}>
                             Extend
                           </Button>
                         )}
                         {canEditRuleInModal(r) && (
-                          <Button variant="ghost" onClick={() => setEditing(r)}>
+                          <Button size="sm" variant="ghost" onClick={() => setEditing(r)}>
                             Edit
                           </Button>
                         )}
-                        {/* F3: enable = one click (additive); disable = confirm (revokes live access instantly). */}
+                        {/* F3: enable = one click (additive); disable = confirm (revokes live access
+                            instantly). */}
                         {r.enabled ? (
-                          <Button
-                            variant="ghost"
-                            onClick={() => setDisablingRule(r)}
-                          >
+                          <Button size="sm" variant="ghost" onClick={() => setDisablingRule(r)}>
                             Disable
                           </Button>
                         ) : (
-                          <Button
-                            variant="ghost"
-                            onClick={() => setEnabled(r.id, true)}
-                          >
+                          <Button size="sm" variant="ghost" onClick={() => setEnabled(r.id, true)}>
                             Enable
                           </Button>
                         )}
-                        <Button variant="danger" onClick={() => del(r.id)}>
+                        <Button size="sm" variant="danger" onClick={() => del(r.id)}>
                           Delete
                         </Button>
                       </span>
-                    ))}
-                </li>
-              );
-            })}
-            {(() => {
-              const es = rulesEmptyState({ rulesResult, modeResult, renderedCount: rules.length });
-              if (es.kind === "rows") return null;
-              const c = rulesEmptyCopy(es);
-              return (
-              <li className={es.kind === "enforcing_empty" ? "text-xs font-semibold text-warn" : "text-xs text-slate-500"}>
-                {c.text}
-              </li>
-              );
-            })()}
-          </ul>
+                    );
+                  },
+                },
+              ]}
+            />
+          </div>
         </>
       )}
 

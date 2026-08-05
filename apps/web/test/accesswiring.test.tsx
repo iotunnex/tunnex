@@ -146,6 +146,21 @@ describe("Access — failure path: the most consequential one in the product", (
     );
   });
 
+  it("⛔ CONVERTING THE LIST TO A TABLE MUST NOT SWALLOW THE FAILURE SENTENCE", async () => {
+    // DataTable renders NOTHING when `failed` — deliberately, because only the page knows what to retry.
+    // So the page has to say it. Without this the rules area would go BLANK on a failed read: the screen
+    // saying nothing at all about a load that failed, which is the reassuring-empty defect wearing its
+    // quietest possible face, and it would pass every other test in this file.
+    rulesFail = true;
+    withAuth(<Access />);
+    await waitFor(() =>
+      expect(screen.getByText("Rules could not be loaded. refresh to try again.")).toBeTruthy(),
+    );
+    // ⚠ And it must never be the table's own emptiness, which claims none EXIST.
+    expect(screen.queryByText(/No rules yet/)).toBeNull();
+    expect(screen.queryByText(/0 rules while enforcing/)).toBeNull();
+  });
+
   it("a failed load never renders a defaulted rule COUNT — it says the status is unavailable", async () => {
     rulesFail = true;
     withAuth(<Access />);
