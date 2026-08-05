@@ -42,7 +42,6 @@ import {
 import {
   deviceCountFor,
   deviceCountLabel,
-  filterMembers,
   groupAccessLabel,
   groupAccessState,
   LAST_OWNER_NOTE,
@@ -70,7 +69,6 @@ export default function Users() {
   const [resetTarget, setResetTarget] = useState<Member | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
   const [isEnterprise, setIsEnterprise] = useState(false);
   const [invites, setInvites] = useState<Invitation[] | null>(null);
   const [inviteErr, setInviteErr] = useState<string | null>(null);
@@ -281,7 +279,8 @@ export default function Users() {
       m.user_id !== myId,
   );
   const groupAccess = groupAccessState({ isEnterprise, role: myRole, groupCount });
-  const shown = filterMembers(members, query);
+  // The table filters now, so the page hands it the whole roster.
+  const shown = members;
 
   return (
     <div>
@@ -289,6 +288,231 @@ export default function Users() {
       <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
       <ErrorText>{error}</ErrorText>
 
+      {/* ⛔ THE ROSTER COMES FIRST. It was FOURTH — below invitations, below a posture panel, below the
+          invite form — so the thing this page is named after was the last thing on it, reached only by
+          scrolling past three cards. The panels are CONTEXT; the roster is the SUBJECT.
+
+          ⚠ And the invite form now sits directly above the table it adds to, rather than adrift between
+          two panels — the same placement rule the Groups screen needed. */}
+      {can(myRole, "member:invite") && emailVerified && org && (
+        <InviteForm orgId={org.id} onInvited={() => loadMembers(org.id)} />
+      )}
+
+      {/* S14.3 slice A: a real <table>. The roster is tabular — person, role, state, actions per row — and as
+          <li> blocks the tier could only find a member by matching their email as free text. The role control
+          and the action buttons keep their own accessible names, so they stay queryable INSIDE a cell. */}
+      <div className="mt-6">
+        {/* ⛔ ONE FILTER, AND IT IS THE TABLE'S NOW. The page carried a separate "Filter members" field
+            floating above the roster in its own box — disconnected from the thing it narrowed, and a second
+            search input the moment the table grew one.
+
+            ⚠ THE SURVIVOR IS THE ONE THAT SEARCHES MORE. `filterMembers` matched name, email and role; the
+            table's search runs over every column's `sortValue`, which is those three PLUS state — so
+            "deactivated" now finds the deactivated members, which the old box could not. Swapping to the
+            weaker control to preserve a helper would have been keeping the test, not the capability. */}
+        <DataTable
+          caption="Members"
+          // ⛔ THE VERBS LEAVE THE ROWS. Deactivate / Reactivate / Reset 2FA were redrawn on every row —
+          // three buttons per member, the same three words down the page, crowding out who the member IS.
+          //
+          // ⚠ `unavailable` carries every rule the per-row version encoded in whether a button RENDERED at
+          // all. That was the quieter design: a row with no controls said nothing about why. Now the bar
+          // names the reason — you cannot deactivate yourself, you cannot deactivate the last owner, and a
+          // member you may not manage says so instead of silently offering nothing.
+          // ⛔ GATED ON anyRowHasAction, NOT ON emailVerified — the rule the ACTIONS COLUMN already earned,
+          // carried onto the selection bar. The test is "does ANY row have an action", not "does the viewer
+          // hold a role": an admin on a roster of owners can act on nobody, and a role-based test would give
+          // them checkboxes and a bar of permanently-disabled verbs. Offering a selection you can do nothing
+          // with is the same lie the empty Actions column was, wearing a different control.
+          rowActions={
+            anyRowHasAction
+              ? [
+                  {
+                    key: "deactivate",
+                    label: "Deactivate",
+                    danger: true,
+                    unavailable: (m: Member) =>
+                      m.user_id === myId
+                        ? // Never on self — it would log you out, which is a footgun, not a feature.
+                          "You cannot deactivate your own account."
+                        : !canManageMembership(myRole, m.role, "")
+                          ? "You cannot manage this member's role."
+                          : m.status !== "active"
+                            ? "Already deactivated."
+                            : isSoleOwner(m)
+                              ? "An organization must always have at least one owner."
+                              : null,
+                    run: (ms: Member[]) => {
+                      void Promise.all(ms.map((m) => setActive(m, false)));
+                    },
+                  },
+                  {
+                    key: "reactivate",
+                    label: "Reactivate",
+                    unavailable: (m: Member) =>
+                      !canManageMembership(myRole, m.role, "")
+                        ? "You cannot manage this member's role."
+                        : m.status === "active"
+                          ? "Already active."
+                          : null,
+                    run: (ms: Member[]) => {
+                      void Promise.all(ms.map((m) => setActive(m, true)));
+                    },
+                  },
+                  {
+                    key: "reset2fa",
+                    label: "Reset 2FA",
+                    // ⚠ Disenroll-only — it clears the member's 2FA and never signs in as them. One at a
+                    // time: the confirm names the person, and a bulk 2FA reset is a different dialog.
+                    arity: "single",
+                    unavailable: (m: Member) =>
+                      m.user_id === myId
+                        ? "Reset your own 2FA from your account settings."
+                        : !canManageMembership(myRole, m.role, "")
+                          ? "You cannot manage this member's role."
+                          : null,
+                    run: (ms: Member[]) => setResetTarget(ms[0]),
+                  },
+                ]
+              : undefined
+          }
+          rows={shown}
+          rowKey={(m) => m.user_id}
+          // ⛔ THE FILTER'S EMPTY STATE IS NOT THE ROSTER'S — "No members yet" under an active query would
+          // tell an admin their org is empty when they simply typed a name that does not match. That
+          // distinction now lives in DataTable, which owns the search and therefore owns the third
+          // emptiness; this prop is the GENUINE zero and nothing else.
+          empty="No members yet."
+          failed={error != null}
+          columns={[
+            {
+              key: "person",
+              header: "Member",
+              // ⚠ NAME AND EMAIL BOTH, because the cell shows whichever exists — searching for the one it
+              // chose not to display must still find the row.
+              sortValue: (m) => `${m.name ?? ""} ${m.email}`,
+              cell: (m) => {
+                // The primary label falls back to the email; the secondary line then has nothing to add.
+                const primary = m.name || m.email;
+                return (
+                <>
+                  <span className="text-sm text-white">{primary}</span>
+                  {m.user_id === myId && (
+                    <span className="ml-2 text-xs text-slate-500">(you)</span>
+                  )}
+                  {/* ⛔ THE EMAIL IS THE SECONDARY LINE ONLY WHEN A NAME TOOK THE PRIMARY ONE. Unconditionally
+                      it rendered the address TWICE for a nameless member — and that is not a corner case:
+                      `users.name` is `NOT NULL DEFAULT ''` and `acceptInvitation.name` is OPTIONAL, so 144 of
+                      241 users in the review database have an empty name.
+                      Found because a MOCK omitted `name` while every seeded member had one — the fixture was
+                      LESS representative than the double. The inverse of S14.10, where the double was more
+                      permissive than the substrate; the lesson is the same one from the other side. */}
+                  {primary !== m.email && (
+                    <span className="ml-2 font-mono text-xs text-slate-500">
+                      {m.email}
+                    </span>
+                  )}
+                </>
+                );
+              },
+            },
+            {
+              key: "state",
+              header: "State",
+              sortValue: (m) => (m.status === "deactivated" ? "deactivated" : "active"),
+              cell: (m) => (
+                <>
+                  {m.status === "deactivated" && (
+                    <span className="text-xs text-warn">deactivated</span>
+                  )}
+                  {!m.email_verified && m.status === "active" && (
+                    <span className="text-xs text-slate-600">unverified</span>
+                  )}
+                </>
+              ),
+            },
+            // ⛔ SPLICED IN, NOT DIMMED. `...(cond ? [col] : [])` means a viewer without member:manage gets
+            // NO <th> and NO cell — nothing in the DOM, nothing announced, nothing keyboard-reachable. An
+            // `opacity-40` column would be "gone only to a sighted mouse user".
+            //
+            // And the reason it is gated at all is the FALSE ZERO: /devices is audience-scoped at the handler
+            // (ListForOrg for member:manage, ListForUser otherwise), so a member's list holds only their own
+            // devices and a group-by over it would print `0 devices` against every colleague. Measured live:
+            // owner@ sees 13 devices / 2 owners, member@ sees 6 / 1.
+            ...(shape.showDeviceCount
+              ? [
+                  {
+                    key: "devices",
+                    header: "Devices",
+                    numeric: true,
+                    cell: (m: Member) => {
+                      const c = deviceCountFor({
+                        role: myRole,
+                        devices,
+                        userId: m.user_id,
+                      });
+                      return (
+                        <span
+                          className={
+                            c.kind === "count"
+                              ? "text-sm text-white"
+                              : "text-xs text-slate-500"
+                          }
+                        >
+                          {c.kind === "count" ? c.n : deviceCountLabel(c)}
+                        </span>
+                      );
+                    },
+                  },
+                ]
+              : []),
+            {
+              key: "role",
+              header: "Role",
+              sortValue: (m) => m.role,
+              cell: (m) => {
+                // Role is editable on any target the actor may manage — INCLUDING self (an owner handing off
+                // ownership). The last-owner disable therefore surfaces on the sole owner's OWN role control.
+                const canManage =
+                  emailVerified && canManageMembership(myRole, m.role, "");
+                const assignable = ROLES.filter((r) =>
+                  canManageMembership(myRole, m.role, r),
+                );
+                if (!canManage || assignable.length === 0)
+                  return (
+                    <span className="text-xs uppercase tracking-wide text-slate-400">
+                      {m.role}
+                    </span>
+                  );
+                return (
+                  <select
+                    className={selectCls}
+                    aria-label={`Role for ${m.email}`}
+                    value={m.role}
+                    disabled={isSoleOwner(m)}
+                    title={
+                      isSoleOwner(m)
+                        ? "An organization must always have at least one owner."
+                        : undefined
+                    }
+                    onChange={(e) => changeRole(m, e.target.value as Role)}
+                  >
+                    {assignable.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                );
+              },
+            },
+          ]}
+        />
+
+      {/* ⚠ CONTEXT, BELOW THE SUBJECT, AND SIDE BY SIDE — two short cards stacked full-width were a screen
+          of scrolling to reach a roster. Columns, so a wider display adds a column rather than stretching
+          either card. */}
+      <div className="mt-6 grid items-start gap-3.5 lg:grid-cols-2">
       {/* ── Pending invitations ───────────────────────────────────────────────────────────────────────────
           ⛔ THE ONLY WRITE-ONLY STATE IN THE PRODUCT THAT IS ITSELF AN ACCESS GRANT. `resendInvitation` and
           `revokeInvitation` are keyed by EMAIL and nothing served the addresses, so an invitation could be
@@ -454,214 +678,8 @@ export default function Users() {
         </Card>
       </div>
 
-      {can(myRole, "member:invite") && emailVerified && org && (
-        <InviteForm orgId={org.id} onInvited={() => loadMembers(org.id)} />
-      )}
-
-      <div className="mt-6 max-w-sm">
-        <Field label="Filter members">
-          <Input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="name, email or role"
-          />
-        </Field>
       </div>
 
-      {/* S14.3 slice A: a real <table>. The roster is tabular — person, role, state, actions per row — and as
-          <li> blocks the tier could only find a member by matching their email as free text. The role control
-          and the action buttons keep their own accessible names, so they stay queryable INSIDE a cell. */}
-      <div className="mt-6">
-        {/* ⛔ NO SECOND FILTER BOX. This page has its OWN "Filter members" control above, backed by the
-            tested `filterMembers` helper, and it had it long before the table grew one. Two search inputs on
-            one screen compose SILENTLY: an operator narrows with the first, narrows again with the second,
-            and the empty result names neither of them. The page's filter stays because it is the one that
-            already existed and is pinned by tests.
-
-            ⚠ Sorting is UNAFFECTED — `sortValue` still orders the columns; only the redundant input goes. */}
-        <DataTable
-          filterable={false}
-          caption="Members"
-          rows={shown}
-          rowKey={(m) => m.user_id}
-          // ⛔ THE FILTER'S EMPTY STATE IS NOT THE ROSTER'S. "No members yet" under an active query would tell
-          // an admin their org is empty when they simply typed a name that does not match.
-          empty={
-            query.trim() !== "" && members.length > 0
-              ? `No members match “${query.trim()}”.`
-              : "No members yet."
-          }
-          failed={error != null}
-          columns={[
-            {
-              key: "person",
-              header: "Member",
-              // ⚠ NAME AND EMAIL BOTH, because the cell shows whichever exists — searching for the one it
-              // chose not to display must still find the row.
-              sortValue: (m) => `${m.name ?? ""} ${m.email}`,
-              cell: (m) => {
-                // The primary label falls back to the email; the secondary line then has nothing to add.
-                const primary = m.name || m.email;
-                return (
-                <>
-                  <span className="text-sm text-white">{primary}</span>
-                  {m.user_id === myId && (
-                    <span className="ml-2 text-xs text-slate-500">(you)</span>
-                  )}
-                  {/* ⛔ THE EMAIL IS THE SECONDARY LINE ONLY WHEN A NAME TOOK THE PRIMARY ONE. Unconditionally
-                      it rendered the address TWICE for a nameless member — and that is not a corner case:
-                      `users.name` is `NOT NULL DEFAULT ''` and `acceptInvitation.name` is OPTIONAL, so 144 of
-                      241 users in the review database have an empty name.
-                      Found because a MOCK omitted `name` while every seeded member had one — the fixture was
-                      LESS representative than the double. The inverse of S14.10, where the double was more
-                      permissive than the substrate; the lesson is the same one from the other side. */}
-                  {primary !== m.email && (
-                    <span className="ml-2 font-mono text-xs text-slate-500">
-                      {m.email}
-                    </span>
-                  )}
-                </>
-                );
-              },
-            },
-            {
-              key: "state",
-              header: "State",
-              sortValue: (m) => (m.status === "deactivated" ? "deactivated" : "active"),
-              cell: (m) => (
-                <>
-                  {m.status === "deactivated" && (
-                    <span className="text-xs text-warn">deactivated</span>
-                  )}
-                  {!m.email_verified && m.status === "active" && (
-                    <span className="text-xs text-slate-600">unverified</span>
-                  )}
-                </>
-              ),
-            },
-            // ⛔ SPLICED IN, NOT DIMMED. `...(cond ? [col] : [])` means a viewer without member:manage gets
-            // NO <th> and NO cell — nothing in the DOM, nothing announced, nothing keyboard-reachable. An
-            // `opacity-40` column would be "gone only to a sighted mouse user".
-            //
-            // And the reason it is gated at all is the FALSE ZERO: /devices is audience-scoped at the handler
-            // (ListForOrg for member:manage, ListForUser otherwise), so a member's list holds only their own
-            // devices and a group-by over it would print `0 devices` against every colleague. Measured live:
-            // owner@ sees 13 devices / 2 owners, member@ sees 6 / 1.
-            ...(shape.showDeviceCount
-              ? [
-                  {
-                    key: "devices",
-                    header: "Devices",
-                    numeric: true,
-                    cell: (m: Member) => {
-                      const c = deviceCountFor({
-                        role: myRole,
-                        devices,
-                        userId: m.user_id,
-                      });
-                      return (
-                        <span
-                          className={
-                            c.kind === "count"
-                              ? "text-sm text-white"
-                              : "text-xs text-slate-500"
-                          }
-                        >
-                          {c.kind === "count" ? c.n : deviceCountLabel(c)}
-                        </span>
-                      );
-                    },
-                  },
-                ]
-              : []),
-            {
-              key: "role",
-              header: "Role",
-              sortValue: (m) => m.role,
-              cell: (m) => {
-                // Role is editable on any target the actor may manage — INCLUDING self (an owner handing off
-                // ownership). The last-owner disable therefore surfaces on the sole owner's OWN role control.
-                const canManage =
-                  emailVerified && canManageMembership(myRole, m.role, "");
-                const assignable = ROLES.filter((r) =>
-                  canManageMembership(myRole, m.role, r),
-                );
-                if (!canManage || assignable.length === 0)
-                  return (
-                    <span className="text-xs uppercase tracking-wide text-slate-400">
-                      {m.role}
-                    </span>
-                  );
-                return (
-                  <select
-                    className={selectCls}
-                    aria-label={`Role for ${m.email}`}
-                    value={m.role}
-                    disabled={isSoleOwner(m)}
-                    title={
-                      isSoleOwner(m)
-                        ? "An organization must always have at least one owner."
-                        : undefined
-                    }
-                    onChange={(e) => changeRole(m, e.target.value as Role)}
-                  >
-                    {assignable.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
-                );
-              },
-            },
-            // Spliced, not dimmed — identical to the Devices column above. See `anyRowHasAction`.
-            ...(anyRowHasAction
-              ? [{
-              key: "actions",
-              header: "Actions",
-              numeric: true,
-              cell: (m: Member) => {
-                const canManage =
-                  emailVerified && canManageMembership(myRole, m.role, "");
-                const isSelf = m.user_id === myId;
-                // Deactivate is never offered on self — it would log you out, which is a footgun, not a feature.
-                if (!canManage || isSelf) return null;
-                return (
-                  <span className="inline-flex items-center gap-2">
-                    {m.status === "active" ? (
-                      <Button
-                        variant="danger"
-                        onClick={() => setActive(m, false)}
-                        disabled={isSoleOwner(m)}
-                        title={
-                          isSoleOwner(m)
-                            ? "An organization must always have at least one owner."
-                            : undefined
-                        }
-                      >
-                        Deactivate
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        onClick={() => setActive(m, true)}
-                      >
-                        Reactivate
-                      </Button>
-                    )}
-                    {/* Admin-reset MFA (enterprise; open build answers edition_required). Disenroll-only —
-                        it clears the member's 2FA, never signs in as them. */}
-                    <Button variant="ghost" onClick={() => setResetTarget(m)}>
-                      Reset 2FA
-                    </Button>
-                  </span>
-                );
-              },
-            }]
-              : []),
-          ]}
-        />
         {/* ⛔ §2.5 OF THE COMMIT-ONE SAID "NO CLIENT-SIDE OWNER COUNT" AND THE SCREEN ALREADY HAD ONE, with a
             written rationale (see isSoleOwner). I ruled on this screen's behaviour without reading the screen
             — the same method error as grepping `Member` and concluding the product did not know.

@@ -421,7 +421,9 @@ describe("Users — the four gates, and WHICH reason each caller is given", () =
     // this viewer" — not "as many columns as an admin gets".
     for (const h of ["Member", "State", "Role"])
       expect(within(table).getByRole("columnheader", { name: h })).toBeTruthy();
-    expect(within(table).queryByRole("columnheader", { name: "Actions" })).toBeNull();
+    // ⚠ The verbs moved from an Actions COLUMN to the selection bar, so the affordance to assert is the
+    // checkbox. The RULE is untouched: a viewer who can act on nobody is offered nothing to act WITH.
+    expect(within(table).queryByRole("checkbox")).toBeNull();
     // And the role tallies render, INCLUDING the zero for admins.
     expect(screen.getByText("0")).toBeTruthy();
   });
@@ -435,7 +437,7 @@ describe("Users — the filter", () => {
     );
     await waitFor(() => within(table).getByText("admin@acme.test"));
 
-    const box = screen.getByRole("searchbox", { name: "Filter members" });
+    const box = screen.getByRole("searchbox", { name: "Filter Members" });
     fireEvent.change(box, { target: { value: "admin@" } });
     await waitFor(() =>
       expect(screen.queryByText("owner@acme.test")).toBeNull(),
@@ -527,7 +529,9 @@ describe("Users — the ACTIONS column follows the same rule as Devices", () => 
 
     const headers = within(table).getAllByRole("columnheader").map((h) => h.textContent);
     expect(headers).toEqual(["Member", "State", "Role"]);
-    expect(within(table).queryByRole("columnheader", { name: "Actions" })).toBeNull();
+    // ⚠ The verbs moved from an Actions COLUMN to the selection bar, so the affordance to assert is the
+    // checkbox. The RULE is untouched: a viewer who can act on nobody is offered nothing to act WITH.
+    expect(within(table).queryByRole("checkbox")).toBeNull();
     expect(within(table).queryByRole("columnheader", { name: "Devices" })).toBeNull();
   });
 
@@ -535,7 +539,7 @@ describe("Users — the ACTIONS column follows the same rule as Devices", () => 
     withAuth(<Users />); // default roster: u1 owner (me), u2 admin — I can act on u2
     const table = await waitFor(() => screen.getByRole("table", { name: "Members" }));
     await waitFor(() => within(table).getByText("Adam Admin"));
-    expect(within(table).getByRole("columnheader", { name: "Actions" })).toBeTruthy();
+    expect(within(table).getAllByRole("checkbox").length).toBeGreaterThan(0);
   });
 
   it("⛔ the test is ANY-ROW-HAS-AN-ACTION, not the viewer's role", async () => {
@@ -549,7 +553,9 @@ describe("Users — the ACTIONS column follows the same rule as Devices", () => 
     withAuth(<Users />);
     const table = await waitFor(() => screen.getByRole("table", { name: "Members" }));
     await waitFor(() => within(table).getByText("Olive Owner"));
-    expect(within(table).queryByRole("columnheader", { name: "Actions" })).toBeNull();
+    // ⚠ The verbs moved from an Actions COLUMN to the selection bar, so the affordance to assert is the
+    // checkbox. The RULE is untouched: a viewer who can act on nobody is offered nothing to act WITH.
+    expect(within(table).queryByRole("checkbox")).toBeNull();
     // But the Devices column STAYS — an admin holds member:manage, and that gate is unrelated.
     expect(within(table).getByRole("columnheader", { name: "Devices" })).toBeTruthy();
   });
@@ -579,7 +585,7 @@ describe("Users — exactly one filter control", () => {
     // different affordance that happens to be configured next door.
     withAuth(<Users />);
     await waitFor(() => screen.getByRole("table", { name: "Members" }));
-    expect(screen.getByLabelText("Filter members")).toBeTruthy();
+    expect(screen.getByRole("searchbox", { name: "Filter Members" })).toBeTruthy();
     const roleHeader = screen.getByRole("columnheader", { name: "Role" });
     expect(within(roleHeader).queryByRole("button")).not.toBeNull();
   });
