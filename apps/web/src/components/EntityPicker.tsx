@@ -23,8 +23,11 @@ export interface PickerOption {
   /** Short uppercase tag — GROUP, SITE, AGENT. */
   tag: string;
   label: string;
-  /** Extra searchable/《displayed》 context, e.g. an agent's gateway. */
+  /** Extra searchable/displayed context, e.g. an agent's gateway. */
   detail?: string;
+  /** Heading this option is filed under. Carries facts a per-row tag cannot — e.g. that a whole section is
+   *  port-unscoped. */
+  section?: string;
   /**
    * ⛔ A reason this option cannot be chosen RIGHT NOW, given the other side's selection.
    *
@@ -151,8 +154,20 @@ export function EntityPicker({
               {acceptCidr && " Type a CIDR (e.g. 10.0.5.0/24) to use a literal address."}
             </li>
           )}
+          {/* ⛔ GROUPED BY SECTION, IN ORDER. Nine flat options teach nothing; a heading that reads
+              "Networks & devices — ALL ports" teaches the model's most consequential fact at the exact
+              moment the choice is made. The index used for keyboard focus is the FLAT one, so grouping
+              changes what the eye sees without changing what the arrow keys do. */}
           {shown.map((o, idx) => (
             <li key={`${o.kind}:${o.value}`} role="option" aria-selected={o.value === value}>
+              {o.section && o.section !== shown[idx - 1]?.section && (
+                <div
+                  role="presentation"
+                  className="px-3 pb-0.5 pt-2 font-mono text-[10px] uppercase tracking-wide text-ink-tertiary"
+                >
+                  {o.section}
+                </div>
+              )}
               <button
                 type="button"
                 disabled={!!o.unavailable}

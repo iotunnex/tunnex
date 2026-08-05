@@ -1044,6 +1044,13 @@ export interface RuleOption {
   label: string;
   detail?: string;
   unavailable?: string;
+  /**
+   * ⛔ THE SECTION IS WHERE PORT SCOPE BECOMES VISIBLE, and port scope is the most consequential fact in
+   * this model. `compiler.go:442`/`:458` emit `Protocol: ProtoAny` for group and site destinations — a
+   * device and a LAN are L3, so there is no port to narrow. A flat list of nine options hides that; a
+   * heading that says "all ports" cannot.
+   */
+  section: string;
 }
 
 /**
@@ -1059,6 +1066,16 @@ export interface RuleOption {
  */
 export const SELF_SITE_REASON = "a site cannot reach itself";
 
+/**
+ * ⛔ THE TWO DESTINATION SECTIONS, AND THE HEADINGS CARRY THE FACT THE TAG CANNOT.
+ *
+ * Port scope is a property of the destination KIND, not a field on the rule: there is no way to narrow a
+ * group destination to one port, and no way to widen a resource past its declared ones. Choosing the noun IS
+ * choosing the scope, so the noun has to be presented under a heading that says which.
+ */
+export const DST_SCOPED = "Services — port-scoped";
+export const DST_WIDE = "Networks & devices — ALL ports";
+
 export function sourceOptions(i: {
   groups: Array<{ id: string; name: string }>;
   members: Array<{ user_id: string; email: string; name?: string }>;
@@ -1068,11 +1085,12 @@ export function sourceOptions(i: {
   dstSite: string;
 }): RuleOption[] {
   return [
-    ...i.groups.map((g) => ({ value: g.id, kind: "group", tag: "group", label: g.name })),
+    ...i.groups.map((g) => ({ value: g.id, kind: "group", tag: "group", label: g.name, section: "People" })),
     ...i.members.map((m) => ({
       value: m.user_id,
       kind: "user",
       tag: "person",
+      section: "People",
       label: m.name || m.email,
       // ⚠ The email rides along even when a display name exists: it is what an operator searches by, and it
       // is the only disambiguator between two people with the same name.
@@ -1083,6 +1101,7 @@ export function sourceOptions(i: {
       kind: "site",
       tag: "site",
       label: s.name,
+      section: "Networks",
       unavailable:
         i.dstKind === "site" && i.dstSite === s.id ? SELF_SITE_REASON : undefined,
     })),
@@ -1092,6 +1111,9 @@ export function sourceOptions(i: {
       tag: "agent",
       label: a.name,
       detail: `via ${a.gateway_name}`,
+      // ⛔ ITS OWN SECTION. An agent is a MACHINE principal and exactly one device — filing it under People
+      // would suggest it has an owner carrying it, and filing it under Networks would suggest a subnet.
+      section: "Machines",
     })),
   ];
 }
@@ -1105,16 +1127,91 @@ export function destinationOptions(i: {
   srcSite: string;
 }): RuleOption[] {
   return [
-    ...i.groups.map((g) => ({ value: g.id, kind: "group", tag: "group", label: g.name })),
-    ...i.resources.map((r) => ({ value: r.id, kind: "resource", tag: "resource", label: r.name })),
+    // ⛔ SERVICES FIRST, because they are the port-scoped ones and the ones an operator usually wants.
+    ...i.resources.map((r) => ({
+      value: r.id, kind: "resource", tag: "resource", label: r.name, section: DST_SCOPED,
+    })),
+    ...i.services.map((s) => ({
+      value: s.id, kind: "k8s_service", tag: "k8s", label: s.name, section: DST_SCOPED,
+    })),
+    ...i.groups.map((g) => ({ value: g.id, kind: "group", tag: "group", label: g.name, section: DST_WIDE })),
     ...i.sites.map((s) => ({
       value: s.id,
       kind: "site",
       tag: "site",
       label: s.name,
+      section: DST_WIDE,
       unavailable:
         i.srcKind === "site" && i.srcSite === s.id ? SELF_SITE_REASON : undefined,
     })),
-    ...i.services.map((s) => ({ value: s.id, kind: "k8s_service", tag: "k8s", label: s.name })),
   ];
+}
+
+/**
+ * ⛔ WHAT THE RULE WILL ACTUALLY DO, IN WORDS, BEFORE IT IS CREATED.
+ *
+ * Two pickers and a Create button let an operator choose two nouns and press go. Nothing in that gesture
+ * says what the compiler will emit — and the gap between "agent rajan → group Contractors" and what it means
+ * is enormous:
+ *
+ * > **A GROUP OR SITE DESTINATION IS PORT-UNSCOPED BY CONSTRUCTION.** `compiler.go:442` and `:458` emit
+ * > `Protocol: ProtoAny` — device-to-device and LAN destinations are L3, so there is no port to narrow. Only
+ * > a resource or a Kubernetes Service carries protocol and ports.
+ *
+ * So "agent → group" grants ONE MACHINE UNRESTRICTED ACCESS TO EVERY DEVICE OWNED BY EVERY MEMBER of that
+ * group. That may be exactly what someone wants; it must not be something they discover afterwards.
+ *
+ * ⚠ THIS IS A DESCRIPTION, NEVER A REFUSAL. Every pair below compiles and every one has a legitimate use.
+ * The render floor still binds: the verb is REACH, and nothing here claims detection or per-tool control.
+ */
+export function ruleEffectSummary(i: {
+  srcKind: string;
+  srcLabel: string;
+  dstKind: string;
+  dstLabel: string;
+}): { text: string; wide: boolean } {
+  const subject =
+    i.srcKind === "agent"
+      ? `AI agent ${i.srcLabel}`
+      : i.srcKind === "user"
+        ? i.srcLabel
+        : i.srcKind === "site"
+          ? `every host on site ${i.srcLabel}`
+          : i.srcKind === "cidr"
+            ? `any host in ${i.srcLabel}`
+            : `every device of ${i.srcLabel}`;
+
+  // ⛔ `wide` marks the port-unscoped destinations. It drives a warning, never a block.
+  const wide = i.dstKind === "group" || i.dstKind === "site";
+  const object =
+    i.dstKind === "group"
+      ? `every device belonging to every member of ${i.dstLabel}`
+      : i.dstKind === "site"
+        ? `every host on site ${i.dstLabel}`
+        : i.dstKind === "k8s_service"
+          ? `the Kubernetes Service ${i.dstLabel}`
+          : i.dstLabel;
+
+  const scope = wide
+    ? " on ALL ports and protocols"
+    : i.dstKind === "resource"
+      ? " on that resource's declared ports only"
+      : " on that Service's declared ports only";
+
+  return { text: `${subject} will be able to reach ${object}${scope}.`, wide };
+}
+
+/**
+ * ⚠ THE EXTRA SENTENCE FOR THE SHAPE THAT SURPRISES PEOPLE, and only for it — a caution attached to every
+ * rule is one nobody reads.
+ *
+ * A non-human principal granted unrestricted access to humans' own devices is backwards for almost every
+ * intent: an agent normally needs SERVICES, which are port-scoped. Said as a question about intent, not as a
+ * verdict about safety, because the grant is legitimate when it is deliberate.
+ */
+export function ruleEffectCaution(srcKind: string, dstKind: string): string | null {
+  if (srcKind === "agent" && (dstKind === "group" || dstKind === "site")) {
+    return "This gives a machine principal unrestricted access to people's own devices. If the agent needs a service, name that service as the destination instead — a resource is port-scoped, a group is not.";
+  }
+  return null;
 }
