@@ -547,3 +547,36 @@ describe("DataTable — the footer earns its place", () => {
     expect(screen.getByText("1–25 of 60")).toBeTruthy();
   });
 });
+
+describe("DataTable — a numeric column's gap", () => {
+  it("⛔ A NUMERIC CELL EMITS EXACTLY ONE `pr-*`, NOT TWO", () => {
+    // Right-aligned content sits flush against its cell's right edge, so that padding is the ONLY thing
+    // between a number and the next column — Users' device count was touching the role select. The fix is a
+    // bigger `pr`, and it must SWAP the base one rather than joining it: emitting `pr-4` and `pr-8` together
+    // is the override coin flip (the winner is whichever the stylesheet orders last), which this repo has a
+    // whole census for. A screenshot cannot show which rule won; this can.
+    render(
+      <DataTable<Row>
+        caption="Widgets"
+        rows={[{ id: "1", name: "a", owner: "o@x", state: "active" }]}
+        failed={false}
+        rowKey={(r) => r.id}
+        empty="none"
+        columns={[
+          { key: "n", header: "Count", numeric: true, cell: () => <span>0</span> },
+          { key: "name", header: "Name", cell: (r) => <span>{r.name}</span> },
+        ]}
+      />,
+    );
+    const prOf = (el: Element) => el.className.match(/\bpr-\d+/g) ?? [];
+    const numeric = prOf(screen.getAllByRole("cell")[0]);
+    expect(numeric).toHaveLength(1);
+    // ⚠ And it is BIGGER than the non-numeric default, or the fix exists only in the comment.
+    const plain = prOf(screen.getAllByRole("cell")[1]);
+    expect(plain).toHaveLength(1);
+    // `noUncheckedIndexedAccess` is on, so the length assertions above do not narrow the element type —
+    // read through a helper that states the fallback rather than asserting non-null.
+    const px = (c: string | undefined) => Number((c ?? "pr-0").slice(3));
+    expect(px(numeric[0])).toBeGreaterThan(px(plain[0]));
+  });
+});
