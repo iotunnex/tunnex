@@ -187,26 +187,36 @@ describe("AuditLog — the actor column names the human", () => {
  * > **TWO PAGERS CONTRADICT EACH OTHER ONLY WHILE THEY ARE SILENT ABOUT WHICH SET THEY DESCRIBE.** The
  * > table's count says "of N loaded"; the server control says "from server" on its face.
  */
-describe("AuditLog — it pages what it has, and can fetch more", () => {
-  it("⛔ DOES NOT RENDER EVERY LOADED ROW AT ONCE", async () => {
-    // The fixture serves 51 rows. Before this fix all 51 rendered; a page is 25.
+/**
+ * ⛔ THIS SURFACE PAGES ON THE SERVER, AND ITS PROOF COUNTS DOM ROWS.
+ *
+ * `e2e/tests/audit.spec.ts` asserts 51 rows, then 54 after "Load more", to show the keyset cursor stitches
+ * pages with NO OVERLAP and NO GAP — a re-served or skipped row changes the count. A CLIENT pager renders 25
+ * of whatever was fetched, so that count stops meaning what the proof needs it to mean.
+ *
+ * ⚠ THESE TWO TESTS ONCE ASSERTED THE OPPOSITE, and that is worth recording rather than quietly deleting.
+ * The founder asked the log surfaces to paginate, so a client pager was added here and pinned. The e2e then
+ * red-lined, the pager was reverted — and THESE TESTS WERE LEFT BEHIND, still asserting a pager that no
+ * longer exists. They passed locally only because the suite was not re-run after that revert, and CI caught
+ * them. Re-expressing the keyset proof to survive client paging is a decide-item, not a fold.
+ */
+describe("AuditLog — the server is its pager", () => {
+  it("⛔ EVERY FETCHED ROW RENDERS — the e2e's stitching proof counts them", async () => {
+    // The fixture serves PAGE+1 = 51 so the has-more probe trips; the page displays PAGE = 50.
+    // 50 body rows + 1 header. The precise number matters: "at least some" would also pass on a component
+    // that rendered one row, which is a different defect wearing the same result.
     withAuth(<AuditLog />);
     const table = await waitFor(() => screen.getByRole("table", { name: "Audit events" }));
-    // 25 body rows + 1 header. The precise number matters: "fewer than 51" would also pass on a
-    // component that rendered one row, which is a different defect wearing the same result.
-    expect(within(table).getAllByRole("row")).toHaveLength(26);
-    // 50, not 51: the page fetches PAGE+1 purely to probe for more and displays PAGE. The count
-    // describes what is SHOWN, never the probe row.
-    expect(screen.getByText("1–25 of 50")).toBeTruthy();
+    expect(within(table).getAllByRole("row")).toHaveLength(51);
   });
 
-  it("⚠ AND BOTH CONTROLS ARE PRESENT AND DISTINGUISHABLE", async () => {
-    // The client pager moves within what is loaded; the server control extends what is loaded. If either
-    // disappeared, one of the two sets would become unreachable — the client pager's absence was the
-    // original defect, and the server control's absence would cap the log at one fetch forever.
+  it("⚠ AND THE SERVER CONTROL IS THE ONLY PAGER — no client one beside it", async () => {
+    // Its absence would cap the log at one fetch forever; a client pager beside it would put two paging
+    // controls on one screen that disagree about which set they describe.
     withAuth(<AuditLog />);
     await waitFor(() => screen.getByRole("table", { name: "Audit events" }));
-    expect(screen.getByRole("button", { name: "Next page" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Load more from server" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Next page" })).toBeNull();
+    expect(screen.queryByLabelText("Rows per page")).toBeNull();
   });
 });
