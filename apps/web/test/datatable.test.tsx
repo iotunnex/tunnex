@@ -546,4 +546,43 @@ describe("DataTable — the footer earns its place", () => {
     expect(screen.getByRole("button", { name: "Next page" })).toBeTruthy();
     expect(screen.getByText("1–25 of 60")).toBeTruthy();
   });
+
+  it("the first column is inset from the table edge — in BOTH the header and the body", () => {
+    // ⚠ THE FOUNDER REPORTED THIS FIXED-BUT-INVISIBLE, AND THE CAUSE WAS A STALE SERVED BUNDLE, NOT A MISSING
+    // EDIT. A test cannot catch a stale deploy — but it can make the source side unambiguous, so the next
+    // time the screen and the code disagree, the code half is already answered.
+    table();
+    const th = screen.getByRole("columnheader", { name: /Name/ });
+    expect(th.className).toContain("pl-3");
+    // The body half is a SEPARATE className expression, so the header passing says nothing about it: text
+    // flush against the panel border is what was actually reported, and that is a <td>.
+    const firstCell = screen.getAllByRole("row")[1].querySelectorAll("td")[0];
+    expect(firstCell?.className).toContain("pl-3");
+  });
+
+  it("⛔ …AND A SELECTABLE TABLE INSETS THE CHECKBOX INSTEAD, never both", () => {
+    // Double-padding the first data column when a checkbox already sits to its left would push the content
+    // out of line with the header of every other table. The guard is `i === 0 && !showSelect`, so this is
+    // the branch that proves the condition is a condition rather than an unconditional pl-3.
+    render(
+      <DataTable<Row>
+        caption="Selectable"
+        rows={ROWS}
+        rowKey={(r) => r.id}
+        empty="none"
+        failed={false}
+        selectable
+        columns={[{ key: "name", header: "Name", cell: (r) => <span>{r.name}</span> }]}
+      />,
+    );
+    const cells = screen.getAllByRole("row")[1].querySelectorAll("td");
+    expect(cells[0].className).toContain("pl-3"); // the checkbox cell carries it
+    expect(cells[1].className).not.toContain("pl-3"); // the name cell does not
+    // ⛔ AND THE HEADER IS ITS OWN EXPRESSION. Asserting only the <td>s left the <th> guard unchecked —
+    // mutation MISSED it: weakening the header condition to a bare `i === 0` double-padded the header of
+    // every selectable table while all three body assertions still passed.
+    const heads = screen.getAllByRole("columnheader");
+    expect(heads[0].className).toContain("pl-3"); // the checkbox header
+    expect(heads[1].className).not.toContain("pl-3"); // the Name header does not repeat it
+  });
 });
