@@ -115,6 +115,14 @@ type Querier interface {
 	// this table in the same release — so the fallback could only ever match rows this version wrote itself.
 	ConsumeRekeyChallenge(ctx context.Context, arg ConsumeRekeyChallengeParams) (NodeRekeyChallenge, error)
 	CountActiveDevicesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
+	// ⛔ AGENTS ARE EXCLUDED FROM THE HUMAN DEVICE SURFACES. An AI agent is a `devices` row because it IS a
+	// WireGuard peer — the peer set, the pool allocation, the revocation sweep and the liveness upsert all read
+	// this table and MUST keep seeing it. What it is not is a user endpoint: it has no owner carrying it, no
+	// client, no posture, and no place in a laptop roster.
+	//
+	// ⚠ THE PREDICATE IS `kind`, NEVER `platform`. Agent rows exist with a NULL platform (measured on the review
+	// rig), so a platform-based filter silently misses them — and a row that escapes this filter reappears in the
+	// middle of an operator's device list with no owner and no posture.
 	// Grandfathered count when flipping device_approval off->on (best-effort blast radius,
 	// S7.3 D4 — existing active devices stay active, not retro-pended).
 	CountActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
@@ -630,7 +638,23 @@ type Querier interface {
 	// (D4): on enabling a check, count how many devices' LAST report would fail it
 	// (best-effort, post-commit; the config write itself never blocks anything).
 	ListDeviceHealthForOrg(ctx context.Context, orgID uuid.UUID) ([]DeviceHealth, error)
+	// ⛔ AGENTS ARE EXCLUDED FROM THE HUMAN DEVICE SURFACES. An AI agent is a `devices` row because it IS a
+	// WireGuard peer — the peer set, the pool allocation, the revocation sweep and the liveness upsert all read
+	// this table and MUST keep seeing it. What it is not is a user endpoint: it has no owner carrying it, no
+	// client, no posture, and no place in a laptop roster.
+	//
+	// ⚠ THE PREDICATE IS `kind`, NEVER `platform`. Agent rows exist with a NULL platform (measured on the review
+	// rig), so a platform-based filter silently misses them — and a row that escapes this filter reappears in the
+	// middle of an operator's device list with no owner and no posture.
 	ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListDevicesByOrgRow, error)
+	// ⛔ AGENTS ARE EXCLUDED FROM THE HUMAN DEVICE SURFACES. An AI agent is a `devices` row because it IS a
+	// WireGuard peer — the peer set, the pool allocation, the revocation sweep and the liveness upsert all read
+	// this table and MUST keep seeing it. What it is not is a user endpoint: it has no owner carrying it, no
+	// client, no posture, and no place in a laptop roster.
+	//
+	// ⚠ THE PREDICATE IS `kind`, NEVER `platform`. Agent rows exist with a NULL platform (measured on the review
+	// rig), so a platform-based filter silently misses them — and a row that escapes this filter reappears in the
+	// middle of an operator's device list with no owner and no posture.
 	ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]ListDevicesByUserRow, error)
 	ListDomainClaims(ctx context.Context, orgID uuid.UUID) ([]DomainClaim, error)
 	// The poller's work-list: every org/provider with sync turned on. Deliberately CROSS-ORG — the
@@ -751,6 +775,14 @@ type Querier interface {
 	// ListOrganizationsForUser (membership-scoped).
 	ListOrganizations(ctx context.Context) ([]Organization, error)
 	ListOrganizationsForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error)
+	// ⛔ AGENTS ARE EXCLUDED FROM THE HUMAN DEVICE SURFACES. An AI agent is a `devices` row because it IS a
+	// WireGuard peer — the peer set, the pool allocation, the revocation sweep and the liveness upsert all read
+	// this table and MUST keep seeing it. What it is not is a user endpoint: it has no owner carrying it, no
+	// client, no posture, and no place in a laptop roster.
+	//
+	// ⚠ THE PREDICATE IS `kind`, NEVER `platform`. Agent rows exist with a NULL platform (measured on the review
+	// rig), so a platform-based filter silently misses them — and a row that escapes this filter reappears in the
+	// middle of an operator's device list with no owner and no posture.
 	// The approval queue (S7.3): devices awaiting admin approval, oldest first.
 	// device_health joined (S7.5.3): a pending device may already be reporting posture
 	// (both facts surface independently — the D7 orthogonality).

@@ -339,6 +339,27 @@ func (s *Service) ReportHealth(ctx context.Context, orgID, actorID, deviceID uui
 		if e != nil {
 			return e
 		}
+		// ⛔ POSTURE IS A HUMAN-ENDPOINT CONTROL AND AN AGENT CANNOT PARTICIPATE IN IT — MEASURED, NOT
+		// ASSUMED. An agent has no desktop client and no helper: it runs plain `wg-quick`, so it can never
+		// self-report disk encryption or an OS version. Nothing about it is ever knowable here.
+		//
+		// The owner check below does NOT stop this, and that is the whole point. An agent's `user_id` is the
+		// ADMIN WHO CREATED IT, so the admin passes the self-report gate and can post posture facts about a
+		// machine they have never seen. On the live rig this produced, end to end:
+		//
+		//   report {"disk_encrypted": false}  ->  {"blocked": true}
+		//   devices.health_blocked = true  ->  `NOT d.health_blocked` in ListActiveWireGuardPeersForNode
+		//   ->  the agent's peer LEFT wg0 (peer count 1 -> 0)  ->  every granted request dead
+		//
+		// ⚠ A HUMAN-ENDPOINT CONTROL REACHED ALL THE WAY TO AN AGENT'S DATA PLANE, through a gate that was
+		// written for humans and is satisfied by an owner who is not the machine. Refused here rather than
+		// filtered downstream: the block must not be WRITABLE, because a stale `health_blocked = true` on an
+		// agent row would keep killing its tunnel long after any filter was added.
+		if dev.Kind == "agent" {
+			return apierr.New(422, "posture_not_applicable",
+				"this is an AI agent, not a user endpoint: it has no client to report posture and cannot be "+
+					"evaluated against device health checks")
+		}
 		// Self-report ONLY: posture facts come from the device's owner, never a
 		// third party (an admin has no better view of the machine than its owner).
 		if dev.UserID != actorID {

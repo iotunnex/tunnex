@@ -34,6 +34,14 @@ SET status = 'revoked', revoked_at = now(), assigned_ip = NULL
 WHERE id = $1 AND org_id = $2 AND status = 'pending' AND deleted_at IS NULL
 RETURNING node_id;
 
+-- ⛔ AGENTS ARE EXCLUDED FROM THE HUMAN DEVICE SURFACES. An AI agent is a `devices` row because it IS a
+-- WireGuard peer — the peer set, the pool allocation, the revocation sweep and the liveness upsert all read
+-- this table and MUST keep seeing it. What it is not is a user endpoint: it has no owner carrying it, no
+-- client, no posture, and no place in a laptop roster.
+--
+-- ⚠ THE PREDICATE IS `kind`, NEVER `platform`. Agent rows exist with a NULL platform (measured on the review
+-- rig), so a platform-based filter silently misses them — and a row that escapes this filter reappears in the
+-- middle of an operator's device list with no owner and no posture.
 -- name: ListPendingDevicesByOrg :many
 -- The approval queue (S7.3): devices awaiting admin approval, oldest first.
 -- device_health joined (S7.5.3): a pending device may already be reporting posture
@@ -43,14 +51,22 @@ SELECT sqlc.embed(d), ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
 LEFT JOIN device_health dh ON dh.device_id = d.id
-WHERE d.org_id = $1 AND d.status = 'pending' AND d.deleted_at IS NULL
+WHERE d.org_id = $1 AND d.status = 'pending' AND d.deleted_at IS NULL AND d.kind <> 'agent'
 ORDER BY d.created_at;
 
+-- ⛔ AGENTS ARE EXCLUDED FROM THE HUMAN DEVICE SURFACES. An AI agent is a `devices` row because it IS a
+-- WireGuard peer — the peer set, the pool allocation, the revocation sweep and the liveness upsert all read
+-- this table and MUST keep seeing it. What it is not is a user endpoint: it has no owner carrying it, no
+-- client, no posture, and no place in a laptop roster.
+--
+-- ⚠ THE PREDICATE IS `kind`, NEVER `platform`. Agent rows exist with a NULL platform (measured on the review
+-- rig), so a platform-based filter silently misses them — and a row that escapes this filter reappears in the
+-- middle of an operator's device list with no owner and no posture.
 -- name: CountActiveDevicesForOrg :one
 -- Grandfathered count when flipping device_approval off->on (best-effort blast radius,
 -- S7.3 D4 — existing active devices stay active, not retro-pended).
 SELECT count(*) FROM devices
-WHERE org_id = $1 AND status = 'active' AND deleted_at IS NULL;
+WHERE org_id = $1 AND status = 'active' AND deleted_at IS NULL AND kind <> 'agent';
 
 -- name: SetOrgDeviceApproval :one
 -- S7.3: flip the org device-approval gate. Enterprise-gated at the HTTP layer; the open
@@ -87,22 +103,38 @@ SELECT * FROM devices
 WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL
 FOR UPDATE;
 
+-- ⛔ AGENTS ARE EXCLUDED FROM THE HUMAN DEVICE SURFACES. An AI agent is a `devices` row because it IS a
+-- WireGuard peer — the peer set, the pool allocation, the revocation sweep and the liveness upsert all read
+-- this table and MUST keep seeing it. What it is not is a user endpoint: it has no owner carrying it, no
+-- client, no posture, and no place in a laptop roster.
+--
+-- ⚠ THE PREDICATE IS `kind`, NEVER `platform`. Agent rows exist with a NULL platform (measured on the review
+-- rig), so a platform-based filter silently misses them — and a row that escapes this filter reappears in the
+-- middle of an operator's device list with no owner and no posture.
 -- name: ListDevicesByUser :many
 SELECT sqlc.embed(d), ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
        dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
 LEFT JOIN device_health dh ON dh.device_id = d.id
-WHERE d.org_id = $1 AND d.user_id = $2 AND d.deleted_at IS NULL
+WHERE d.org_id = $1 AND d.user_id = $2 AND d.deleted_at IS NULL AND d.kind <> 'agent'
 ORDER BY d.created_at;
 
+-- ⛔ AGENTS ARE EXCLUDED FROM THE HUMAN DEVICE SURFACES. An AI agent is a `devices` row because it IS a
+-- WireGuard peer — the peer set, the pool allocation, the revocation sweep and the liveness upsert all read
+-- this table and MUST keep seeing it. What it is not is a user endpoint: it has no owner carrying it, no
+-- client, no posture, and no place in a laptop roster.
+--
+-- ⚠ THE PREDICATE IS `kind`, NEVER `platform`. Agent rows exist with a NULL platform (measured on the review
+-- rig), so a platform-based filter silently misses them — and a row that escapes this filter reappears in the
+-- middle of an operator's device list with no owner and no posture.
 -- name: ListDevicesByOrg :many
 SELECT sqlc.embed(d), ds.last_handshake_at, ds.rx_bytes, ds.tx_bytes,
        dh.evaluated_state, dh.failed_checks, dh.os_version, dh.disk_encrypted, dh.reported_at
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
 LEFT JOIN device_health dh ON dh.device_id = d.id
-WHERE d.org_id = $1 AND d.deleted_at IS NULL
+WHERE d.org_id = $1 AND d.deleted_at IS NULL AND d.kind <> 'agent'
 ORDER BY d.created_at;
 
 -- name: CountDevicesForUserCap :one
