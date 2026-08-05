@@ -580,3 +580,56 @@ describe("DataTable — a numeric column's gap", () => {
     expect(px(numeric[0])).toBeGreaterThan(px(plain[0]));
   });
 });
+
+describe("DataTable — where the spare width goes", () => {
+  it("⛔ THE SLACK POOLS AT THE RIGHT EDGE, NOT BETWEEN TWO COLUMNS", () => {
+    // A `w-full` auto-layout table must put its spare width somewhere, and left to itself it hands it to
+    // whichever column has the longest content. On the Users roster that was Member — so the leftover
+    // rendered as EMPTY SPACE between Member and State while every other column huddled at the far right,
+    // which is what the founder circled. Every real column hugs its content; one empty trailing cell takes
+    // the remainder, where it reads as margin.
+    render(
+      <DataTable<Row>
+        caption="Widgets"
+        rows={[{ id: "1", name: "a", owner: "o@x", state: "active" }]}
+        failed={false}
+        rowKey={(r) => r.id}
+        empty="none"
+        columns={[
+          { key: "name", header: "Name", cell: (r) => <span>{r.name}</span> },
+          { key: "state", header: "State", cell: (r) => <span>{r.state}</span> },
+        ]}
+      />,
+    );
+    // ⚠ ASSERTED IN THE DOM, NOT BY ROLE — the spacer is `aria-hidden`, so it is correctly NOT a
+    // columnheader. A screen reader hears two columns because there are two; the third cell exists only to
+    // hold width. (My first version of this test expected three headers and was wrong about the component,
+    // not the other way round.)
+    expect(screen.getAllByRole("columnheader")).toHaveLength(2);
+    const ths = document.querySelectorAll("thead th");
+    expect(ths).toHaveLength(3);
+    expect(ths[2]!.className).toContain("w-full");
+    expect(ths[2]!.textContent).toBe("");
+    // The real ones shrink to content.
+    expect(ths[0]!.className).toContain("w-px");
+  });
+
+  it("⛔ AND THEY SHRINK WITHOUT `whitespace-nowrap` — a long value must still be able to wrap", () => {
+    // Adding nowrap would size columns more predictably and would also stop a 70-character address ever
+    // wrapping, so it would overflow or clip. A clipped value is the reassuring-empty defect in miniature;
+    // the founder's own no-clip test caught this exact attempt on the Users page.
+    render(
+      <DataTable<Row>
+        caption="Widgets"
+        rows={[{ id: "1", name: "a", owner: "o@x", state: "active" }]}
+        failed={false}
+        rowKey={(r) => r.id}
+        empty="none"
+        columns={[{ key: "name", header: "Name", cell: (r) => <span>{r.name}</span> }]}
+      />,
+    );
+    for (const el of [...screen.getAllByRole("columnheader"), ...screen.getAllByRole("cell")]) {
+      expect(el.className).not.toContain("whitespace-nowrap");
+    }
+  });
+});

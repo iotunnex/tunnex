@@ -401,15 +401,16 @@ export default function Users() {
                 // right — every other row then read as mostly empty space. A column sized by its worst row
                 // is a column sized by an outlier.
                 //
-                // ⛔ IT WRAPS, IT DOES NOT TRUNCATE — and that is a ruling, not a preference. A doubled
-                // string HIDES behind an ellipsis: the second copy clips out of view and reads as one copy,
-                // which is the exact defect this cell was fixed for and which its test still guards. So the
-                // column is capped and the address WRAPS onto a second line, where it stays fully readable
-                // and a duplicate would still be visible.
+                // ⛔ IT WRAPS, IT DOES NOT TRUNCATE — a ruling, not a preference. A doubled string HIDES
+                // behind an ellipsis: the second copy clips out of view and reads as one copy, which is the
+                // exact defect this cell was fixed for and which its test still guards.
                 //
-                // ⚠ STACKED, NOT INLINE: name over email spends the width twice instead of end to end.
-                <span className="flex max-w-[24rem] flex-col">
-                  <span className="break-all text-sm text-white">
+                // ⚠ AND THE CAP IS GONE. `max-w-[24rem]` on the content while the CELL absorbed the table's
+                // spare width is what produced the dead zone — the column was wide, the text was not, and
+                // the difference rendered as emptiness between Member and State. The short columns are
+                // `fit` now, so this one takes the remainder and its text uses it.
+                <span className="flex flex-col">
+                  <span className="text-sm text-white">
                     {primary}
                     {m.user_id === myId && (
                       <span className="ml-2 text-xs text-slate-500">(you)</span>
@@ -423,7 +424,7 @@ export default function Users() {
                       LESS representative than the double. The inverse of S14.10, where the double was more
                       permissive than the substrate; the lesson is the same one from the other side. */}
                   {primary !== m.email && (
-                    <span className="break-all font-mono text-[11px] text-slate-500">
+                    <span className="font-mono text-[11px] text-slate-500">
                       {m.email}
                     </span>
                   )}
