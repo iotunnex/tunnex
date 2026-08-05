@@ -945,11 +945,21 @@ export function DataTable<T>({
           </tbody>
         </table>
       </div>
-      {/* THE FOOTER: what is shown on the left, the range in the middle, where to go on the right. Rendered
-          whenever there is a page to describe — the range is useful even on one page, because "10" alone
-          does not say whether ten is all of them. */}
-      {paged && (
+      {/* ⛔ THE FOOTER ONLY EXISTS WHEN IT HAS SOMETHING TO SAY, and the first version of this got it wrong
+          in exactly the way the pager comment warned against. "No pager when everything fits" hid the page
+          BUTTONS and left the rows-per-page control and the range behind — so a five-row table carried
+          "Rows per page [25]   1–5 of 5", a control that can only no-op and a range that restates the
+          obvious. Repeated on every table on a screen, that is more chrome than content.
+
+          It renders when there is MORE THAN ONE PAGE (there is somewhere to go, and a size worth changing),
+          or when a FILTER is narrowing (the "3 of 47" that stops a filtered view reading as a short one).
+          On a table that fits and is unfiltered it renders nothing at all. */}
+      {paged && (lastPage > 0 || query.trim() !== "") && (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-3 border-t border-white/5 pt-2 text-[11px] text-ink-secondary">
+          {/* ⚠ ABSENT WHEN EVERYTHING FITS — changing "rows per page" on a table showing all of them does
+              nothing, and a control whose every value produces the same screen teaches that the controls
+              here are decorative. */}
+          {lastPage > 0 ? (
           <label className="flex items-center gap-1.5">
             <span>Rows per page</span>
             <select
@@ -968,6 +978,9 @@ export function DataTable<T>({
               ))}
             </select>
           </label>
+          ) : (
+            <span />
+          )}
 
           {/* ⚠ THE RANGE DESCRIBES THE VIEW *AND* THE WHOLE, because with a pager the two are almost never
               the same number. And when a filter is on, the total it was filtered FROM stays visible, so the
@@ -975,8 +988,11 @@ export function DataTable<T>({
           <span className="tabular-nums">
             {visible.length === 0
               ? `0 of ${rows.length}`
-              : `${safePage * pageSize + 1}–${Math.min((safePage + 1) * pageSize, visible.length)} of ${visible.length}` +
-                (query.trim() ? ` (filtered from ${rows.length})` : "")}
+              : lastPage === 0
+                ? // One page: the RANGE is noise ("1–5 of 5"), but the fact that a filter narrowed it is not.
+                  `${visible.length} of ${rows.length}`
+                : `${safePage * pageSize + 1}–${Math.min((safePage + 1) * pageSize, visible.length)} of ${visible.length}` +
+                  (query.trim() ? ` (filtered from ${rows.length})` : "")}
           </span>
 
           {lastPage > 0 ? (

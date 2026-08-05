@@ -76,7 +76,9 @@ describe("DataTable — scannability", () => {
     });
     // Two rows share that owner, and neither cell renders it.
     expect(bodyNames()).toEqual(["zebra", "mango"]);
-    expect(screen.getByText("1–2 of 2 (filtered from 3)")).toBeTruthy();
+    // ⚠ ONE PAGE: the range is noise ("1–2 of 2"), but the narrowing is not. The count says what was
+    // filtered FROM; the row positions are only worth printing when there are pages to move between.
+    expect(screen.getByText("2 of 3")).toBeTruthy();
   });
 
   it("⭐ finds a row by a state its cell renders as a styled element, not as plain text", () => {
@@ -486,5 +488,62 @@ describe("DataTable — row actions in one bar", () => {
     expect(screen.queryByText(/^\d+ of \d+$/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(ran).toEqual([["alpha", "cocoa"]]);
+  });
+});
+
+/**
+ * ⛔ THE FOOTER MUST ONLY EXIST WHEN IT HAS SOMETHING TO SAY.
+ *
+ * The first version of "no pager when everything fits" hid the page BUTTONS and left the rows-per-page
+ * control and the range behind — so a five-row table rendered "Rows per page [25]   1–5 of 5": a control
+ * whose every value produces the same screen, and a range restating the obvious. On a page with three
+ * tables that is more chrome than content, which is how the founder found it.
+ */
+describe("DataTable — the footer earns its place", () => {
+  const rows = (n: number): Row[] =>
+    Array.from({ length: n }, (_, i) => ({
+      id: String(i), name: `row-${i}`, owner: i % 2 ? "ana@x.com" : "bo@x.com", state: "active",
+    }));
+
+  function t(n: number) {
+    render(
+      <DataTable<Row>
+        caption="Widgets"
+        rows={rows(n)}
+        failed={false}
+        rowKey={(r) => r.id}
+        empty="none"
+        columns={[{ key: "name", header: "Name", sortValue: (r) => `${r.name} ${r.owner}`, cell: (r) => <span>{r.name}</span> }]}
+      />,
+    );
+  }
+
+  it("⛔ A TABLE THAT FITS SHOWS NO FOOTER AT ALL", () => {
+    t(5);
+    expect(screen.queryByLabelText("Rows per page")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Next page" })).toBeNull();
+    expect(screen.queryByText(/of 5/)).toBeNull();
+    // ⚠ And the rows are all there — "hide the footer" must not have become "hide the table".
+    expect(screen.getAllByRole("row")).toHaveLength(6);
+  });
+
+  it("⚠ …BUT A FILTER ON THAT SAME TABLE BRINGS BACK THE COUNT", () => {
+    // The narrowing is the one fact a single page still owes the operator: without it a filtered view is
+    // indistinguishable from a short one.
+    t(5);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter Widgets" }), {
+      target: { value: "ana@x.com" },
+    });
+    expect(screen.getByText("2 of 5")).toBeTruthy();
+    // Still no paging controls — narrowing did not create a second page.
+    expect(screen.queryByLabelText("Rows per page")).toBeNull();
+  });
+
+  it("more than one page shows the full footer", () => {
+    // The negative half: "never show a footer" would satisfy both assertions above and delete pagination.
+    t(60);
+    expect(screen.getByLabelText("Rows per page")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Next page" })).toBeTruthy();
+    expect(screen.getByText("1–25 of 60")).toBeTruthy();
   });
 });
