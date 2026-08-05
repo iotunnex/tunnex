@@ -1030,3 +1030,91 @@ export function cascadeConfirmCopy(kind: "group" | "resource", name: string): {
 export function cascadeConfirmSatisfied(typed: string, name: string): boolean {
   return typed.trim() === name;
 }
+
+// ── S15.4: the rule form's two option lists ────────────────────────────────────────────────────────────
+//
+// ⛔ PURE, AND SEPARATE FROM THE PICKER, because these encode the VALIDITY RULES and those must be testable
+// without rendering anything. The matrix they implement is measured from the compiler in
+// `docs/rule-validity-matrix.md`; nothing here is derived from what the old form happened to offer.
+
+export interface RuleOption {
+  value: string;
+  kind: string;
+  tag: string;
+  label: string;
+  detail?: string;
+  unavailable?: string;
+}
+
+/**
+ * ⛔ THE ONE SENTENCE THE FORM EXISTS TO PREVENT, and it mirrors the server's `invalid_rule_self_site`.
+ *
+ * A site cannot be both ends: two hosts on one LAN are switched locally, so their traffic never enters that
+ * gateway's forward chain and the compiled allow can never match. Unlike OUTSIDE RANGES this cannot
+ * self-clear — there is no future world in which it starts working — which is why the API REFUSES it rather
+ * than warning, and why the option is shown-but-disabled here rather than hidden.
+ *
+ * ⚠ SHOWN, NOT HIDDEN. An option that silently vanishes when you change the other side teaches nothing; one
+ * that says why teaches the rule.
+ */
+export const SELF_SITE_REASON = "a site cannot reach itself";
+
+export function sourceOptions(i: {
+  groups: Array<{ id: string; name: string }>;
+  members: Array<{ user_id: string; email: string; name?: string }>;
+  sites: Array<{ id: string; name: string }>;
+  agents: Array<{ device_id: string; name: string; gateway_name: string }>;
+  dstKind: string;
+  dstSite: string;
+}): RuleOption[] {
+  return [
+    ...i.groups.map((g) => ({ value: g.id, kind: "group", tag: "group", label: g.name })),
+    ...i.members.map((m) => ({
+      value: m.user_id,
+      kind: "user",
+      tag: "person",
+      label: m.name || m.email,
+      // ⚠ The email rides along even when a display name exists: it is what an operator searches by, and it
+      // is the only disambiguator between two people with the same name.
+      detail: m.name ? m.email : undefined,
+    })),
+    ...i.sites.map((s) => ({
+      value: s.id,
+      kind: "site",
+      tag: "site",
+      label: s.name,
+      unavailable:
+        i.dstKind === "site" && i.dstSite === s.id ? SELF_SITE_REASON : undefined,
+    })),
+    ...i.agents.map((a) => ({
+      value: a.device_id,
+      kind: "agent",
+      tag: "agent",
+      label: a.name,
+      detail: `via ${a.gateway_name}`,
+    })),
+  ];
+}
+
+export function destinationOptions(i: {
+  groups: Array<{ id: string; name: string }>;
+  resources: Array<{ id: string; name: string }>;
+  sites: Array<{ id: string; name: string }>;
+  services: Array<{ id: string; name: string }>;
+  srcKind: string;
+  srcSite: string;
+}): RuleOption[] {
+  return [
+    ...i.groups.map((g) => ({ value: g.id, kind: "group", tag: "group", label: g.name })),
+    ...i.resources.map((r) => ({ value: r.id, kind: "resource", tag: "resource", label: r.name })),
+    ...i.sites.map((s) => ({
+      value: s.id,
+      kind: "site",
+      tag: "site",
+      label: s.name,
+      unavailable:
+        i.srcKind === "site" && i.srcSite === s.id ? SELF_SITE_REASON : undefined,
+    })),
+    ...i.services.map((s) => ({ value: s.id, kind: "k8s_service", tag: "k8s", label: s.name })),
+  ];
+}

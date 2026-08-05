@@ -34,6 +34,7 @@ import {
   Select,
   DataTable,
 } from "../components/ui";
+import { EntityPicker } from "../components/EntityPicker";
 import { ComposeGate } from "../components/ComposeGate";
 import { LoadRetry } from "../components/LoadRetry";
 import {
@@ -72,6 +73,8 @@ import {
   grantControls,
   managedGrantWarning,
   type LoadState,
+  sourceOptions,
+  destinationOptions,
 } from "../lib/policyview";
 import {
   DIRECTORY_MANAGED_BADGE,
@@ -1429,183 +1432,53 @@ function RuleFormModal({
       <div className="space-y-3">
         {/* S8.3 CP layout: source + destination each read as a labeled panel (was a flat field list),
             so the "who → what" of a rule is legible at a glance. Layout only — no behavior change. */}
-        <fieldset className="space-y-3 rounded-md border border-white/10 p-3">
-          <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-500">
-            Source
-          </legend>
-          <Field label="Source type">
-            <Select
-              value={srcKind}
-              onChange={(e) =>
-                setSrcKind(
-                  e.target.value as "group" | "user" | "site" | "cidr" | "agent",
-                )
-              }
-            >
-              <option value="group">Group</option>
-              <option value="user">User (a single person)</option>
-              {sites.length > 0 && (
-                <option value="site">Site (a LAN behind a gateway)</option>
-              )}
-              <option value="cidr">CIDR (a specific host or subnet)</option>
-              {/* ⚠ OFFERED ONLY WHEN ONE EXISTS. An empty picker for a kind with no members is a control
-                  that can only fail — the same reasoning that keeps `site` conditional above. */}
-              {agents.length > 0 && (
-                <option value="agent">AI agent</option>
-              )}
-            </Select>
-          </Field>
-          {/* ⚠ THE GATEWAY IS SHOWN BESIDE THE NAME because two agents may share a name across gateways,
-              and the grant matches ONE device — the operator must be able to tell which. */}
-          {srcKind === "agent" && (
-            <Field label="Source agent">
-              <Select value={srcAgent} onChange={(e) => setSrcAgent(e.target.value)}>
-                <option value="">Choose an agent…</option>
-                {agents.map((a) => (
-                  <option key={a.device_id} value={a.device_id}>
-                    {a.name} (via {a.gateway_name})
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          )}
-          {srcKind === "cidr" && (
-            <Field label="Source CIDR">
-              <Input
-                value={srcCidr}
-                onChange={(e) => setSrcCidr(e.target.value)}
-                placeholder="172.31.17.64/32"
-              />
-            </Field>
-          )}
-          {srcKind === "group" ? (
-            <Field label="Source group">
-              <Select value={src} onChange={(e) => setSrc(e.target.value)}>
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          ) : srcKind === "user" ? (
-            // D1 constraint mirrored client-side: only CURRENT active members are offered,
-            // so the picker never lets you build a rule the server would reject (user_not_member).
-            <Field label="Source user">
-              {members.length > 0 ? (
-                <Select
-                  value={srcUser}
-                  onChange={(e) => setSrcUser(e.target.value)}
-                >
-                  {members.map((m) => (
-                    <option key={m.user_id} value={m.user_id}>
-                      {m.name || m.email}
-                    </option>
-                  ))}
-                </Select>
-              ) : (
-                <Input
-                  value=""
-                  disabled
-                  placeholder="No active members to grant"
-                />
-              )}
-            </Field>
-          ) : (
-            <Field label="Source site">
-              <Select
-                value={srcSite}
-                onChange={(e) => setSrcSite(e.target.value)}
-              >
-                {sites.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          )}
-        </fieldset>
-        <fieldset className="space-y-3 rounded-md border border-white/10 p-3">
-          <legend className="px-1 text-[11px] uppercase tracking-wide text-slate-500">
-            Destination
-          </legend>
-          <Field label="Destination type">
-            <Select
-              value={dstKind}
-              onChange={(e) =>
-                setDstKind(
-                  e.target.value as
-                    "group" | "resource" | "site" | "k8s_service",
-                )
-              }
-            >
-              <option value="group">Group (device-to-device)</option>
-              <option value="resource">Resource (CIDR / port)</option>
-              {sites.length > 0 && (
-                <option value="site">Site (a LAN behind a gateway)</option>
-              )}
-              {services.length > 0 && (
-                <option value="k8s_service">
-                  Kubernetes Service (in-cluster)
-                </option>
-              )}
-            </Select>
-          </Field>
-          {dstKind === "group" ? (
-            <Field label="Destination group">
-              <Select
-                value={dstGroup}
-                onChange={(e) => setDstGroup(e.target.value)}
-              >
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          ) : dstKind === "resource" ? (
-            <Field label="Destination resource">
-              <Select
-                value={dstResource}
-                onChange={(e) => setDstResource(e.target.value)}
-              >
-                {resources.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          ) : dstKind === "k8s_service" ? (
-            <Field label="Destination Kubernetes Service">
-              <Select
-                value={dstK8sService}
-                onChange={(e) => setDstK8sService(e.target.value)}
-              >
-                {services.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.fqdn}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          ) : (
-            <Field label="Destination site">
-              <Select
-                value={dstSite}
-                onChange={(e) => setDstSite(e.target.value)}
-              >
-                {sites.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          )}
-        </fieldset>
+        {/* ⛔ ONE PICKER PER SIDE. Four controls became two, and the KIND stopped being a thing you choose
+            first — you look for "Engineering", you do not first decide that Engineering is a Group. The
+            cascade let a source type be chosen against any destination type, which is how a site reaching
+            itself became creatable; here the other side's choice is reflected in what this side offers.
+
+            ⚠ THE GUARD IS THE SERVER'S (invalid_rule_self_site). This mirrors it — the CLI and the GitOps CR
+            path reach the same API and never see this form, so a picker that merely hid the option would be
+            guarding one caller of three. What the picker adds is the EXPLANATION. */}
+        <EntityPicker
+          label="Source"
+          placeholder="Search groups, people, sites, agents… or type a CIDR"
+          acceptCidr
+          value={
+            srcKind === "group" ? src
+              : srcKind === "user" ? srcUser
+              : srcKind === "site" ? srcSite
+              : srcKind === "agent" ? srcAgent
+              : srcCidr
+          }
+          options={sourceOptions({ groups, members, sites, agents, dstKind, dstSite })}
+          onSelect={(o) => {
+            setSrcKind(o.kind as typeof srcKind);
+            if (o.kind === "group") setSrc(o.value);
+            else if (o.kind === "user") setSrcUser(o.value);
+            else if (o.kind === "site") setSrcSite(o.value);
+            else if (o.kind === "agent") setSrcAgent(o.value);
+            else setSrcCidr(o.value);
+          }}
+        />
+        <EntityPicker
+          label="Destination"
+          placeholder="Search groups, resources, sites, services…"
+          value={
+            dstKind === "group" ? dstGroup
+              : dstKind === "resource" ? dstResource
+              : dstKind === "site" ? dstSite
+              : dstK8sService
+          }
+          options={destinationOptions({ groups, resources, sites, services, srcKind, srcSite })}
+          onSelect={(o) => {
+            setDstKind(o.kind as typeof dstKind);
+            if (o.kind === "group") setDstGroup(o.value);
+            else if (o.kind === "resource") setDstResource(o.value);
+            else if (o.kind === "site") setDstSite(o.value);
+            else setDstK8sService(o.value);
+          }}
+        />
         {/* Temporary grant (CREATE only): set an expiry to auto-revoke; empty = permanent.
             Editing an existing rule changes its src/dst; change a temporary grant's window
             with Extend (a window bump), not Edit. */}
