@@ -140,7 +140,13 @@ export default function AccessEvents() {
       </Card>
 
       <div className="mt-4">
-        <DataTable<AccessEvent>
+        {/* ⛔ NO CLIENT PAGER HERE: this page ALREADY pages server-side with a keyset cursor behind
+                "Load more". Two paging controls on one screen disagree — "Load more" appends rows the
+                operator cannot see without advancing a second pager, and the count then describes neither
+                the fetch nor the view. The server's cursor is the one that must win, because it is the one
+                that bounds the query. */}
+            <DataTable<AccessEvent>
+              pageSize={0}
           caption="Access events"
           rows={events}
           rowKey={(e) => e.id}

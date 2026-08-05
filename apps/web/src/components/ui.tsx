@@ -412,6 +412,7 @@ export function DataTable<T>({
   failed,
   filterable,
   defaultSortKey,
+  pageSize: initialPageSize = 25,
 }: {
   caption: string;
   columns: Array<Column<T>>;
@@ -448,6 +449,15 @@ export function DataTable<T>({
   filterable?: boolean;
   /** Column key to sort by initially. Omit to keep the caller's order, which is often deliberate. */
   defaultSortKey?: string;
+  /**
+   * Rows per page. Defaults to 25.
+   *
+   * ⛔ PASS `0` TO DISABLE, AND THERE IS EXACTLY ONE REASON TO: THE PAGE ALREADY PAGES SERVER-SIDE. AuditLog
+   * and AccessEvents fetch with a keyset cursor behind a "Load more" button. A client pager on top of that
+   * puts TWO paging controls on one screen that disagree — "Load more" appends rows the operator cannot see
+   * without also advancing a second pager, and the row count then describes neither the fetch nor the view.
+   */
+  pageSize?: number;
 }) {
   const searchable = columns.some((c) => c.sortValue);
   const showFilter = filterable ?? searchable;
@@ -455,6 +465,8 @@ export function DataTable<T>({
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(
     defaultSortKey ? { key: defaultSortKey, dir: 1 } : null,
   );
+  const [pageSize, setPageSize] = useState(initialPageSize);
+  const [page, setPage] = useState(0);
 
   const visible = useMemo(() => {
     let out = rows;
@@ -479,6 +491,17 @@ export function DataTable<T>({
     return out;
   }, [rows, columns, query, sort]);
 
+  // ⛔ THE PAGE INDEX IS CLAMPED AT RENDER, NOT TRUSTED FROM STATE. Rows shrink underneath this component
+  // all the time — a revoke, a filter, a refetch — and a page index that was valid a moment ago then points
+  // past the end. The result is a table that renders ZERO ROWS while the data is right there, which is the
+  // reassuring-empty defect arriving by arithmetic instead of by a failed load.
+  //
+  // Clamping here rather than in an effect means there is no frame in which the out-of-range value renders.
+  const paged = pageSize > 0;
+  const lastPage = paged ? Math.max(0, Math.ceil(visible.length / pageSize) - 1) : 0;
+  const safePage = Math.min(page, lastPage);
+  const pageRows = paged ? visible.slice(safePage * pageSize, safePage * pageSize + pageSize) : visible;
+
   if (failed) return null;
 
   // ⛔ THREE EMPTINESSES, NOT ONE, AND THEY ARE DIFFERENT CLAIMS. `failed` (handled above) is "we never found
@@ -490,8 +513,12 @@ export function DataTable<T>({
   // > exists because of that class. The row count stays visible so the difference is never inferred.
   if (rows.length === 0) return <EmptyState>{empty}</EmptyState>;
 
-  const toggle = (key: string) =>
-    setSort((s: { key: string; dir: 1 | -1 } | null) => (s && s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
+  const toggle = (key: string) => (
+    // Re-sorting returns to the first page: the row you were looking at is not where it was, and staying on
+    // page 3 of a freshly reordered list lands the operator somewhere arbitrary.
+    setPage(0),
+    setSort((s: { key: string; dir: 1 | -1 } | null) => (s && s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }))
+  );
 
   return (
     <div>
@@ -500,15 +527,31 @@ export function DataTable<T>({
           <input
             type="search"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              // ⛔ NARROWING RETURNS TO PAGE ONE. Typing while on page 3 of a list that now has four
+              // matches would show an empty table — the operator's own search reading as "nothing exists".
+              setPage(0);
+            }}
             placeholder={`Filter ${caption.toLowerCase()}…`}
             aria-label={`Filter ${caption}`}
             className="w-56 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 placeholder:text-slate-600 focus:border-white/20 focus:outline-none"
           />
           {/* ⚠ THE COUNT IS THE HONEST PART. "3 of 47" makes a narrowed view legible as narrowed; without it
               a filtered table is indistinguishable from a short one. */}
+          {/* ⚠ THE COUNT DESCRIBES THE VIEW *AND* THE WHOLE, because with a pager the two are almost never
+              the same number. "Showing 1–25 of 47" makes a partial view legible as partial; a bare "25"
+              reads as a complete list that happens to be short. And when a filter is on, the total it was
+              filtered FROM stays visible so the narrowing is never inferred. */}
           <span className="text-[11px] tabular-nums text-ink-secondary">
-            {query.trim() ? `${visible.length} of ${rows.length}` : `${rows.length}`}
+            {visible.length === 0
+              ? `0 of ${rows.length}`
+              : paged && visible.length > pageSize
+                ? `Showing ${safePage * pageSize + 1}–${Math.min((safePage + 1) * pageSize, visible.length)} of ${visible.length}` +
+                  (query.trim() ? ` (filtered from ${rows.length})` : "")
+                : query.trim()
+                  ? `${visible.length} of ${rows.length}`
+                  : `${rows.length}`}
           </span>
         </div>
       )}
@@ -559,7 +602,7 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {visible.map((r: T, i: number) => (
+            {pageRows.map((r: T, i: number) => (
               <tr
                 key={rowKey(r)}
                 // Zebra + hover: scanning across a wide row is where the eye loses its line, and this is
@@ -579,6 +622,54 @@ export function DataTable<T>({
           </tbody>
         </table>
       </div>
+      {/* The pager. Absent entirely when everything already fits — a control that can only be a no-op is
+          noise, and on a five-row table it implies there is more to see. */}
+      {paged && visible.length > pageSize && (
+        <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-ink-secondary">
+          <label className="flex items-center gap-1.5">
+            <span>Rows</span>
+            <select
+              aria-label="Rows per page"
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                // Resizing changes what "page 3" means; returning to the first page is the only
+                // interpretation that cannot land the operator past the end.
+                setPage(0);
+              }}
+              className="rounded border border-white/10 bg-white/5 px-1 py-0.5 text-[11px] text-slate-300 focus:outline-none"
+            >
+              {[25, 50, 100].map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </label>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={safePage === 0}
+              onClick={() => setPage((p: number) => Math.max(0, p - 1))}
+            >
+              Previous
+            </Button>
+            {/* ⚠ ONE-INDEXED FOR THE READER. The state is zero-indexed; showing that leaks an
+                implementation detail into a place an operator reads as a count. */}
+            <span className="tabular-nums">
+              Page {safePage + 1} of {lastPage + 1}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={safePage >= lastPage}
+              onClick={() => setPage((p: number) => Math.min(lastPage, p + 1))}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* ⛔ THE THIRD EMPTINESS, SAID IN WORDS. Never the `empty` copy — that one claims none exist. */}
       {visible.length === 0 && (
         <p className="py-6 text-center text-xs text-ink-secondary">
