@@ -171,12 +171,22 @@ export function Modal({
   onDismiss,
   children,
   actions,
+  size = "default",
 }: {
   title: string;
   danger?: boolean;
   onDismiss: () => void;
   children: ReactNode;
   actions: ReactNode;
+  /**
+   * `wide` for a dialog whose content is a pair of searchable pickers rather than a sentence and a button.
+   *
+   * ⚠ A PROP RATHER THAN AN OVERRIDE CLASS, for the same Tailwind reason `Button.size` is one: `max-w-md` is
+   * baked into the shell, so a caller passing `max-w-2xl` gets whichever rule the generated stylesheet
+   * happens to order last — which is not attribute order, so the "fix" works or does not depending on the
+   * build.
+   */
+  size?: "default" | "wide";
 }) {
   // Dismiss on backdrop-click or the Cancel action only. Esc-to-dismiss was DROPPED after a
   // 3-finding churn (broken → too-global → focus-steal) on a nice-to-have that's also a
@@ -207,7 +217,7 @@ export function Modal({
       onClick={onDismiss}
     >
       <div
-        className="w-full max-w-md rounded-card border border-white/10 bg-surface p-4 shadow-modal backdrop-blur-[24px] backdrop-saturate-[1.4]"
+        className={`w-full ${size === "wide" ? "max-w-2xl" : "max-w-md"} rounded-card border border-white/10 bg-surface p-4 shadow-modal backdrop-blur-[24px] backdrop-saturate-[1.4]`}
         onClick={(e) => e.stopPropagation()}
       >
         <h2
@@ -768,7 +778,7 @@ export function DataTable<T>({
           <thead>
             {/* Sticky: on a long roster the header is the only thing telling you what a column means, and
                 scrolling past it turns every cell into an unlabelled string. */}
-            <tr className="sticky top-0 z-10 bg-surface-1 text-[11px] uppercase tracking-wide text-slate-500">
+            <tr className="sticky top-0 z-10 bg-ink-900 text-[11px] uppercase tracking-wide text-slate-500">
               {showSelect && (
                 <th scope="col" className="w-8 border-b border-white/10 py-1.5 pr-2">
                   {/* ⛔ THIS BOX SELECTS THE PAGE, AND ITS LABEL SAYS SO. A header checkbox that quietly

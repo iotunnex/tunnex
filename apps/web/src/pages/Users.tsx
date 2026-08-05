@@ -328,7 +328,7 @@ export default function Users() {
                           className={
                             "rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold " +
                             (st === "pending"
-                              ? "border-accent-500/40 bg-accent-500/10 text-accent-300"
+                              ? "border-accent-500/40 bg-accent-500/10 text-accent-400"
                               : st === "expired"
                                 ? "border-warn/40 bg-warn/10 text-warn"
                                 : "border-slate-700 bg-slate-900 text-slate-500")

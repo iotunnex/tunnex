@@ -53,6 +53,7 @@ export function EntityPicker({
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
   const box = useRef<HTMLDivElement>(null);
 
   const selected = options.find((o) => o.value === value);
@@ -100,6 +101,33 @@ export function EntityPicker({
         onChange={(e) => {
           setQuery(e.target.value);
           setOpen(true);
+          setActive(0);
+        }}
+        onKeyDown={(e) => {
+          // ⛔ A COMBOBOX YOU CANNOT DRIVE FROM THE KEYBOARD IS A TEXT BOX WITH DECORATION. What this
+          // replaced was four <select>s — every one arrow-navigable and type-ahead searchable for FREE.
+          // Something prettier that only works with a mouse is a regression wearing a redesign, so the keys
+          // the native control gave us are re-implemented rather than quietly lost.
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            setOpen(true);
+            setActive((a) => {
+              const n = shown.length;
+              if (n === 0) return 0;
+              return e.key === "ArrowDown" ? (a + 1) % n : (a - 1 + n) % n;
+            });
+          } else if (e.key === "Enter") {
+            const o = shown[active];
+            // ⚠ Enter must not select what the rules forbid — the same refusal the click path honours.
+            if (o && !o.unavailable) {
+              e.preventDefault();
+              onSelect(o);
+              setOpen(false);
+              setQuery("");
+            }
+          } else if (e.key === "Escape") {
+            setOpen(false);
+          }
         }}
         className="mt-1 w-full rounded-md border border-white/10 bg-ink-900 px-3 py-2 text-sm text-white placeholder:text-slate-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-400"
       />
@@ -115,7 +143,7 @@ export function EntityPicker({
           id={`list-${label}`}
           role="listbox"
           aria-label={label}
-          className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-white/15 bg-surface-1 py-1 shadow-lg"
+          className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-white/20 bg-ink-900 py-1 shadow-[0_12px_32px_rgba(0,0,0,.6)]"
         >
           {shown.length === 0 && (
             <li className="px-3 py-2 text-xs text-ink-secondary">
@@ -123,7 +151,7 @@ export function EntityPicker({
               {acceptCidr && " Type a CIDR (e.g. 10.0.5.0/24) to use a literal address."}
             </li>
           )}
-          {shown.map((o) => (
+          {shown.map((o, idx) => (
             <li key={`${o.kind}:${o.value}`} role="option" aria-selected={o.value === value}>
               <button
                 type="button"
@@ -136,15 +164,23 @@ export function EntityPicker({
                   setOpen(false);
                   setQuery("");
                 }}
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
+                className={`flex w-full items-center gap-3 px-3 py-2 text-left text-sm ${
                   o.unavailable
                     ? "cursor-not-allowed text-slate-600"
-                    : "text-slate-200 hover:bg-white/10"
+                    : active === idx
+                      ? "bg-white/10 text-slate-100"
+                      : "text-slate-200 hover:bg-white/10"
                 }`}
               >
-                <span className="w-16 shrink-0 font-mono text-[10px] uppercase text-slate-500">{o.tag}</span>
-                <span className="truncate">{o.label}</span>
-                {o.detail && <span className="truncate text-xs text-ink-secondary">{o.detail}</span>}
+                {/* ⚠ A FIXED-WIDTH TAG COLUMN. Ragged tags turn the list into a staircase and the labels
+                    stop forming a scannable column, which is the entire point of one picker. */}
+                <span className="w-[4.5rem] shrink-0 font-mono text-[10px] uppercase tracking-wide text-slate-500">
+                  {o.tag}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                {o.detail && (
+                  <span className="shrink-0 truncate text-xs text-ink-secondary">{o.detail}</span>
+                )}
                 {/* ⛔ THE REASON IS SHOWN IN THE ROW, not only on hover. A disabled option whose
                     explanation requires a mouse is no explanation on a touch screen or to a reader. */}
                 {o.unavailable && (

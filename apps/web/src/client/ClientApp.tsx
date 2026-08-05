@@ -559,7 +559,7 @@ export function ClientApp() {
               (view.severity === "loud"
                 ? "text-danger"
                 : view.severity === "ok"
-                  ? "text-accent-300"
+                  ? "text-accent-400"
                   : view.severity === "warn"
                     ? "text-warn"
                     : "text-ink-heading")
