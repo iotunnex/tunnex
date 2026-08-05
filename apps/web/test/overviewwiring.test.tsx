@@ -144,8 +144,13 @@ describe("⛔ A FAILED COUNT NEVER RENDERS AS ZERO", () => {
     // The rule is not "never show 0". It is "NEVER SHOW 0 FOR SOMETHING WE DID NOT LEARN" — and a page-wide
     // text query cannot tell those apart, because on screen they are the same character. So the assertion is
     // scoped to the FAILED card, which is the only place the distinction lives.
-    const sitesCard = screen.getByText("Sites").closest("div")!.parentElement!;
-    // (copy changed with the design pass; the ASSERTION is unchanged — a failed card must not show a number)
+    // ⚠ SCOPED BY THE GROUP'S NAME, not by walking `closest("div").parentElement`. That walk depended on
+    // how deeply the label was nested, so removing the stat card's box moved it up to the whole stat ROW and
+    // the query started matching every zero on the page. The named group is the locator this row already has
+    // for exactly this reason (an earlier xpath keyed to sibling order broke the same way).
+    //
+    // The ASSERTION is unchanged: a failed card must not show a number.
+    const sitesCard = screen.getByRole("group", { name: "Sites" });
     expect(within(sitesCard).queryByText("0")).toBeNull();
   });
 
