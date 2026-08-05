@@ -426,6 +426,19 @@ describe("DataTable — row actions in one bar", () => {
     expect(screen.getByText("Select one or more rows to act on them")).toBeTruthy();
   });
 
+  it("⛔ THE ACTION BAR SITS ABOVE THE TABLE, NOT BELOW IT", () => {
+    // The verbs are what the selection is FOR, so they belong where the eye already is — beside the rows
+    // being ticked rather than past the end of them. Below, on a 25-row page, the operator selects at the
+    // top and must then scroll away from their own selection to act on it.
+    //
+    // Asserted on DOM ORDER because CSS cannot be seen from here and a class name is not a position.
+    acts();
+    const bar = screen.getByText("Select one or more rows to act on them").closest("div")!;
+    const table = screen.getByRole("table");
+    // DOCUMENT_POSITION_FOLLOWING (4) — the table comes AFTER the bar.
+    expect(bar.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("a `single` verb is disabled for two rows, and says why", () => {
     acts();
     pick("alpha");

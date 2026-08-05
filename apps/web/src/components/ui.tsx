@@ -679,6 +679,89 @@ export function DataTable<T>({
           {toolbar}
         </div>
       )}
+      {/* THE SELECTION BAR, ABOVE THE TABLE. Always present when the table is selectable — an empty-state bar that says
+          "0 selected" teaches where the count will appear, and a bar that only materialises on the first
+          click moves the layout under the operator's cursor. */}
+      {showSelect && (
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-xs">
+          <span className="text-ink-secondary">
+            <span className="tabular-nums text-slate-300">{selected.size}</span> selected
+            {/* ⛔ THE HALF THAT PREVENTS A SURPRISE. An action applies to the whole selection, including rows
+                a filter or a page turn has hidden. Saying so is the difference between a bulk action the
+                operator authorised and one they merely appeared to. */}
+            {offscreenSelected > 0 && (
+              <span className="ml-1 text-warn">
+                ({offscreenSelected} not visible under the current filter)
+              </span>
+            )}
+            {selected.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setSel(new Set())}
+                className="ml-2 underline hover:text-slate-300"
+              >
+                Clear
+              </button>
+            )}
+            {/* Selecting everything is possible, but it is its own control and it says the number. */}
+            {!pageAllSelected || visible.length <= pageRows.length ? null : (
+              <button
+                type="button"
+                onClick={() => setSel(new Set(visible.map(rowKey)))}
+                className="ml-2 underline hover:text-slate-300"
+              >
+                Select all {visible.length} matching
+              </button>
+            )}
+          </span>
+          <span className="flex items-center gap-2">
+            {selected.size === 0 ? (
+              <span className="text-ink-tertiary">Select one or more rows to act on them</span>
+            ) : (
+              <>
+                {rowActions?.map((a) => {
+                  const chosen = rows.filter((r) => selected.has(rowKey(r)));
+                  const eligible = chosen.filter((r) => !a.unavailable?.(r));
+                  const arityOK = a.arity === "single" ? chosen.length === 1 : chosen.length > 0;
+                  // ⛔ THE FIRST REASON WINS AND IS SHOWN. A disabled control with no explanation is a
+                  // dead end an operator cannot reason about — they cannot tell "not allowed" from "broken".
+                  const reason = chosen.map((r) => a.unavailable?.(r)).find(Boolean) ?? undefined;
+                  const blocked = !arityOK || eligible.length === 0;
+                  return (
+                    <span key={a.key} className="flex items-center gap-1">
+                      {/* ⚠ THE PARTIAL COUNT, SAID BEFORE THE CLICK. A selection is almost never uniform,
+                          and an action that quietly applies to a subset leaves the operator believing they
+                          did something they did not do. */}
+                      {!blocked && eligible.length < chosen.length && (
+                        <span className="text-warn" title={reason}>
+                          {eligible.length} of {chosen.length}
+                        </span>
+                      )}
+                      <Button
+                        size="sm"
+                        variant={a.danger ? "danger" : "ghost"}
+                        disabled={blocked}
+                        title={
+                          !arityOK && a.arity === "single"
+                            ? `${a.label} applies to exactly one row at a time`
+                            : eligible.length === 0
+                              ? reason
+                              : undefined
+                        }
+                        onClick={() => a.run(eligible)}
+                      >
+                        {a.label}
+                      </Button>
+                    </span>
+                  );
+                })}
+                {bulkActions?.([...selected], () => setSel(new Set()))}
+              </>
+            )}
+          </span>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <caption className="sr-only">{caption}</caption>
@@ -853,89 +936,6 @@ export function DataTable<T>({
           ) : (
             <span />
           )}
-        </div>
-      )}
-
-      {/* THE SELECTION BAR. Always present when the table is selectable — an empty-state bar that says
-          "0 selected" teaches where the count will appear, and a bar that only materialises on the first
-          click moves the layout under the operator's cursor. */}
-      {showSelect && (
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-xs">
-          <span className="text-ink-secondary">
-            <span className="tabular-nums text-slate-300">{selected.size}</span> selected
-            {/* ⛔ THE HALF THAT PREVENTS A SURPRISE. An action applies to the whole selection, including rows
-                a filter or a page turn has hidden. Saying so is the difference between a bulk action the
-                operator authorised and one they merely appeared to. */}
-            {offscreenSelected > 0 && (
-              <span className="ml-1 text-warn">
-                ({offscreenSelected} not visible under the current filter)
-              </span>
-            )}
-            {selected.size > 0 && (
-              <button
-                type="button"
-                onClick={() => setSel(new Set())}
-                className="ml-2 underline hover:text-slate-300"
-              >
-                Clear
-              </button>
-            )}
-            {/* Selecting everything is possible, but it is its own control and it says the number. */}
-            {!pageAllSelected || visible.length <= pageRows.length ? null : (
-              <button
-                type="button"
-                onClick={() => setSel(new Set(visible.map(rowKey)))}
-                className="ml-2 underline hover:text-slate-300"
-              >
-                Select all {visible.length} matching
-              </button>
-            )}
-          </span>
-          <span className="flex items-center gap-2">
-            {selected.size === 0 ? (
-              <span className="text-ink-tertiary">Select one or more rows to act on them</span>
-            ) : (
-              <>
-                {rowActions?.map((a) => {
-                  const chosen = rows.filter((r) => selected.has(rowKey(r)));
-                  const eligible = chosen.filter((r) => !a.unavailable?.(r));
-                  const arityOK = a.arity === "single" ? chosen.length === 1 : chosen.length > 0;
-                  // ⛔ THE FIRST REASON WINS AND IS SHOWN. A disabled control with no explanation is a
-                  // dead end an operator cannot reason about — they cannot tell "not allowed" from "broken".
-                  const reason = chosen.map((r) => a.unavailable?.(r)).find(Boolean) ?? undefined;
-                  const blocked = !arityOK || eligible.length === 0;
-                  return (
-                    <span key={a.key} className="flex items-center gap-1">
-                      {/* ⚠ THE PARTIAL COUNT, SAID BEFORE THE CLICK. A selection is almost never uniform,
-                          and an action that quietly applies to a subset leaves the operator believing they
-                          did something they did not do. */}
-                      {!blocked && eligible.length < chosen.length && (
-                        <span className="text-warn" title={reason}>
-                          {eligible.length} of {chosen.length}
-                        </span>
-                      )}
-                      <Button
-                        size="sm"
-                        variant={a.danger ? "danger" : "ghost"}
-                        disabled={blocked}
-                        title={
-                          !arityOK && a.arity === "single"
-                            ? `${a.label} applies to exactly one row at a time`
-                            : eligible.length === 0
-                              ? reason
-                              : undefined
-                        }
-                        onClick={() => a.run(eligible)}
-                      >
-                        {a.label}
-                      </Button>
-                    </span>
-                  );
-                })}
-                {bulkActions?.([...selected], () => setSel(new Set()))}
-              </>
-            )}
-          </span>
         </div>
       )}
 
