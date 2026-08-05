@@ -64,6 +64,35 @@ expected to be rewritten before merge.
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
 **CURRENT (2026-07-31): EPIC 13 = GATEWAY RECOVERY — BUILD COMPLETE INCLUDING SLICE 7 on `story/S13.1-gateway-recovery` (tip `7c1a127`; Slice 7 = `120ff0c`, since then docs-only), NOT MERGED. Slice 7 (operator-initiated restore, `POST /nodes/{nodeId}/restore-devices`, new perm `device:restore`, re-homes onto a named LIVE gateway because a revoked node never returns) closed the reachability defect and is RED-PROVEN REACHABLE + UI-exposed. **REVIEW STATE POINTER = `docs/S13.1-review-state.md`** (pass 1 COMPLETE — 20 findings + F3, HELD, nothing folded, `docs/S13.1-review-pass1-findings.md`; pass 3 launched before pass 2 by ruling; pass 2 not started and must cover Slice 7). Earlier note: pass 1 was once interrupted — (run `wf_642e5fe8-1ed`: 8/8 finders done, 127/144 verifiers returned, Critic and Synthesize never ran — resumable from cache). The review remains a merge precondition. Next session = REVIEW → WALK → merge word, nothing in between.** The epic exists for one observed event: an AWS gateway went offline past its 48h cert lifetime and could not come back — `/agent/renew` lives behind the mTLS channel its expired cert can no longer authenticate to. Commit-one `docs/S13.1-decisions.md` (six walls, D1–D10 ruled). **SHIPPED:** agent precedence (`identity.Decide`, no network argument — a failed handshake structurally cannot trigger re-key; `Recover` ranked above `UseToken`) · **PoP re-key** on the public listener (RSA over `nonce ‖ CSR DER`; gate BEFORE crypto so timing is not a liveness oracle; **D3 amended: expiry authorizes, revocation REFUSES** — expiry is an absence of action, revocation is the presence of a decision) · its own path-scoped throttle + body cap (registered before `middleware.RealIP` — review #1 was exactly that) · **cascade restore** (`revoked_cause`, reclaim-first via the canonical oracle) · **Slice 6 `provisioned_ip`** (`needs_reexport` gains the ADDRESS cause for EVERY mode; ranges stay static-only; both contract rewrites + the label the census under-scoped) · **D10 second identifier** (key fingerprint: a LOST RESPONSE no longer bricks a gateway; ambiguity refuses; three implementations of one digest pinned to a golden vector; agent persists its pending key before submitting and reuses it so retries CONVERGE; migration guard forced expand/contract with both shim halves). Retroactive review pass 1 (leader election) folded — *leadership was a boolean that lies*; `ConfirmLeader` now matches `pg_locks`. **OWED BEFORE MERGE, IN ORDER: (1) the epic-end review pass — three passes by surface family (unauthenticated re-key surface · identity/cascade data path + migrations 0054–0061 · agent recovery loop), ~4.5–6M tokens, a merge precondition alongside CI and the walk, and a truncated pass is worse than none; (2) the walk per `docs/S13-boxwalk.md` — seven legs, TWO GATEWAYS MUST BE OFFLINE 48h+ BEFORE the session (`agentca.CertTTL` is a constant; the clock is the only way to make a cert expire); (3) the merge word.** **RULED — cascade-restore reachability: SLICE 7 (operator-initiated restore), built AFTER the review pass and BEFORE the walk; two conditions — authorized as a deliberate operator act (same class as minting a join token) and RED-PROVEN REACHABLE, not merely correct. Un-revoke PERMANENTLY REFUSED (it is the attack chain D3 exists to prevent); removing the mechanism refused (re-opens Wall 6). Walk Leg 4 stays a falsification attempt. The defect:** `RestoreCascadeRevokedDevices` has one caller (`Rekey`), devices are cascade-revoked in one place (`Revoke`), and `Rekey` refuses a revoked node — so the trigger may put the node into the one state that can never reach the restorer (dormant-machinery law). Four faces in the paper; walk Leg 4 is written as a falsification attempt. Retroactive **pass 2 (backup/restore)** still attaches to the next natural merge boundary. Registered: the 0061 contract migration (trigger = the release after this one) · no general rate limiting · body caps only on the two re-key routes · failover hysteresis persistence (beta-blocking, owned by the failover story).
+**S15.3 — THE AGENT SURFACE + THE UI PASS — PR #90, content tip `dac3382f` (pre-merge; post-merge sha to be
+filled in as a docs correction on `main`).** `docs/S15.3-decisions.md`, `docs/rule-validity-matrix.md`,
+`docs/rule-model-review.md`, `walk-artifacts/S15.3-agent-e2e.md`.
+
+⭐ **THE AGENT IS A PEER HOMED ON A GATEWAY, NOT A GATEWAY** — the model was rebuilt mid-story after the
+founder's question exposed it. Traffic an agent originates ON a gateway is locally-originated, never
+traverses `FORWARD`, so no grant could ever fire. **Proven end to end on the wire** with the product's OWN
+generated command: grant counter `0→1` on the allowed port, `default_drop 0→4` on the adjacent one, deny
+measured as 5 packets in / 0 out, revoke removing the peer from `wg0`.
+
+**SHIPPED:** agent creation + connect command (`kind='agent'`, cap-exempt, static export) · `src_kind='agent'`
+as a policy source · agent liveness with `gateway_reporting` (⛔ *a dead agent and a dead REPORTER produce an
+identical absence of handshakes*) · `posture_not_applicable` — **device posture reached an agent's data plane
+and killed its tunnel**, measured, because an agent's `user_id` is the admin who created it · agents removed
+from the human device surfaces (`kind`, never `platform`) · `invalid_rule_self_site`, the **first cross-field
+check `CreatePolicyRule` has ever had** · a rule form of one searchable picker per side, with the compiled
+effect stated before Create.
+
+**UI PASS across the product:** DataTable gained search, sort, pagination, selection, declarative `rowActions`
+with `unavailable` reasons, row expansion and `rowAttrs`; Rules, Groups, Resources, Invitations, Machine
+credentials and Pending devices converted; **Approve/Reject had no call site on the Devices page**; Edit for
+groups and resources — **both `PATCH` endpoints existed and nothing called them**.
+
+⛔ **OPEN AND HELD, NOT DONE:** one agent per gateway (and a revoke bricks the slot permanently) ·
+`wg-quick` deletes the interface when `resolvconf` is absent · exported ranges can overlap the agent host's
+own subnet, undetectably · whether `enrols_kind`/`enrolled_kind` should be RETIRED (zero consumers since the
+peer-model rebuild) · client paging on the log surfaces (removed: `audit.spec` proves keyset stitching by
+counting DOM rows).
+
 **EPIC 15 WALK + THE ARMING — MERGED (2026-08-04) — PR #89, content tip `53e6d9c0` (`7a8baa8c` pre-merge).**
 `docs/EPIC-15-CLOSE.md`. **Five legs PASS**; ⛔ **§7's FULL-SURFACE PASS IS UNRUN, NOT CLEAR** — five legs of
 an epic walk is not a product walk.
