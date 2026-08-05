@@ -37,9 +37,17 @@ func (q *Queries) ApproveDevice(ctx context.Context, arg ApproveDeviceParams) (u
 
 const countActiveDevicesForOrg = `-- name: CountActiveDevicesForOrg :one
 SELECT count(*) FROM devices
-WHERE org_id = $1 AND status = 'active' AND deleted_at IS NULL
+WHERE org_id = $1 AND status = 'active' AND deleted_at IS NULL AND kind <> 'agent'
 `
 
+// ⛔ AGENTS ARE EXCLUDED FROM THE HUMAN DEVICE SURFACES. An AI agent is a `devices` row because it IS a
+// WireGuard peer — the peer set, the pool allocation, the revocation sweep and the liveness upsert all read
+// this table and MUST keep seeing it. What it is not is a user endpoint: it has no owner carrying it, no
+// client, no posture, and no place in a laptop roster.
+//
+// ⚠ THE PREDICATE IS `kind`, NEVER `platform`. Agent rows exist with a NULL platform (measured on the review
+// rig), so a platform-based filter silently misses them — and a row that escapes this filter reappears in the
+// middle of an operator's device list with no owner and no posture.
 // Grandfathered count when flipping device_approval off->on (best-effort blast radius,
 // S7.3 D4 — existing active devices stay active, not retro-pended).
 func (q *Queries) CountActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) (int64, error) {
@@ -591,7 +599,7 @@ SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
 LEFT JOIN device_health dh ON dh.device_id = d.id
-WHERE d.org_id = $1 AND d.deleted_at IS NULL
+WHERE d.org_id = $1 AND d.deleted_at IS NULL AND d.kind <> 'agent'
 ORDER BY d.created_at
 `
 
@@ -607,6 +615,14 @@ type ListDevicesByOrgRow struct {
 	ReportedAt      pgtype.Timestamptz `json:"reported_at"`
 }
 
+// ⛔ AGENTS ARE EXCLUDED FROM THE HUMAN DEVICE SURFACES. An AI agent is a `devices` row because it IS a
+// WireGuard peer — the peer set, the pool allocation, the revocation sweep and the liveness upsert all read
+// this table and MUST keep seeing it. What it is not is a user endpoint: it has no owner carrying it, no
+// client, no posture, and no place in a laptop roster.
+//
+// ⚠ THE PREDICATE IS `kind`, NEVER `platform`. Agent rows exist with a NULL platform (measured on the review
+// rig), so a platform-based filter silently misses them — and a row that escapes this filter reappears in the
+// middle of an operator's device list with no owner and no posture.
 func (q *Queries) ListDevicesByOrg(ctx context.Context, orgID uuid.UUID) ([]ListDevicesByOrgRow, error) {
 	rows, err := q.db.Query(ctx, listDevicesByOrg, orgID)
 	if err != nil {
@@ -666,7 +682,7 @@ SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
 LEFT JOIN device_health dh ON dh.device_id = d.id
-WHERE d.org_id = $1 AND d.user_id = $2 AND d.deleted_at IS NULL
+WHERE d.org_id = $1 AND d.user_id = $2 AND d.deleted_at IS NULL AND d.kind <> 'agent'
 ORDER BY d.created_at
 `
 
@@ -687,6 +703,14 @@ type ListDevicesByUserRow struct {
 	ReportedAt      pgtype.Timestamptz `json:"reported_at"`
 }
 
+// ⛔ AGENTS ARE EXCLUDED FROM THE HUMAN DEVICE SURFACES. An AI agent is a `devices` row because it IS a
+// WireGuard peer — the peer set, the pool allocation, the revocation sweep and the liveness upsert all read
+// this table and MUST keep seeing it. What it is not is a user endpoint: it has no owner carrying it, no
+// client, no posture, and no place in a laptop roster.
+//
+// ⚠ THE PREDICATE IS `kind`, NEVER `platform`. Agent rows exist with a NULL platform (measured on the review
+// rig), so a platform-based filter silently misses them — and a row that escapes this filter reappears in the
+// middle of an operator's device list with no owner and no posture.
 func (q *Queries) ListDevicesByUser(ctx context.Context, arg ListDevicesByUserParams) ([]ListDevicesByUserRow, error) {
 	rows, err := q.db.Query(ctx, listDevicesByUser, arg.OrgID, arg.UserID)
 	if err != nil {
@@ -823,7 +847,7 @@ SELECT d.id, d.org_id, d.user_id, d.node_id, d.name, d.platform, d.public_key, d
 FROM devices d
 LEFT JOIN device_status ds ON ds.device_id = d.id
 LEFT JOIN device_health dh ON dh.device_id = d.id
-WHERE d.org_id = $1 AND d.status = 'pending' AND d.deleted_at IS NULL
+WHERE d.org_id = $1 AND d.status = 'pending' AND d.deleted_at IS NULL AND d.kind <> 'agent'
 ORDER BY d.created_at
 `
 
@@ -839,6 +863,14 @@ type ListPendingDevicesByOrgRow struct {
 	ReportedAt      pgtype.Timestamptz `json:"reported_at"`
 }
 
+// ⛔ AGENTS ARE EXCLUDED FROM THE HUMAN DEVICE SURFACES. An AI agent is a `devices` row because it IS a
+// WireGuard peer — the peer set, the pool allocation, the revocation sweep and the liveness upsert all read
+// this table and MUST keep seeing it. What it is not is a user endpoint: it has no owner carrying it, no
+// client, no posture, and no place in a laptop roster.
+//
+// ⚠ THE PREDICATE IS `kind`, NEVER `platform`. Agent rows exist with a NULL platform (measured on the review
+// rig), so a platform-based filter silently misses them — and a row that escapes this filter reappears in the
+// middle of an operator's device list with no owner and no posture.
 // The approval queue (S7.3): devices awaiting admin approval, oldest first.
 // device_health joined (S7.5.3): a pending device may already be reporting posture
 // (both facts surface independently — the D7 orthogonality).
