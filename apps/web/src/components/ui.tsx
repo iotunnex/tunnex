@@ -1,4 +1,4 @@
-import { cloneElement, isValidElement, useId, useMemo, useState } from "react";
+import { cloneElement, Fragment, isValidElement, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
   ButtonHTMLAttributes,
@@ -382,7 +382,14 @@ export interface Column<T> {
   key: string;
   /** The column's HEADER TEXT. Required: a `<th>` with no text is a cell the tier cannot name. */
   header: string;
-  cell: (row: T) => ReactNode;
+  /**
+   * `ctx` carries the row's expansion state and a toggle, so a cell can BE the disclosure control.
+   *
+   * ⚠ A SECOND ARGUMENT RATHER THAN A NEW COLUMN TYPE: the trigger belongs on whichever cell reads as the
+   * way in — a member count, a name — not on a chevron in a column of its own that means nothing until you
+   * click it.
+   */
+  cell: (row: T, ctx: { expanded: boolean; toggle: () => void }) => ReactNode;
   /** Numeric/right-aligned columns. Presentation only — never a reason to drop the header. */
   numeric?: boolean;
   /**
@@ -507,6 +514,7 @@ export function DataTable<T>({
   bulkActions,
   rowActions,
   rowAttrs,
+  expandable,
 }: {
   caption: string;
   columns: Array<Column<T>>;
@@ -597,6 +605,14 @@ export function DataTable<T>({
    * and a cell is not.
    */
   rowAttrs?: (row: T) => Record<string, string>;
+  /**
+   * Content revealed beneath a row, full width. Return `null` for rows that do not expand.
+   *
+   * ⛔ RENDERED IN A `<tr>` OF ITS OWN, spanning every column — not inside a cell. A nested panel inside one
+   * column is constrained to that column's width, so a member roster would render in the space taken by a
+   * count. The row below is the only placement that gives it the table's full width.
+   */
+  expandable?: (row: T) => ReactNode | null;
 }) {
   const searchable = columns.some((c) => c.sortValue);
   const showFilter = filterable ?? searchable;
@@ -607,6 +623,7 @@ export function DataTable<T>({
   const [pageSize, setPageSize] = useState(initialPageSize);
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   // The first column is the name column by convention here; using it keeps the checkbox's name meaningful
   // without every call site having to remember a prop.
@@ -855,9 +872,20 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {pageRows.map((r: T, i: number) => (
+            {pageRows.map((r: T, i: number) => {
+              const key = rowKey(r);
+              const isOpen = expanded.has(key);
+              const toggle = () =>
+                setExpanded((e) => {
+                  const n = new Set(e);
+                  if (n.has(key)) n.delete(key);
+                  else n.add(key);
+                  return n;
+                });
+              const panel = isOpen ? expandable?.(r) : null;
+              return (
+              <Fragment key={key}>
               <tr
-                key={rowKey(r)}
                 {...(rowAttrs?.(r) ?? {})}
                 // Zebra + hover: scanning across a wide row is where the eye loses its line, and this is
                 // presentation only — never the carrier of a state the row needs to announce in words.
@@ -884,11 +912,21 @@ export function DataTable<T>({
                     key={c.key}
                     className={`py-1.5 pr-4 align-middle ${c.numeric ? "text-right tabular-nums" : ""}`}
                   >
-                    {c.cell(r)}
+                    {c.cell(r, { expanded: isOpen, toggle })}
                   </td>
                 ))}
               </tr>
-            ))}
+              {/* ⚠ The panel is a row, so it inherits the table's width rather than a column's. */}
+              {panel && (
+                <tr>
+                  <td colSpan={columns.length + (showSelect ? 1 : 0)} className="px-0 pb-3">
+                    {panel}
+                  </td>
+                </tr>
+              )}
+              </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
