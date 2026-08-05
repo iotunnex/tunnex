@@ -1710,12 +1710,45 @@ function GroupsResourcesSection({
   // ⛔ TABS, NOT A STACK. Two tables one under the other cost a screen of scrolling to reach the second, and
   // the two are alternatives — an operator is working on groups OR on resources, never reading both at once.
   const [tab, setTab] = useState<"groups" | "resources">("groups");
+  // ⛔ EDIT EXISTED IN THE API AND HAD NO CALL SITE. `PATCH .../groups/{id}` and `PATCH .../resources/{id}`
+  // have shipped all along; the UI offered only Delete, so renaming a group or correcting a resource's port
+  // meant deleting it — which CASCADES every rule that names it — and building it again. A capability the
+  // product had and no operator could reach (the absence question, docs/CLAUDE.md).
+  const [editingGroup, setEditingGroup] = useState<UserGroup | null>(null);
+  const [editingRes, setEditingRes] = useState<Resource | null>(null);
 
   return (
     <Card className="mt-4">
       <h2 className="text-sm font-semibold text-slate-300">
         Groups &amp; resources
       </h2>
+      {/* ⛔ RENAME, NOT DELETE-AND-REBUILD. Deleting a group CASCADES every rule that names it, so without
+          this the only way to fix a typo in a group's name was to destroy the access it grants and
+          reconstruct it from memory. */}
+      {editingGroup && (
+        <RenameGroupModal
+          orgId={orgId}
+          group={editingGroup}
+          onClose={() => setEditingGroup(null)}
+          onDone={() => {
+            setEditingGroup(null);
+            load();
+            onSubjectsChanged();
+          }}
+        />
+      )}
+      {editingRes && (
+        <EditResourceModal
+          orgId={orgId}
+          resource={editingRes}
+          onClose={() => setEditingRes(null)}
+          onDone={() => {
+            setEditingRes(null);
+            load();
+            onSubjectsChanged();
+          }}
+        />
+      )}
       {deletingGroups.length > 0 && (
         <CascadeDeleteModal
           kind="group"
@@ -1871,6 +1904,12 @@ function GroupsResourcesSection({
                   canManage
                     ? [
                         {
+                          key: "edit",
+                          label: "Rename",
+                          arity: "single",
+                          run: (gs: UserGroup[]) => setEditingGroup(gs[0]),
+                        },
+                        {
                           key: "delete",
                           label: "Delete",
                           danger: true,
@@ -1914,6 +1953,11 @@ function GroupsResourcesSection({
                     // ⛔ THE COUNT IS THE WAY IN. Making it the disclosure control means the number an
                     // operator is already looking at is the thing they click, rather than a chevron in a
                     // column that means nothing until used.
+                    // ⛔ IT HAD TO LOOK LIKE A CONTROL, AND IT DID NOT. The count was plain text with a
+                    // hover underline, so the only way to manage members was to click something that read
+                    // as a label — the founder found it by accident, which is the definition of an
+                    // undiscoverable affordance. It is now a bordered control with a disclosure caret and
+                    // the word "Manage", so what it does is legible without clicking it.
                     cell: (g, { expanded, toggle }) => {
                       const count = memberCounts.get(g.id);
                       return (
@@ -1921,8 +1965,17 @@ function GroupsResourcesSection({
                           type="button"
                           onClick={toggle}
                           aria-expanded={expanded}
-                          className="text-xs underline-offset-2 hover:underline"
+                          title={expanded ? "Hide members" : "View and add members"}
+                          className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs hover:border-white/25 hover:bg-white/10"
                         >
+                          <svg
+                            aria-hidden
+                            viewBox="0 0 10 10"
+                            className={`h-2 w-2 shrink-0 text-slate-500 transition-transform ${expanded ? "rotate-90" : ""}`}
+                            fill="currentColor"
+                          >
+                            <path d="M2 0 L8 5 L2 10 Z" />
+                          </svg>
                           {/* `undefined` = not yet asked, and renders as a prompt rather than as a 0
                               nobody fetched. */}
                           {count === undefined ? (
@@ -1936,6 +1989,9 @@ function GroupsResourcesSection({
                               {count === 1 ? "1 member" : `${count} members`}
                             </span>
                           )}
+                          {/* ⚠ The VERB, beside the number. "3 members" alone says what is true; it does
+                              not say that clicking is how you change it. */}
+                          <span className="text-slate-600">· Manage</span>
                         </button>
                       );
                     },
@@ -1974,6 +2030,12 @@ function GroupsResourcesSection({
                 rowActions={
                   canManage
                     ? [
+                        {
+                          key: "edit",
+                          label: "Edit",
+                          arity: "single",
+                          run: (rs: Resource[]) => setEditingRes(rs[0]),
+                        },
                         {
                           key: "delete",
                           label: "Delete",
@@ -2555,6 +2617,11 @@ function GroupMembersPanel({
 
   return (
     <div className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2">
+      {/* ⚠ THE PANEL NAMES ITSELF. Expanded content that opens with a bare list of emails leaves the
+          operator to infer what they are looking at and what they may do to it. */}
+      <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wide text-ink-tertiary">
+        Members of {group.name}
+      </p>
       {(
         <div>
           {loaded === null && <p className="text-xs text-slate-500">Loading members…</p>}
@@ -2620,5 +2687,169 @@ function GroupMembersPanel({
         </div>
       )}
     </div>
+  );
+}
+
+
+/**
+ * Rename a group.
+ *
+ * ⚠ THE NAME IS ALL THAT CHANGES, and rules follow it automatically because they reference the group by ID.
+ * Said in the dialog, because the alternative an operator would otherwise assume — that renaming might break
+ * their rules — is exactly what would push them back to delete-and-rebuild.
+ */
+function RenameGroupModal({
+  orgId,
+  group,
+  onClose,
+  onDone,
+}: {
+  orgId: string;
+  group: UserGroup;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [name, setName] = useState(group.name);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    setBusy(true);
+    setErr(null);
+    const { error } = await api.PATCH("/api/v1/organizations/{orgId}/groups/{groupId}", {
+      params: { path: { orgId, groupId: group.id } },
+      body: { name: name.trim() },
+    });
+    setBusy(false);
+    if (error) return setErr(apiErrorMessage(error, "Could not rename the group."));
+    onDone();
+  }
+
+  return (
+    <Modal
+      title="Rename group"
+      onDismiss={onClose}
+      actions={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={busy || !name.trim() || name.trim() === group.name} onClick={() => void save()}>
+            {busy ? "Saving…" : "Save"}
+          </Button>
+        </>
+      }
+    >
+      <Field label="Group name">
+        <Input value={name} onChange={(e) => setName(e.target.value)} />
+      </Field>
+      <p className="mt-2 text-xs text-ink-secondary">
+        Rules that use this group keep working — they reference it by identity, not by name.
+      </p>
+      <ErrorText>{err}</ErrorText>
+    </Modal>
+  );
+}
+
+/**
+ * Edit a resource.
+ *
+ * ⛔ CHANGING A CIDR OR A PORT CHANGES WHAT EVERY RULE NAMING IT PERMITS, and it does so silently — the rules
+ * themselves do not appear to change. That is the one thing this dialog has to say out loud, because the
+ * blast radius is invisible from here.
+ */
+function EditResourceModal({
+  orgId,
+  resource,
+  onClose,
+  onDone,
+}: {
+  orgId: string;
+  resource: Resource;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [f, setF] = useState({
+    name: resource.name,
+    cidr: resource.cidr,
+    protocol: resource.protocol as "any" | "tcp" | "udp",
+    port_low: resource.port_low != null ? String(resource.port_low) : "",
+    port_high: resource.port_high != null ? String(resource.port_high) : "",
+    label: resource.label ?? "",
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    setBusy(true);
+    setErr(null);
+    const { error } = await api.PATCH("/api/v1/organizations/{orgId}/resources/{resourceId}", {
+      params: { path: { orgId, resourceId: resource.id } },
+      body: {
+        name: f.name.trim(),
+        cidr: f.cidr.trim(),
+        protocol: f.protocol,
+        // Blank means "all ports" — sent as null rather than 0, which would be a port nobody asked for.
+        port_low: f.port_low.trim() ? Number(f.port_low) : null,
+        port_high: f.port_high.trim() ? Number(f.port_high) : null,
+        label: f.label.trim() ? f.label.trim() : null,
+      },
+    });
+    setBusy(false);
+    if (error) return setErr(apiErrorMessage(error, "Could not update the resource."));
+    onDone();
+  }
+
+  return (
+    <Modal
+      title="Edit resource"
+      onDismiss={onClose}
+      actions={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={busy || !f.name.trim() || !f.cidr.trim()} onClick={() => void save()}>
+            {busy ? "Saving…" : "Save"}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <Field label="Name">
+          <Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+        </Field>
+        <Field label="CIDR">
+          <Input value={f.cidr} onChange={(e) => setF({ ...f, cidr: e.target.value })} />
+        </Field>
+        <div className="flex gap-2">
+          <Field label="Protocol">
+            <Select
+              value={f.protocol}
+              onChange={(e) => setF({ ...f, protocol: e.target.value as "any" | "tcp" | "udp" })}
+            >
+              <option value="any">any</option>
+              <option value="tcp">tcp</option>
+              <option value="udp">udp</option>
+            </Select>
+          </Field>
+          <Field label="Port low (blank = all)">
+            <Input value={f.port_low} onChange={(e) => setF({ ...f, port_low: e.target.value })} />
+          </Field>
+          <Field label="Port high">
+            <Input value={f.port_high} onChange={(e) => setF({ ...f, port_high: e.target.value })} />
+          </Field>
+        </div>
+        <Field label="Label (optional note)">
+          <Input value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
+        </Field>
+        {/* ⛔ THE INVISIBLE BLAST RADIUS, STATED. */}
+        <p className="text-xs text-warn">
+          Changing the CIDR, protocol or ports changes what every rule using this resource permits. The
+          rules themselves will not look any different.
+        </p>
+      </div>
+      <ErrorText>{err}</ErrorText>
+    </Modal>
   );
 }
