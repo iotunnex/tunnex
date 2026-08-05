@@ -389,6 +389,49 @@ export interface Column<T> {
   sortValue?: (row: T) => string | number;
 }
 
+
+/**
+ * The page numbers to render, with `null` marking an elided run.
+ *
+ * ⛔ ALWAYS FIRST AND LAST, ALWAYS THE CURRENT ONE AND ITS NEIGHBOURS. A pager that elides the last page
+ * hides how much there is — and "how much is there" is the question a pager exists to answer. Kept as a pure
+ * function so the windowing is testable without rendering a table.
+ */
+export function pageWindow(current: number, last: number): Array<number | null> {
+  if (last <= 6) return Array.from({ length: last + 1 }, (_, i) => i);
+  const keep = new Set([0, last, current, current - 1, current + 1]);
+  const out: Array<number | null> = [];
+  for (let i = 0; i <= last; i++) {
+    if (keep.has(i)) out.push(i);
+    else if (out[out.length - 1] !== null) out.push(null);
+  }
+  return out;
+}
+
+function PagerButton({
+  label,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  disabled: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="min-w-[1.75rem] rounded border border-white/10 px-1.5 py-0.5 text-slate-400 hover:bg-white/5 disabled:opacity-30 disabled:hover:bg-transparent"
+    >
+      {children}
+    </button>
+  );
+}
+
 /**
  * A real table.
  *
@@ -413,6 +456,11 @@ export function DataTable<T>({
   filterable,
   defaultSortKey,
   pageSize: initialPageSize = 25,
+  selectable,
+  rowLabel,
+  onSelectionChange,
+  toolbar,
+  bulkActions,
 }: {
   caption: string;
   columns: Array<Column<T>>;
@@ -458,6 +506,36 @@ export function DataTable<T>({
    * without also advancing a second pager, and the row count then describes neither the fetch nor the view.
    */
   pageSize?: number;
+  /**
+   * Add a leading checkbox column and the selection footer.
+   *
+   * ⛔ SELECTION IS THE MOST DANGEROUS THING A TABLE CAN OFFER, because the operator's next click is a BULK
+   * action and the set it applies to is whatever this component says it is. Two ambiguities are resolved
+   * explicitly rather than left to convention, and both are resolved the CONSERVATIVE way:
+   *
+   *  · **The header checkbox selects THIS PAGE, never the whole result set.** "Select all" meaning 500
+   *    invisible rows is how a bulk revoke becomes an outage. Selecting everything is still possible — it is
+   *    a separate, labelled control that states the number out loud.
+   *  · **Selection SURVIVES paging and filtering, and the footer says when part of it is off-screen.** The
+   *    alternative — silently dropping rows from the selection when they scroll out of view — makes the
+   *    applied set differ from the counted set, which is worse than an honest warning.
+   */
+  selectable?: boolean;
+  /**
+   * A HUMAN name for the row, used as the checkbox's accessible name.
+   *
+   * ⛔ THE KEY IS NOT A NAME. `rowKey` is a uuid or a database id, so without this a screen-reader user hears
+   * "select 019fcda7-7718-77e3" — a control they cannot identify, on the one interaction whose next step is
+   * a bulk action. Defaults to the FIRST column's search value, which is the name column by convention on
+   * every table in this app; falls back to the key only when there is nothing better.
+   */
+  rowLabel?: (row: T) => string;
+  /** Called with the selected row keys whenever the selection changes. */
+  onSelectionChange?: (keys: string[]) => void;
+  /** Controls that belong beside the filter — a status dropdown, a date range. Rendered right-aligned. */
+  toolbar?: ReactNode;
+  /** Rendered in the selection footer. Receives the selected keys and a clear callback. */
+  bulkActions?: (selected: string[], clear: () => void) => ReactNode;
 }) {
   const searchable = columns.some((c) => c.sortValue);
   const showFilter = filterable ?? searchable;
@@ -467,6 +545,17 @@ export function DataTable<T>({
   );
   const [pageSize, setPageSize] = useState(initialPageSize);
   const [page, setPage] = useState(0);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+
+  // The first column is the name column by convention here; using it keeps the checkbox's name meaningful
+  // without every call site having to remember a prop.
+  const labelFor = (r: T) =>
+    rowLabel?.(r) ?? (columns[0]?.sortValue ? String(columns[0].sortValue(r)) : rowKey(r));
+
+  const setSel = (next: Set<string>) => {
+    setSelected(next);
+    onSelectionChange?.([...next]);
+  };
 
   const visible = useMemo(() => {
     let out = rows;
@@ -501,6 +590,11 @@ export function DataTable<T>({
   const lastPage = paged ? Math.max(0, Math.ceil(visible.length / pageSize) - 1) : 0;
   const safePage = Math.min(page, lastPage);
   const pageRows = paged ? visible.slice(safePage * pageSize, safePage * pageSize + pageSize) : visible;
+  const pageAllSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(rowKey(r)));
+  // ⚠ HOW MUCH OF THE SELECTION THE OPERATOR CANNOT SEE. Selection survives paging and filtering on
+  // purpose; hiding that it did is what would make the applied set differ from the counted one.
+  const visibleKeys = new Set(visible.map(rowKey));
+  const offscreenSelected = [...selected].filter((k) => !visibleKeys.has(k)).length;
 
   if (failed) return null;
 
@@ -522,37 +616,26 @@ export function DataTable<T>({
 
   return (
     <div>
-      {showFilter && (
-        <div className="mb-2 flex items-center gap-3">
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              // ⛔ NARROWING RETURNS TO PAGE ONE. Typing while on page 3 of a list that now has four
-              // matches would show an empty table — the operator's own search reading as "nothing exists".
-              setPage(0);
-            }}
-            placeholder={`Filter ${caption.toLowerCase()}…`}
-            aria-label={`Filter ${caption}`}
-            className="w-56 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 placeholder:text-slate-600 focus:border-white/20 focus:outline-none"
-          />
-          {/* ⚠ THE COUNT IS THE HONEST PART. "3 of 47" makes a narrowed view legible as narrowed; without it
-              a filtered table is indistinguishable from a short one. */}
-          {/* ⚠ THE COUNT DESCRIBES THE VIEW *AND* THE WHOLE, because with a pager the two are almost never
-              the same number. "Showing 1–25 of 47" makes a partial view legible as partial; a bare "25"
-              reads as a complete list that happens to be short. And when a filter is on, the total it was
-              filtered FROM stays visible so the narrowing is never inferred. */}
-          <span className="text-[11px] tabular-nums text-ink-secondary">
-            {visible.length === 0
-              ? `0 of ${rows.length}`
-              : paged && visible.length > pageSize
-                ? `Showing ${safePage * pageSize + 1}–${Math.min((safePage + 1) * pageSize, visible.length)} of ${visible.length}` +
-                  (query.trim() ? ` (filtered from ${rows.length})` : "")
-                : query.trim()
-                  ? `${visible.length} of ${rows.length}`
-                  : `${rows.length}`}
-          </span>
+      {(showFilter || toolbar) && (
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+          {showFilter ? (
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                // ⛔ NARROWING RETURNS TO PAGE ONE. Typing while on page 3 of a list that now has four
+                // matches would show an empty table — the operator's own search reading as "nothing exists".
+                setPage(0);
+              }}
+              placeholder={`Search ${caption.toLowerCase()}…`}
+              aria-label={`Filter ${caption}`}
+              className="w-64 rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-white/20 focus:outline-none"
+            />
+          ) : (
+            <span />
+          )}
+          {toolbar}
         </div>
       )}
       <div className="overflow-x-auto">
@@ -562,6 +645,31 @@ export function DataTable<T>({
             {/* Sticky: on a long roster the header is the only thing telling you what a column means, and
                 scrolling past it turns every cell into an unlabelled string. */}
             <tr className="sticky top-0 z-10 bg-surface-1 text-[11px] uppercase tracking-wide text-slate-500">
+              {selectable && (
+                <th scope="col" className="w-8 border-b border-white/10 py-1.5 pr-2">
+                  {/* ⛔ THIS BOX SELECTS THE PAGE, AND ITS LABEL SAYS SO. A header checkbox that quietly
+                      means "all 500 matches" is how a bulk revoke becomes an outage — the operator sees ten
+                      rows and reasons about ten. Selecting everything is offered separately, by a control
+                      that states the number out loud. */}
+                  <input
+                    type="checkbox"
+                    aria-label={`Select all ${pageRows.length} on this page`}
+                    checked={pageAllSelected}
+                    ref={(el) => {
+                      // Indeterminate is a DOM property, not an attribute — a partly-selected page must not
+                      // render as either fully selected or untouched.
+                      if (el) el.indeterminate = !pageAllSelected && pageRows.some((r) => selected.has(rowKey(r)));
+                    }}
+                    onChange={() => {
+                      const next = new Set(selected);
+                      if (pageAllSelected) pageRows.forEach((r) => next.delete(rowKey(r)));
+                      else pageRows.forEach((r) => next.add(rowKey(r)));
+                      setSel(next);
+                    }}
+                    className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-slate-400"
+                  />
+                </th>
+              )}
               {columns.map((c) => {
                 const active = sort?.key === c.key;
                 return (
@@ -609,6 +717,22 @@ export function DataTable<T>({
                 // presentation only — never the carrier of a state the row needs to announce in words.
                 className={`border-b border-white/5 hover:bg-white/[0.06] ${i % 2 ? "bg-white/[0.02]" : ""}`}
               >
+                {selectable && (
+                  <td className="w-8 py-1.5 pr-2 align-middle">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${labelFor(r)}`}
+                      checked={selected.has(rowKey(r))}
+                      onChange={() => {
+                        const next = new Set(selected);
+                        if (next.has(rowKey(r))) next.delete(rowKey(r));
+                        else next.add(rowKey(r));
+                        setSel(next);
+                      }}
+                      className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-slate-400"
+                    />
+                  </td>
+                )}
                 {columns.map((c) => (
                   <td
                     key={c.key}
@@ -622,12 +746,13 @@ export function DataTable<T>({
           </tbody>
         </table>
       </div>
-      {/* The pager. Absent entirely when everything already fits — a control that can only be a no-op is
-          noise, and on a five-row table it implies there is more to see. */}
-      {paged && visible.length > pageSize && (
-        <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-ink-secondary">
+      {/* THE FOOTER: what is shown on the left, the range in the middle, where to go on the right. Rendered
+          whenever there is a page to describe — the range is useful even on one page, because "10" alone
+          does not say whether ten is all of them. */}
+      {paged && (
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3 border-t border-white/5 pt-2 text-[11px] text-ink-secondary">
           <label className="flex items-center gap-1.5">
-            <span>Rows</span>
+            <span>Rows per page</span>
             <select
               aria-label="Rows per page"
               value={pageSize}
@@ -637,36 +762,101 @@ export function DataTable<T>({
                 // interpretation that cannot land the operator past the end.
                 setPage(0);
               }}
-              className="rounded border border-white/10 bg-white/5 px-1 py-0.5 text-[11px] text-slate-300 focus:outline-none"
+              className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[11px] text-slate-300 focus:outline-none"
             >
-              {[25, 50, 100].map((n) => (
+              {[10, 25, 50, 100].map((n) => (
                 <option key={n} value={n}>{n}</option>
               ))}
             </select>
           </label>
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={safePage === 0}
-              onClick={() => setPage((p: number) => Math.max(0, p - 1))}
-            >
-              Previous
-            </Button>
-            {/* ⚠ ONE-INDEXED FOR THE READER. The state is zero-indexed; showing that leaks an
-                implementation detail into a place an operator reads as a count. */}
-            <span className="tabular-nums">
-              Page {safePage + 1} of {lastPage + 1}
-            </span>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={safePage >= lastPage}
-              onClick={() => setPage((p: number) => Math.min(lastPage, p + 1))}
-            >
-              Next
-            </Button>
-          </div>
+
+          {/* ⚠ THE RANGE DESCRIBES THE VIEW *AND* THE WHOLE, because with a pager the two are almost never
+              the same number. And when a filter is on, the total it was filtered FROM stays visible, so the
+              narrowing is never something the operator has to infer. */}
+          <span className="tabular-nums">
+            {visible.length === 0
+              ? `0 of ${rows.length}`
+              : `${safePage * pageSize + 1}–${Math.min((safePage + 1) * pageSize, visible.length)} of ${visible.length}` +
+                (query.trim() ? ` (filtered from ${rows.length})` : "")}
+          </span>
+
+          {lastPage > 0 ? (
+            <div className="flex items-center gap-1">
+              <PagerButton label="Previous page" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+                ‹
+              </PagerButton>
+              {pageWindow(safePage, lastPage).map((n, i) =>
+                n === null ? (
+                  <span key={`gap-${i}`} className="px-1 text-slate-700">…</span>
+                ) : (
+                  <button
+                    key={n}
+                    type="button"
+                    aria-label={`Page ${n + 1}`}
+                    aria-current={n === safePage ? "page" : undefined}
+                    onClick={() => setPage(n)}
+                    className={`min-w-[1.75rem] rounded border px-1.5 py-0.5 tabular-nums ${
+                      n === safePage
+                        ? "border-white/25 bg-white/10 text-ink-heading"
+                        : "border-white/10 text-slate-400 hover:bg-white/5"
+                    }`}
+                  >
+                    {n + 1}
+                  </button>
+                ),
+              )}
+              <PagerButton label="Next page" disabled={safePage >= lastPage} onClick={() => setPage(safePage + 1)}>
+                ›
+              </PagerButton>
+            </div>
+          ) : (
+            <span />
+          )}
+        </div>
+      )}
+
+      {/* THE SELECTION BAR. Always present when the table is selectable — an empty-state bar that says
+          "0 selected" teaches where the count will appear, and a bar that only materialises on the first
+          click moves the layout under the operator's cursor. */}
+      {selectable && (
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-xs">
+          <span className="text-ink-secondary">
+            <span className="tabular-nums text-slate-300">{selected.size}</span> selected
+            {/* ⛔ THE HALF THAT PREVENTS A SURPRISE. An action applies to the whole selection, including rows
+                a filter or a page turn has hidden. Saying so is the difference between a bulk action the
+                operator authorised and one they merely appeared to. */}
+            {offscreenSelected > 0 && (
+              <span className="ml-1 text-warn">
+                ({offscreenSelected} not visible under the current filter)
+              </span>
+            )}
+            {selected.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setSel(new Set())}
+                className="ml-2 underline hover:text-slate-300"
+              >
+                Clear
+              </button>
+            )}
+            {/* Selecting everything is possible, but it is its own control and it says the number. */}
+            {!pageAllSelected || visible.length <= pageRows.length ? null : (
+              <button
+                type="button"
+                onClick={() => setSel(new Set(visible.map(rowKey)))}
+                className="ml-2 underline hover:text-slate-300"
+              >
+                Select all {visible.length} matching
+              </button>
+            )}
+          </span>
+          <span className="flex items-center gap-2">
+            {selected.size === 0 ? (
+              <span className="text-ink-tertiary">Select one or more rows to act on them</span>
+            ) : (
+              bulkActions?.([...selected], () => setSel(new Set()))
+            )}
+          </span>
         </div>
       )}
 
