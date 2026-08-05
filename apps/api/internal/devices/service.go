@@ -667,6 +667,41 @@ func (s *Service) Get(ctx context.Context, orgID, deviceID uuid.UUID) (sqlc.Devi
 
 // Revoke marks a device revoked and pushes its gateway so the peer is removed
 // from the device within the <5s bound. A no-op (already revoked) is a conflict.
+// RemoveRevoked takes an already-REVOKED device off the roster. Soft: `deleted_at` is set and nothing is
+// destroyed.
+//
+// ⛔ THE CASCADE IS WHY IT IS SOFT. Every FK into `devices` is ON DELETE CASCADE, and `ovpn_client_certs` is
+// one of them — the OpenVPN CRL is `SELECT serial FROM ovpn_client_certs WHERE revoked_at IS NOT NULL`. A
+// hard delete would drop this device's serial out of the CRL and UN-REVOKE its credential on the wire, so
+// the housekeeping verb would silently restore the access the operator revoked. It would also take the
+// device's posture history, its telemetry, and any policy rule naming it as an agent source.
+//
+// ⚠ REVOKED ONLY, ENFORCED IN THE STATEMENT rather than by a read-then-write: the WHERE clause carries
+// `status = 'revoked'`, so a device that is active — or that becomes active between the check and the write
+// — is not removed. Removing an ACTIVE device would leave a live credential with no surface to revoke it
+// from: invisible and still working, the worst state this product can produce.
+//
+// ⚠ AND ROWS-AFFECTED IS READ, so "not found" and "not revoked" are different answers. Reporting success for
+// a no-op is how an operator concludes a device is gone when it is still on the roster.
+func (s *Service) RemoveRevoked(ctx context.Context, orgID, actorID, deviceID uuid.UUID) error {
+	return s.withTx(ctx, func(q *sqlc.Queries) error {
+		n, err := q.SoftDeleteRevokedDevice(ctx, sqlc.SoftDeleteRevokedDeviceParams{ID: deviceID, OrgID: orgID})
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			// Distinguish the two zero-row causes for the caller, from inside the same transaction.
+			if _, e := q.GetDevice(ctx, sqlc.GetDeviceParams{ID: deviceID, OrgID: orgID}); e != nil {
+				return apierr.NotFound("device_not_found", "device not found")
+			}
+			return apierr.Conflict("device_not_revoked",
+				"only a revoked device can be removed from the roster — revoke it first")
+		}
+		return audit(ctx, q, orgID, &actorID, "device.removed", "device", deviceID.String(),
+			map[string]any{"cause": "operator_removed_revoked"})
+	})
+}
+
 func (s *Service) Revoke(ctx context.Context, orgID, actorID, deviceID uuid.UUID) error {
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		// Read the PRIOR status (in-tx, ROW-LOCKED) so the audit distinguishes an owner

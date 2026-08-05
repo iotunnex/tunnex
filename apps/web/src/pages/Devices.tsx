@@ -271,6 +271,28 @@ export default function Devices() {
   }
 
   /**
+   * ⛔ REMOVE IS NOT REVOKE, AND THE ORDER MATTERS. Revoke kills the credential; remove takes the dead row
+   * off the roster. The server refuses to remove anything that is not already revoked, because removing a
+   * LIVE device would leave a working credential with no surface to revoke it from.
+   *
+   * ⚠ AND IT IS A SOFT DELETE SERVER-SIDE — the revocation record and the OpenVPN CRL entry survive. A hard
+   * delete would cascade into `ovpn_client_certs` and drop the serial out of the CRL, un-revoking the
+   * credential on the wire.
+   */
+  async function remove(id: string) {
+    if (!org) return;
+    setError(null);
+    const { error } = await api.DELETE(
+      "/api/v1/organizations/{orgId}/devices/{deviceId}",
+      { params: { path: { orgId: org.id, deviceId: id } } },
+    );
+    if (error) {
+      setError(apiErrorMessage(error, "Could not remove the device."));
+      return;
+    }
+  }
+
+  /**
    * ⛔ ONE REFETCH AFTER THE BATCH, NOT ONE PER ROW — this is the "I have to reload the page" defect.
    *
    * Each mutation used to refetch on its own, so a bulk action on N rows fired N identical GETs
@@ -565,6 +587,21 @@ export default function Devices() {
                 d.status === "active" ? null : `A ${d.status} device cannot be revoked.`,
               run: (ds) => {
                 void runBatch(() => Promise.all(ds.map((d) => revoke(d.id))));
+              },
+            },
+            {
+              key: "remove",
+              label: "Remove",
+              danger: true,
+              // ⚠ REVOKED ONLY, mirroring the server's own refusal. The reason is stated rather than the
+              // control silently missing: "why can I not remove this" is exactly the question a blank
+              // disabled button leaves an operator holding.
+              unavailable: (d) =>
+                d.status === "revoked"
+                  ? null
+                  : "Only a revoked device can be removed. Revoke it first.",
+              run: (ds) => {
+                void runBatch(() => Promise.all(ds.map((d) => remove(d.id))));
               },
             },
           ]}

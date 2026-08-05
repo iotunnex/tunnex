@@ -1069,6 +1069,23 @@ type Querier interface {
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
 	SoftDeleteK8sService(ctx context.Context, arg SoftDeleteK8sServiceParams) error
 	SoftDeleteOrganization(ctx context.Context, id uuid.UUID) (int64, error)
+	// ⛔ SOFT, AND THE `ovpn_client_certs` CASCADE IS WHY — NOT A PREFERENCE.
+	//
+	// Every FK into `devices` is ON DELETE CASCADE, including `ovpn_client_certs`. The OpenVPN CRL is
+	// literally `SELECT serial ... FROM ovpn_client_certs WHERE revoked_at IS NOT NULL`, so a HARD delete of a
+	// revoked device would delete its cert row, drop the serial out of the CRL, and thereby UN-REVOKE the
+	// credential on the wire. The operator's tidy-up would silently restore access.
+	//
+	// > **A DELETE THAT CASCADES INTO A REVOCATION LIST IS AN UN-REVOKE WEARING A HOUSEKEEPING VERB.**
+	//
+	// It would also destroy the device's posture and telemetry history and any policy rule naming it as an
+	// agent source. Soft delete keeps every one of those rows and simply stops the device being a subject:
+	// 27 queries in this file already scope `deleted_at IS NULL`, so the convention exists and this joins it.
+	//
+	// ⚠ REVOKED ONLY. Removing an ACTIVE device from the roster would leave a live credential with no surface
+	// to revoke it from — invisible and still working, which is the worst state this product can produce.
+	// Returns rows-affected so the caller can tell "not found" from "not revoked" instead of reporting success.
+	SoftDeleteRevokedDevice(ctx context.Context, arg SoftDeleteRevokedDeviceParams) (int64, error)
 	// S7.4b (X-4): stamp the term-3 desync ONSET, CONTROL-PLANE-ONLY, idempotent per episode —
 	// the WHERE ... IS NULL preserves the first onset (a repeated mismatch never re-stamps a
 	// newer time). Called from exactly one site (nodes.trackDesync); the value is the CP clock,

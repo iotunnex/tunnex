@@ -1092,6 +1092,40 @@ paths:
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/devices/{deviceId}:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: deviceId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      operationId: removeDevice
+      summary: Remove a REVOKED device from the roster (soft delete)
+      description: >-
+        ⛔ SOFT, AND THE CASCADE IS WHY. Every foreign key into `devices` is ON DELETE CASCADE, including
+        `ovpn_client_certs` — and the OpenVPN CRL is built from that table. A hard delete would drop the
+        device's serial out of the CRL and thereby UN-REVOKE the credential on the wire: a tidy-up that
+        silently restores access. It would also destroy the device's posture history, its telemetry and any
+        policy rule naming it as an agent source.
+
+        ⚠ REVOKED ONLY. Removing an ACTIVE device would leave a live credential with no surface to revoke it
+        from — invisible and still working. A device that is not revoked answers 409.
+      tags: [devices]
+      responses:
+        "204":
+          description: Removed from the roster. The revocation record and the CRL entry are untouched.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        "409":
+          description: The device is not revoked. Revoke it first.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        default: { $ref: "#/components/responses/Error" }
+
   # ── Device posture (S7.3, ENTERPRISE) ───────────────────────────────────────
   # An org-level approval gate: new devices enroll PENDING (blocked) until approved.
   # Edition-gated: the open build returns 403 edition_required. RBAC: device:approve.

@@ -2107,6 +2107,9 @@ type ClientInterface interface {
 	// ListPendingDevices request
 	ListPendingDevices(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RemoveDevice request
+	RemoveDevice(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ApproveDevice request
 	ApproveDevice(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -3135,6 +3138,18 @@ func (c *Client) CreateDevice(ctx context.Context, orgId openapi_types.UUID, bod
 
 func (c *Client) ListPendingDevices(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListPendingDevicesRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RemoveDevice(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRemoveDeviceRequest(c.Server, orgId, deviceId)
 	if err != nil {
 		return nil, err
 	}
@@ -6270,6 +6285,47 @@ func NewListPendingDevicesRequest(server string, orgId openapi_types.UUID) (*htt
 	}
 
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRemoveDeviceRequest generates requests for RemoveDevice
+func NewRemoveDeviceRequest(server string, orgId openapi_types.UUID, deviceId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "deviceId", runtime.ParamLocationPath, deviceId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/devices/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -10228,6 +10284,9 @@ type ClientWithResponsesInterface interface {
 	// ListPendingDevicesWithResponse request
 	ListPendingDevicesWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListPendingDevicesResponse, error)
 
+	// RemoveDeviceWithResponse request
+	RemoveDeviceWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RemoveDeviceResponse, error)
+
 	// ApproveDeviceWithResponse request
 	ApproveDeviceWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ApproveDeviceResponse, error)
 
@@ -11467,6 +11526,29 @@ func (r ListPendingDevicesResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r ListPendingDevicesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RemoveDeviceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON409      *Error
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r RemoveDeviceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RemoveDeviceResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -13912,6 +13994,15 @@ func (c *ClientWithResponses) ListPendingDevicesWithResponse(ctx context.Context
 	return ParseListPendingDevicesResponse(rsp)
 }
 
+// RemoveDeviceWithResponse request returning *RemoveDeviceResponse
+func (c *ClientWithResponses) RemoveDeviceWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RemoveDeviceResponse, error) {
+	rsp, err := c.RemoveDevice(ctx, orgId, deviceId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRemoveDeviceResponse(rsp)
+}
+
 // ApproveDeviceWithResponse request returning *ApproveDeviceResponse
 func (c *ClientWithResponses) ApproveDeviceWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ApproveDeviceResponse, error) {
 	rsp, err := c.ApproveDevice(ctx, orgId, deviceId, reqEditors...)
@@ -16245,6 +16336,39 @@ func ParseListPendingDevicesResponse(rsp *http.Response) (*ListPendingDevicesRes
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRemoveDeviceResponse parses an HTTP response from a RemoveDeviceWithResponse call
+func ParseRemoveDeviceResponse(rsp *http.Response) (*RemoveDeviceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RemoveDeviceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error

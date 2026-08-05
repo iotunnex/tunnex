@@ -1207,3 +1207,38 @@ func (q *Queries) SetOrgDeviceApproval(ctx context.Context, arg SetOrgDeviceAppr
 	)
 	return i, err
 }
+
+const softDeleteRevokedDevice = `-- name: SoftDeleteRevokedDevice :execrows
+UPDATE devices
+SET deleted_at = now(), updated_at = now()
+WHERE id = $1 AND org_id = $2 AND status = 'revoked' AND deleted_at IS NULL
+`
+
+type SoftDeleteRevokedDeviceParams struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+// ⛔ SOFT, AND THE `ovpn_client_certs` CASCADE IS WHY — NOT A PREFERENCE.
+//
+// Every FK into `devices` is ON DELETE CASCADE, including `ovpn_client_certs`. The OpenVPN CRL is
+// literally `SELECT serial ... FROM ovpn_client_certs WHERE revoked_at IS NOT NULL`, so a HARD delete of a
+// revoked device would delete its cert row, drop the serial out of the CRL, and thereby UN-REVOKE the
+// credential on the wire. The operator's tidy-up would silently restore access.
+//
+// > **A DELETE THAT CASCADES INTO A REVOCATION LIST IS AN UN-REVOKE WEARING A HOUSEKEEPING VERB.**
+//
+// It would also destroy the device's posture and telemetry history and any policy rule naming it as an
+// agent source. Soft delete keeps every one of those rows and simply stops the device being a subject:
+// 27 queries in this file already scope `deleted_at IS NULL`, so the convention exists and this joins it.
+//
+// ⚠ REVOKED ONLY. Removing an ACTIVE device from the roster would leave a live credential with no surface
+// to revoke it from — invisible and still working, which is the worst state this product can produce.
+// Returns rows-affected so the caller can tell "not found" from "not revoked" instead of reporting success.
+func (q *Queries) SoftDeleteRevokedDevice(ctx context.Context, arg SoftDeleteRevokedDeviceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteRevokedDevice, arg.ID, arg.OrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
