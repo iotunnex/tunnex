@@ -854,11 +854,16 @@ export function DataTable<T>({
                     key={c.key}
                     scope="col"
                     aria-sort={active ? (sort!.dir === 1 ? "ascending" : "descending") : undefined}
-                    // ⚠ A RIGHT-ALIGNED COLUMN NEEDS PADDING ON ITS *LEFT*, not only its right. `pr-4`
-                    // alone pushes a numeric column's content to its own right edge, where it lands flush
-                    // against the next column's left edge — "0" and a role select ended up touching, and
-                    // the eye reads two adjacent columns as one field.
-                    className={`border-b border-white/10 py-1.5 pr-4 font-medium ${c.numeric ? "pl-6 text-right" : ""}`}
+                    // ⛔ A RIGHT-ALIGNED COLUMN NEEDS THE GAP *AFTER* IT, and my first attempt padded the
+                    // wrong side. `text-right` pushes the content flush to the cell's right edge, so the
+                    // only thing between a number and the NEXT column's content is that cell's right
+                    // padding — `pr-4` was not enough and `pl-6` separated it from the column BEFORE,
+                    // which was never the complaint. Numeric cells take `pr-8`.
+                    //
+                    // ⚠ AND THE BASE `pr-4` IS SWAPPED, NOT SUPPLEMENTED. Emitting both `pr-4` and `pr-8`
+                    // is the override coin flip this repo already has a test for — the winner would be
+                    // whichever the stylesheet orders last.
+                    className={`border-b border-white/10 py-1.5 font-medium ${c.numeric ? "pl-6 pr-8 text-right" : "pr-4"}`}
                   >
                     {c.sortValue ? (
                       <button
@@ -929,7 +934,7 @@ export function DataTable<T>({
                 {columns.map((c) => (
                   <td
                     key={c.key}
-                    className={`py-1.5 pr-4 align-middle ${c.numeric ? "pl-6 text-right tabular-nums" : ""}`}
+                    className={`py-1.5 align-middle ${c.numeric ? "pl-6 pr-8 text-right tabular-nums" : "pr-4"}`}
                   >
                     {c.cell(r, { expanded: isOpen, toggle })}
                   </td>
