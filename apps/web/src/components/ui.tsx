@@ -408,18 +408,6 @@ export interface Column<T> {
   /** Numeric/right-aligned columns. Presentation only — never a reason to drop the header. */
   numeric?: boolean;
   /**
-   * Let this column ABSORB the table's spare width instead of hugging its content.
-   *
-   * ⚠ RARELY WANTED. Without it every column sizes to what it holds and the slack pools in a trailing
-   * spacer at the right edge, which is what stops a wide table growing a gap in the MIDDLE of itself.
-   *
-   * ⛔ AND THE SHRINK IS `w-px` ALONE — NEVER WITH `whitespace-nowrap`. Adding nowrap would size columns
-   * more predictably and would also stop a long value ever wrapping, which on this product's roster means a
-   * 70-character address either overflows or clips. A clipped value is the reassuring-empty defect in
-   * miniature: the founder's own test forbids it, and it caught this exact attempt.
-   */
-  grow?: boolean;
-  /**
    * The row's value for this column AS TEXT — what sorting orders by and what the filter matches.
    *
    * ⛔ SEPARATE FROM `cell` ON PURPOSE, AND THE REASON IS THE ONE THAT MATTERS: `cell` returns a ReactNode.
@@ -866,16 +854,11 @@ export function DataTable<T>({
                     key={c.key}
                     scope="col"
                     aria-sort={active ? (sort!.dir === 1 ? "ascending" : "descending") : undefined}
-                    // ⛔ A RIGHT-ALIGNED COLUMN NEEDS THE GAP *AFTER* IT, and my first attempt padded the
-                    // wrong side. `text-right` pushes the content flush to the cell's right edge, so the
-                    // only thing between a number and the NEXT column's content is that cell's right
-                    // padding — `pr-4` was not enough and `pl-6` separated it from the column BEFORE,
-                    // which was never the complaint. Numeric cells take `pr-8`.
-                    //
-                    // ⚠ AND THE BASE `pr-4` IS SWAPPED, NOT SUPPLEMENTED. Emitting both `pr-4` and `pr-8`
-                    // is the override coin flip this repo already has a test for — the winner would be
-                    // whichever the stylesheet orders last.
-                    className={`border-b border-white/10 py-1.5 font-medium ${c.grow ? "" : "w-px"} ${c.numeric ? "pl-6 pr-8 text-right" : "pr-4"}`}
+                    // ⚠ A RIGHT-ALIGNED COLUMN NEEDS PADDING ON ITS *LEFT*, not only its right. `pr-4`
+                    // alone pushes a numeric column's content to its own right edge, where it lands flush
+                    // against the next column's left edge — "0" and a role select ended up touching, and
+                    // the eye reads two adjacent columns as one field.
+                    className={`border-b border-white/10 py-1.5 pr-4 font-medium ${c.numeric ? "pl-6 text-right" : ""}`}
                   >
                     {c.sortValue ? (
                       <button
@@ -905,17 +888,6 @@ export function DataTable<T>({
                   </th>
                 );
               })}
-              {/* ⛔ THE SLACK GOES TO THE RIGHT EDGE, NOT BETWEEN TWO COLUMNS. A `w-full` auto-layout table
-                  must put its spare width SOMEWHERE, and left to itself it hands it to whichever column has
-                  the longest content — which is how this roster grew a dead zone: Member won the slack and
-                  the leftover rendered as EMPTY SPACE between Member and State, while every other column
-                  huddled at the far right.
-
-                  Every real column now hugs its content (`w-px` is a floor the content exceeds immediately)
-                  and one empty trailing cell takes the remainder. The space still exists — it cannot not —
-                  but it sits past the last column, where it reads as MARGIN rather than as a gap someone
-                  forgot to close. */}
-              <th aria-hidden className="w-full border-b border-white/10" />
             </tr>
           </thead>
           <tbody>
@@ -957,17 +929,16 @@ export function DataTable<T>({
                 {columns.map((c) => (
                   <td
                     key={c.key}
-                    className={`py-1.5 align-middle ${c.grow ? "" : "w-px"} ${c.numeric ? "pl-6 pr-8 text-right tabular-nums" : "pr-4"}`}
+                    className={`py-1.5 pr-4 align-middle ${c.numeric ? "pl-6 text-right tabular-nums" : ""}`}
                   >
                     {c.cell(r, { expanded: isOpen, toggle })}
                   </td>
                 ))}
-                <td aria-hidden />
               </tr>
               {/* ⚠ The panel is a row, so it inherits the table's width rather than a column's. */}
               {panel && (
                 <tr>
-                  <td colSpan={columns.length + (showSelect ? 1 : 0) + 1} className="px-0 pb-3">
+                  <td colSpan={columns.length + (showSelect ? 1 : 0)} className="px-0 pb-3">
                     {panel}
                   </td>
                 </tr>
