@@ -242,19 +242,18 @@ export default function Dashboard() {
               { ok: true, data },
               (d) => d.nodes,
             );
-            const seen = statFrom<OrgOverview>(
-              { ok: true, data },
-              (d) => d.online,
-            );
             const sites = statFrom(sitesRes, (r: Site[]) => r.length);
             const pending = statFrom(pendingRes, (r: Device[]) => r.length);
             const rules = statFrom(rulesRes, (r: PolicyRule[]) => r.length);
             // Edition is UNKNOWN until /meta answers; treat unknown as not-enterprise so a slow load never
             // flashes an enterprise-only surface. Absent-until-known, same rule as every count on this screen.
             const enterprise = isEnterprise(edition);
-            // Five core cards, plus Access Rules and Pending approvals on enterprise. ONE definition, read by
-            // both the gating below and the grid's column count.
-            const STAT_CARDS = enterprise ? 7 : 5;
+            // FOUR core cards, plus Access Rules and Pending approvals on enterprise, plus AI Agents when
+            // its read succeeded. ONE definition, read by both the gating below and the grid's column count.
+            // ⚠ THE AGENT TERM IS THE CONDITION ITSELF, not `enterprise`: the card renders on `ok` alone, so
+            // counting it on edition would re-span the row for a card that is not there — the two-column
+            // hole the re-span was ruled to prevent.
+            const STAT_CARDS = (enterprise ? 6 : 4) + (agentsRes?.ok ? 1 : 0);
 
             // NEEDS ATTENTION is COMPOSED, not fetched — every item names the source that produced it, and an
             // item appears only when its source has been READ. A source still loading contributes nothing;
@@ -286,6 +285,16 @@ export default function Dashboard() {
               ? ztRes.data.mode === "enforcing"
                 ? "enforcing"
                 : "not enforced"
+              : null;
+            // ⛔ THE SUB-LINE IS WHERE THE PANEL'S ONE REAL SENTENCE SURVIVES. The AI Agents panel named
+            // the unattributable count, and a count with the gap dropped is a smaller claim than it looks:
+            // "3 agents" reads as three accounted-for agents. The qualification moves into the sub-line
+            // rather than being lost with the card that used to carry it.
+            // ⚠ Still named ONLY when non-zero (agentSummary's rule) — a permanent "0 unattributable"
+            // trains the reader to stop seeing the line that matters when it is not zero.
+            const agentSum = agentsRes?.ok ? agentSummary(agentsRes.data) : null;
+            const agentSub = agentSum
+              ? (agentSum.note ?? "enrolled in this organization")
               : null;
             const fresh = isFreshOrg(gateways, devices, members);
 
@@ -357,19 +366,20 @@ export default function Dashboard() {
                         : `${degraded} reporting degraded kinds`
                     }
                   />
-                  {/* ⛔ THE HONEST LABEL, FOUNDER-RULED. `online` is derived from LAST-HANDSHAKE RECENCY
-                      (S3.6), not a live session. The design labels this "Online Peers" and puts the
-                      qualification in the sub-line; the ruling keeps the qualification in the LABEL, which is
-                      the safer of two honest compositions. A render-floor violation in a WORD is still one. */}
-                  <Stat
-                    label="Seen in last 3 min"
-                    icon="waves"
-                    value={seen}
-                    sub="derived from WireGuard handshake liveness"
-                    tone={
-                      seen.state === "ok" && seen.value > 0 ? "ok" : undefined
-                    }
-                  />
+                  {/* ⛔ ENTERPRISE, AND RENDERED ONLY ON `ok` — NOT ON "enterprise". The agents fetch
+                      swallows every error, 403 and genuine failure alike, so `agentsRes` stays `null` in
+                      both cases. Gating on the EDITION would make a failed read on enterprise render a
+                      permanent "loading" card — which is the exact `pendingRes` defect documented above,
+                      reintroduced from the other direction. `ok` is the only state that means the number
+                      is known. */}
+                  {agentsRes?.ok && (
+                    <Stat
+                      label="AI Agents"
+                      icon="bot"
+                      value={statFrom(agentsRes, (r: AgentRow[]) => r.length)}
+                      sub={agentSub}
+                    />
+                  )}
                   <Stat
                     label="Sites"
                     icon="network"
@@ -471,37 +481,6 @@ export default function Dashboard() {
                       green while dead.
                     </p>
                   </Panel>
-
-                  {/* ⛔ AI AGENTS — COUNTS AND ONE NAMED GAP, NOTHING ELSE (S15.3).
-                      A card is where copy gets shortened until it implies things, so the render floor
-                      binds hardest here: no detection claim, no per-tool claim, and NOT a health verdict.
-                      "3 agents, 1 unattributable" is a count and an audit gap — it is not "you are secure"
-                      and says nothing about what any agent is doing.
-                      ⚠ Absent in the open edition: the endpoint answers 403 edition_required, which is a
-                      SUCCESSFUL refusal, and agentsRes stays null rather than becoming an error. */}
-                  {agentsRes?.ok && agentsRes.data.length > 0 && (
-                    <Panel title="AI Agents">
-                      {(() => {
-                        const sum = agentSummary(agentsRes.data);
-                        return (
-                          <div className="flex flex-col gap-1.5">
-                            <span className="text-[22px] font-semibold text-ink-heading">{sum.total}</span>
-                            <span className="text-cell text-ink-tertiary">
-                              enrolled in this organization
-                            </span>
-                            {/* ⚠ Named only when it exists — a permanent "0 unattributable" would train
-                                the reader to stop seeing the line that matters when it is not zero. */}
-                            {sum.note && (
-                              <span className="text-cell text-warn">{sum.note}</span>
-                            )}
-                            <Link to="/agents" className="text-cell text-ink-body underline">
-                              Open AI agents
-                            </Link>
-                          </div>
-                        );
-                      })()}
-                    </Panel>
-                  )}
 
                   <Panel title="Gateway Health">
                     {nodesRes === null ? (
