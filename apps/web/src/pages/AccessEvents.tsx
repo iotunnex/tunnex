@@ -150,6 +150,7 @@ export default function AccessEvents() {
             {
               key: "time",
               header: "Time",
+              sortValue: (e) => Date.parse(e.occurred_at),
               cell: (e) => (
                 <span className="font-mono text-xs text-slate-500">
                   {relativeAge(e.occurred_at)}
@@ -183,6 +184,7 @@ export default function AccessEvents() {
             {
               key: "source",
               header: "Source",
+              sortValue: (e) => sourceFor(e),
               cell: (e) => (
                 <span className="font-mono text-xs text-slate-300">{sourceFor(e)}</span>
               ),
@@ -190,6 +192,7 @@ export default function AccessEvents() {
             {
               key: "destination",
               header: "Destination",
+              sortValue: (e) => destinationFor(e),
               cell: (e) => (
                 <span className="font-mono text-xs text-slate-300">
                   {destinationFor(e)}

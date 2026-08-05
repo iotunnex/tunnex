@@ -474,6 +474,10 @@ export default function Devices() {
             {
               key: "name",
               header: "Device",
+              // ⚠ THE OWNER'S EMAIL IS SEARCHABLE EVEN WHEN THE SUB-LINE IS ABSENT. The cell hides it when
+              // the members read failed; the search key does not, so "find every device of this person"
+              // keeps working on a page that could not render the label.
+              sortValue: (d) => `${d.name} ${ownerEmail.get(d.user_id) ?? ""}`,
               cell: (d) => (
                 <span className="flex flex-col gap-0.5">
                   <span className="text-sm text-white">{d.name}</span>
@@ -492,6 +496,7 @@ export default function Devices() {
             {
               key: "protocol",
               header: "Protocol",
+              sortValue: (d) => deviceProtocol(d.public_key),
               cell: (d) => (
                 // ⛔ DERIVED FROM `public_key`, because there is NO `protocol` FIELD ON Device — measured. An
                 // OpenVPN device is minted with "no WireGuard key", so an empty key IS the discriminator, and
@@ -504,6 +509,7 @@ export default function Devices() {
             {
               key: "address",
               header: "Address",
+              sortValue: (d) => addressLabel(d.assigned_ip),
               cell: (d) => (
                 <span
                   className={`font-mono text-xs ${
@@ -517,6 +523,15 @@ export default function Devices() {
             {
               key: "state",
               header: "State",
+              // ⛔ THE SEARCH KEY CARRIES THE STATE AS TEXT, because the cell renders it as a Badge and a
+              // coloured dot. Without this a search for "revoked" would miss every revoked device — the row
+              // would be invisible to a search for the very state its badge is announcing.
+              sortValue: (d) =>
+                d.status === "revoked"
+                  ? "revoked"
+                  : d.status === "pending"
+                    ? "pending"
+                    : lastSeen(d.last_handshake_at, !!d.public_key),
               cell: (d) =>
                 d.status === "revoked" ? (
                   <Badge tone="danger">revoked</Badge>
