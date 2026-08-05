@@ -2,7 +2,6 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Icon, type IconName } from "../components/Icon";
 import { GLASS } from "../components/ui";
 import { isEnterprise, type Edition } from "../lib/edition";
-import { HealthStatus } from "../components/HealthStatus";
 import { formatBytes, hubSetView } from "../lib/hubsetview";
 import { assembleTopology, meshFrom } from "../lib/sitesview";
 import { Donut, Histogram, NodeLink } from "../components/viz";
@@ -25,10 +24,7 @@ import {
   type ZeroTrustMode,
   type K8sCluster,
   type K8sService,
-  type Member,
 } from "../lib/api";
-import { relativeAge } from "../lib/format";
-import { resolveActor } from "../lib/auditview";
 import {
   Badge,
   EmptyState,
@@ -65,12 +61,6 @@ export default function Dashboard() {
   // independent failures into one blast radius — one failure would blank six cards instead of two. Screens
   // compose endpoints; endpoints do not compose themselves for screens.
   const [sitesRes, setSitesRes] = useState<Loaded<Site[]> | null>(null);
-  // ⛔ THE ROSTER, NOT THE COUNT. `/overview` serves `members` as a NUMBER, so the activity feed had
-  // nothing to resolve an actor id against. Passing an empty roster to `resolveActor` would label a
-  // CURRENT member "former member 019fc421" — a false statement about a person, which is worse than
-  // showing no actor at all. Second-class read: if it fails, the feed degrades to un-named humans and
-  // every other card is untouched.
-  const [rosterRes, setRosterRes] = useState<Loaded<Member[]> | null>(null);
   const [pendingRes, setPendingRes] = useState<Loaded<Device[]> | null>(null);
   const [nodesRes, setNodesRes] = useState<Loaded<Node[]> | null>(null);
   // ⚠ NULL means "not entitled or not loaded", and that is deliberate: the open edition's 403 is a
@@ -157,11 +147,6 @@ export default function Dashboard() {
           }),
         ).then((r) => !cancelled && setSitesRes(r as Loaded<Site[]>));
         void loadOne(() =>
-          api.GET("/api/v1/organizations/{orgId}/members", {
-            params: { path: { orgId: org.id } },
-          }),
-        ).then((r) => !cancelled && setRosterRes(r as Loaded<Member[]>));
-        void loadOne(() =>
           api.GET("/api/v1/organizations/{orgId}/nodes", {
             params: { path: { orgId: org.id } },
           }),
@@ -223,11 +208,6 @@ export default function Dashboard() {
   // browser dashboard reacting to a tunnel it cannot see.
 
 
-  // Empty until the roster arrives (or if it failed). The third argument tells resolveActor that
-  // the roster is NOT KNOWN, so a human actor reads as an unnamed member instead of being asserted
-  // to be a FORMER one — a false name is worse than no name.
-  const roster: Member[] = rosterRes?.ok ? rosterRes.data : [];
-
   return (
     // ⛔ THE PAGE ROOT CARRIES THE RHYTHM. This was a bare `<div>`, and every section inside it stacked with
     // ZERO spacing — the stat row touched Get started, which touched the panel row.
@@ -287,41 +267,6 @@ export default function Dashboard() {
             // forever — and `null` was the "still loading" signal. The panel hung on "Loading…" permanently,
             // waiting for a request that was deliberately never made.
             //
-            // A DELIBERATE NON-FETCH AND AN IN-FLIGHT FETCH ARE THE SAME `null`, and that ambiguity was
-            // created by the edition gate two hours after the gate was added. The fix is to ask each source
-            // whether it is EXPECTED, not merely whether it has answered.
-            const sources = enterprise
-              ? ([nodesRes, pendingRes] as const)
-              : ([nodesRes] as const);
-            const attention: Array<{
-              key: string;
-              text: string;
-              to: string;
-            }> | null = sources.some((r) => r === null)
-              ? null
-              : [
-                  ...(nodesRes?.ok
-                    ? nodesRes.data
-                        // ⛔ RE-SOURCED THROUGH THE VERDICT (S14.21). A raw `n.policy_degraded` read
-                        // bypasses the function that owns the rule, so a REVOKED gateway could be listed
-                        // as needing attention — a decommissioned machine asking for repair.
-                        .filter((n) => policyHealthBadge(n) !== null)
-                        .map((n) => ({
-                          key: `gw-${n.id}`,
-                          text: `${n.name}: ${policyHealthBadge(n)?.label ?? "degraded"}`,
-                          to: "/sites",
-                        }))
-                    : []),
-                  ...(enterprise && pendingRes?.ok && pendingRes.data.length > 0
-                    ? [
-                        {
-                          key: "pending-devices",
-                          text: `${pendingRes.data.length} device${pendingRes.data.length === 1 ? "" : "s"} awaiting approval`,
-                          to: "/devices",
-                        },
-                      ]
-                    : []),
-                ];
 
             // Sub-lines are QUALIFICATIONS, and each is `null` when there is nothing honest to say. A sub-line
             // is never filler: an unqualified number is a smaller claim than a wrongly-qualified one.
@@ -601,63 +546,6 @@ export default function Dashboard() {
                                   </span>
                                 )}
                                 <Badge tone={g.tone}>{g.label}</Badge>
-                              </span>
-                            </span>
-                          </ListItem>
-                        ))}
-                      </List>
-                    )}
-                  </Panel>
-
-                  <Panel title="Recent Activity">
-                    {data.recent_activity.length === 0 ? (
-                      <EmptyState>No activity yet.</EmptyState>
-                    ) : (
-                      <List label="Recent activity">
-                        {data.recent_activity.slice(0, 6).map((a, i) => (
-                          <ListItem key={i}>
-                            <span className="flex items-baseline justify-between gap-2">
-                              <span className="min-w-0 truncate">
-                                <span className="font-mono text-mono text-ink-primary">
-                                  {a.action}
-                                </span>
-                                {/* ⛔ THE FEED SHOWED *WHAT* HAPPENED AND NEVER *WHO*. The payload
-                                    carried `actor_id` all along and this card dropped it — and it did
-                                    not carry `actor_system` at all until S14.16 added it, so a
-                                    machine-initiated event was indistinguishable from an unattributed
-                                    one. Same resolver as the Audit Log, so the two screens cannot
-                                    drift: a named subsystem reads by NAME, an unrecorded actor reads
-                                    as a gap and is styled as a warning rather than as metadata. */}
-                                {(() => {
-                                  const who = resolveActor(a, roster, rosterRes?.ok === true);
-                                  return (
-                                    <span
-                                      data-actor-kind={who.kind}
-                                      className={
-                                        "ml-2 text-micro " +
-                                        (who.gap
-                                          ? "text-warn"
-                                          : who.kind === "system"
-                                            ? "font-mono text-ink-emphasis"
-                                            : "text-ink-tertiary")
-                                      }
-                                    >
-                                      {who.label}
-                                    </span>
-                                  );
-                                })()}
-                              </span>
-                              {/* `data-volatile` marks content DERIVED FROM WALL-CLOCK TIME, so the visual
-                                  suite can mask it. Freezing the browser clock is not enough: the seed writes
-                                  these rows at SEED time, which differs every CI run, so "2m ago" becomes
-                                  "5m ago" and the snapshot diffs by a few hundred pixels forever.
-                                  The value itself is unit-tested (`relativeAge`); the snapshot's job is the
-                                  LAYOUT around it. */}
-                              <span
-                                data-volatile
-                                className="shrink-0 text-micro text-ink-tertiary"
-                              >
-                                {relativeAge(a.created_at)}
                               </span>
                             </span>
                           </ListItem>
@@ -987,58 +875,6 @@ export default function Dashboard() {
                     )}
                   </Panel>
 
-                  <Panel title="Needs Attention">
-                    {attention === null ? (
-                      <Loading />
-                    ) : attention.length === 0 ? (
-                      <EmptyState>Nothing needs attention.</EmptyState>
-                    ) : (
-                      <List label="Needs attention">
-                        {attention.map((a) => (
-                          <ListItem key={a.key}>
-                            <span className="flex items-center justify-between gap-2">
-                              <span className="text-cell text-ink-body">
-                                {a.text}
-                              </span>
-                              <Link
-                                to={a.to}
-                                className="shrink-0 text-mono text-ink-emphasis hover:text-ink-heading"
-                              >
-                                Review
-                              </Link>
-                            </span>
-                          </ListItem>
-                        ))}
-                      </List>
-                    )}
-                    <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
-                      Server refusals are shown verbatim. No client-side
-                      re-validation.
-                    </p>
-                  </Panel>
-
-                  <Panel title="System Health">
-                    <List label="System health">
-                      <ListItem>
-                        <span className="flex items-center justify-between gap-2">
-                          <span className="text-cell text-ink-body">
-                            Control Plane
-                          </span>
-                          <HealthStatus />
-                        </span>
-                      </ListItem>
-                    </List>
-                    {/* ⛔ ONE ROW, NOT FIVE. The design lists Control Plane · Database · WireGuard Service ·
-                        IdP Sync · Access-log retention. `/healthz` says of itself: "Reports process liveness.
-                        NO EXTERNAL DEPENDENCIES ARE CHECKED." Rendering "Database ● Healthy" from it would
-                        claim a check that never ran — a green light for a thing nobody looked at, which is
-                        the render-floor violation in its most dangerous form. IdP Sync and Access-log
-                        retention are enterprise-only and absent on this edition. */}
-                    <p className="mt-2 text-explainer leading-[1.55] text-ink-tertiary">
-                      Liveness only. The control plane does not probe its
-                      dependencies, so nothing else is claimed here.
-                    </p>
-                  </Panel>
                 </div>
               </div>
             );
