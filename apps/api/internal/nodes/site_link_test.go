@@ -226,9 +226,9 @@ func TestSiteLinkGraphHubSpokeAndFullSweep(t *testing.T) {
 	ex(`INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'A'),($3,$2,'B')`, siteA, org, siteB)
 	// Hub = has a public endpoint; spoke = none. Both have WG keys + site bindings.
 	ex(`INSERT INTO nodes (id,org_id,name,cert_serial,agent_version,wg_public_key,endpoint,site_id)
-	    VALUES ($1,$2,'hub','s1','0.1.0','KHUB','hub.example:51820',$3)`, nodeHub, org, siteA)
+	    VALUES ($1,$2,'hub','s1','0.1.0','GWOmhHpqg/vBW5HtkAIOs3Vnur+qGKxCwx3QXbvzNZ4=','hub.example:51820',$3)`, nodeHub, org, siteA)
 	ex(`INSERT INTO nodes (id,org_id,name,cert_serial,agent_version,wg_public_key,endpoint,site_id)
-	    VALUES ($1,$2,'spoke','s2','0.1.0','KSPOKE','',$3)`, nodeSpoke, org, siteB)
+	    VALUES ($1,$2,'spoke','s2','0.1.0','M7WMHm1BCV1HuqZYhlw5QoBM6aLrjlgUhFYu9K6xInc=','',$3)`, nodeSpoke, org, siteB)
 	ex(`INSERT INTO site_subnets (site_id,cidr,status) VALUES ($1,'10.1.0.0/24','approved'),($2,'10.2.0.0/24','approved')`, siteA, siteB)
 
 	hubNode := sqlc.Node{ID: nodeHub, OrgID: org, SiteID: pgtype.UUID{Bytes: siteA, Valid: true}}
@@ -244,7 +244,7 @@ func TestSiteLinkGraphHubSpokeAndFullSweep(t *testing.T) {
 
 	// Hub: peers with the spoke (AllowedIPs = the spoke's subnet); routes to the spoke subnet.
 	hp, hr := graph(hubNode)
-	if len(hp) != 1 || hp[0].PublicKey != "KSPOKE" || !sliceHas(hp[0].AllowedIPs, "10.2.0.0/24") {
+	if len(hp) != 1 || hp[0].PublicKey != "M7WMHm1BCV1HuqZYhlw5QoBM6aLrjlgUhFYu9K6xInc=" || !sliceHas(hp[0].AllowedIPs, "10.2.0.0/24") {
 		t.Fatalf("hub must peer with the spoke (AllowedIPs = its subnet), got %+v", hp)
 	}
 	if hp[0].PersistentKeepalive != siteLinkKeepaliveSecs { // S8.3 CK: every site-link peer carries the keepalive
@@ -256,7 +256,7 @@ func TestSiteLinkGraphHubSpokeAndFullSweep(t *testing.T) {
 
 	// Spoke: peers ONLY with the hub (endpoint set, AllowedIPs = all remote); routes to the hub subnet.
 	sp, sr := graph(spokeNode)
-	if len(sp) != 1 || sp[0].PublicKey != "KHUB" || sp[0].Endpoint != "hub.example:51820" || !sliceHas(sp[0].AllowedIPs, "10.1.0.0/24") {
+	if len(sp) != 1 || sp[0].PublicKey != "GWOmhHpqg/vBW5HtkAIOs3Vnur+qGKxCwx3QXbvzNZ4=" || sp[0].Endpoint != "hub.example:51820" || !sliceHas(sp[0].AllowedIPs, "10.1.0.0/24") {
 		t.Fatalf("spoke must peer with the hub (endpoint + remote AllowedIPs), got %+v", sp)
 	}
 	if len(sr) != 1 || sr[0].DstCIDR != "10.1.0.0/24" {

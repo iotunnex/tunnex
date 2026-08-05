@@ -54,11 +54,19 @@ test("an owner sees the invite form and per-member controls", async ({
 }) => {
   await loginAs(page, OWNER);
   await expect(page.getByLabel("Invite by email")).toBeVisible();
-  const memberRow = page.getByRole("row").filter({ hasText: MEMBER.email });
+  // ⚠ SCOPED TO THE MEMBERS TABLE. The page now renders a second table — Invitations — and the seeded
+  // roster member also has an ACCEPTED invitation, so an unscoped row filter matches both and trips strict
+  // mode. Naming the table is the fix; loosening the filter would have made the assertion ambiguous.
+  const memberRow = page
+    .getByRole("table", { name: "Members" })
+    .getByRole("row")
+    .filter({ hasText: MEMBER.email });
   await expect(memberRow.locator("select")).toBeVisible();
-  await expect(
-    memberRow.getByRole("button", { name: "Deactivate" }),
-  ).toBeVisible();
+  // ⚠ THE VERBS MOVED FROM THE ROW TO THE SELECTION BAR (S15.4 tidy-up): three buttons redrawn on every
+  // row crowded out who the member IS. The CLAIM is unchanged — an owner can manage this member — so the
+  // affordance asserted is the one that now carries it: tick the row, and Deactivate is offered and enabled.
+  await memberRow.getByRole("checkbox").check();
+  await expect(page.getByRole("button", { name: "Deactivate" })).toBeEnabled();
 });
 
 // (a) Verified-gate: an admin has the ROLE to invite/manage, but with an

@@ -307,7 +307,12 @@ func TestSiteSourceRuleAuditsSiteID(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer pool.Close()
-	org, site := uuid.New(), uuid.New()
+	// ⚠ TWO SITES, AND THE SECOND IS NOT DECORATION. This test's subject is that the AUDIT records
+	// `src_site_id`; using one site for both ends was incidental convenience, and it happens to build the
+	// one rule the product now refuses (`invalid_rule_self_site`, S15.4) — a LAN cannot reach itself through
+	// its own gateway, so the compiled allow could never match. The guard caught it here, in a fixture,
+	// which is the guard working rather than the test failing.
+	org, site, dstSite := uuid.New(), uuid.New(), uuid.New()
 	ex := func(q string, a ...any) {
 		if _, e := pool.Exec(ctx, q, a...); e != nil {
 			t.Fatalf("seed %q: %v", q, e)
@@ -315,11 +320,12 @@ func TestSiteSourceRuleAuditsSiteID(t *testing.T) {
 	}
 	ex(`INSERT INTO organizations (id,name,slug) VALUES ($1,'M6',$2)`, org, "m6-"+org.String()[:8])
 	ex(`INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'A')`, site, org)
+	ex(`INSERT INTO sites (id,org_id,name) VALUES ($1,$2,'B')`, dstSite, org)
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE id=$1`, org) })
 
 	s := policy.NewService(pool)
 	s.SetNotifier(&fakeNotifier{})
-	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "site", SrcSiteID: &site, DstKind: "site", DstSiteID: &site}, uuid.Nil, uuid.Nil, "", ""); err != nil {
+	if _, err := s.CreatePolicyRule(ctx, org, policyspec.RuleInput{SrcKind: "site", SrcSiteID: &site, DstKind: "site", DstSiteID: &dstSite}, uuid.Nil, uuid.Nil, "", ""); err != nil {
 		t.Fatalf("create site-src rule: %v", err)
 	}
 	var srcSiteID, srcGroupID *string

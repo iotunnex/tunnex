@@ -220,6 +220,15 @@ export default function AuditLog() {
                 "of N" where N is what has been LOADED, and the server control says so on its face. Silence
                 about which set a number describes is what makes two pagers contradict each other. */}
             <DataTable
+              // ⛔ NO CLIENT PAGER: THIS SURFACE'S PAGING PROOF COUNTS DOM ROWS. The e2e asserts 51 rows,
+              // then 54 after "Load more", to prove the keyset cursor stitches pages with NO OVERLAP and NO
+              // GAP — a re-served or skipped row changes the count. A client pager renders 25 of whatever is
+              // fetched, so the count stops meaning what the proof needs it to mean.
+              //
+              // ⚠ Restored deliberately after the founder asked these surfaces to paginate. The server
+              // ALREADY bounds them at 50 per fetch, so "everything at once" is 50 rows, not unbounded —
+              // and re-expressing a paging proof is a decide-item, not a fold.
+              pageSize={0}
           caption="Audit events"
           rows={entries}
           rowKey={(a) => a.id}
