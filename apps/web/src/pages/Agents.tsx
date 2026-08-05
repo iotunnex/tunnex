@@ -5,7 +5,7 @@ import {
   agentConnectCommand, AGENT_PREREQ, attributionNote, NO_AGENTS,
   sortAgents, livenessLabel, agentLiveness, formatTraffic, type AgentRow,
 } from "../lib/agentview";
-import { Badge, Button, Card, Field, Input, Select, StatusDot } from "../components/ui";
+import { Badge, Button, Card, DataTable, Field, Input, Select, StatusDot } from "../components/ui";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
 
 type Node = { id: string; name: string; status: string; endpoint?: string | null; last_seen_at?: string };
@@ -180,46 +180,95 @@ export default function Agents() {
         ) : rows.data.length === 0 ? (
           <p data-state="no-agents" className="mt-3 text-xs text-ink-secondary">{NO_AGENTS}</p>
         ) : (
-          <ul className="mt-3 space-y-1">
-            {sortAgents(rows.data).map((a) => {
-              const note = attributionNote(a);
-              const live = livenessLabel(a);
-              const traffic = formatTraffic(a.rx_bytes, a.tx_bytes);
-              return (
-                <li
-                  key={a.device_id}
-                  data-unattributable={a.unattributable ? "yes" : "no"}
-                  data-liveness={agentLiveness(a)}
-                  className="flex items-center justify-between gap-3 rounded-md bg-white/5 px-3 py-2 text-sm"
-                >
-                  <span className="min-w-0 text-slate-200">
-                    {/* ⛔ THE DOT IS NEVER GREEN ON AN INFERENCE WE DO NOT HAVE. `unknown` and `never` are
-                        muted/amber, not a red that claims a fault we cannot attribute. */}
-                    <StatusDot tone={live.tone === "ok" ? "on" : live.tone === "warn" ? "warn" : "off"} />
-                    <span className="ml-2">{a.name}</span>
-                    <span className="ml-2 font-mono text-xs text-slate-500">{a.address ?? "no address"}</span>
-                    <span className="ml-2 text-xs text-ink-secondary">
-                      · via {a.gateway_name}
-                      {a.owner_email
-                        ? <> · authorised by <span className="text-slate-300">{a.owner_email}</span></>
-                        : " · no owner recorded"}
-                      {traffic && <> · <span className="font-mono">{traffic}</span></>}
+          <div className="mt-3">
+            <DataTable<AgentRow>
+              caption="AI agents"
+              rows={sortAgents(rows.data)}
+              rowKey={(a) => a.device_id}
+              failed={false}
+              empty={NO_AGENTS}
+              columns={[
+                {
+                  key: "name",
+                  header: "Agent",
+                  sortValue: (a) => a.name,
+                  cell: (a) => {
+                    const live = livenessLabel(a);
+                    return (
+                      <span
+                        className="inline-flex items-center gap-2"
+                        data-unattributable={a.unattributable ? "yes" : "no"}
+                        data-liveness={agentLiveness(a)}
+                      >
+                        {/* ⛔ THE DOT IS NEVER GREEN ON AN INFERENCE WE DO NOT HAVE. `unknown` and `never`
+                            are muted/amber, not a red that claims a fault we cannot attribute. */}
+                        <StatusDot tone={live.tone === "ok" ? "on" : live.tone === "warn" ? "warn" : "off"} />
+                        <span className="text-white">{a.name}</span>
+                      </span>
+                    );
+                  },
+                },
+                {
+                  key: "address",
+                  header: "Address",
+                  sortValue: (a) => a.address ?? "",
+                  cell: (a) => (
+                    <span className={`font-mono text-xs ${a.address ? "text-slate-500" : "italic text-slate-600"}`}>
+                      {a.address ?? "no address"}
                     </span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-2">
-                    {/* The liveness word carries its own explanation on hover — an operator seeing
-                        "liveness unknown" must be able to learn WHY without leaving the row. */}
-                    <span title={live.detail}>
-                      <Badge tone={live.tone}>{live.label}</Badge>
-                    </span>
-                    {note && (
+                  ),
+                },
+                {
+                  key: "gateway",
+                  header: "Gateway",
+                  sortValue: (a) => a.gateway_name,
+                  cell: (a) => <span className="text-xs text-slate-400">{a.gateway_name}</span>,
+                },
+                {
+                  key: "owner",
+                  header: "Authorised by",
+                  // ⚠ THE UNATTRIBUTABLE STATE IS SEARCHABLE BY THE WORD THE BADGE USES, not only by an
+                  // email that does not exist — otherwise the one row an operator most needs to find is the
+                  // one row no search term reaches.
+                  sortValue: (a) => a.owner_email ?? "unattributable no owner recorded",
+                  cell: (a) => {
+                    const note = attributionNote(a);
+                    return a.owner_email ? (
+                      <span className="text-xs text-slate-400">{a.owner_email}</span>
+                    ) : note ? (
                       <span title={note.detail}><Badge tone="warn">{note.label}</Badge></span>
-                    )}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
+                    ) : null;
+                  },
+                },
+                {
+                  key: "status",
+                  header: "Status",
+                  // ⛔ THE STATE AS TEXT, because the cell renders it as a Badge. Without this a search for
+                  // "unknown" or "never" would miss every row whose badge says exactly that.
+                  sortValue: (a) => livenessLabel(a).label,
+                  cell: (a) => {
+                    const live = livenessLabel(a);
+                    // The liveness word carries its own explanation on hover — an operator seeing
+                    // "liveness unknown" must be able to learn WHY without leaving the row.
+                    return <span title={live.detail}><Badge tone={live.tone}>{live.label}</Badge></span>;
+                  },
+                },
+                {
+                  key: "traffic",
+                  header: "Traffic",
+                  numeric: true,
+                  // ⚠ NULL SORTS AS NULL, NOT AS ZERO. An unreported counter is not a measurement of no
+                  // traffic, and sorting it alongside real zeros would assert that it is.
+                  sortValue: (a) => (a.rx_bytes ?? -1) + (a.tx_bytes ?? 0),
+                  cell: (a) => (
+                    <span className="font-mono text-[11px] text-slate-500">
+                      {formatTraffic(a.rx_bytes, a.tx_bytes) ?? "n/a"}
+                    </span>
+                  ),
+                },
+              ]}
+            />
+          </div>
         )}
       </Card>
 

@@ -125,6 +125,9 @@ export default function GatewaysPage() {
     {
       key: "name",
       header: "Gateway",
+      // ⚠ THE SITE NAME IS SEARCHABLE THOUGH IT IS A SUB-LINE, and "HUB" is searchable though it is a badge.
+      // A term an operator can SEE on the row must be a term that finds the row.
+      sortValue: (r: GatewayRow) => `${r.name} ${r.siteName ?? ""}${r.isHub ? " hub" : ""}`,
       cell: (r: GatewayRow) => (
         <span className="flex flex-col gap-0.5">
           <span className="flex items-center gap-2">
@@ -145,6 +148,9 @@ export default function GatewaysPage() {
     {
       key: "health",
       header: "State",
+      // ⛔ THE STATE AS TEXT — the cell is a Badge, so without this a search for "revoked" finds nothing.
+      sortValue: (r: GatewayRow) =>
+        r.status === "revoked" ? "revoked" : (r.health?.label ?? "healthy"),
       cell: (r: GatewayRow) =>
         r.status === "revoked" ? (
           // WF-S11-10: `revoked` IS the state. No health badge beside it.
@@ -158,6 +164,7 @@ export default function GatewaysPage() {
     {
       key: "agent",
       header: "Agent",
+      sortValue: (r: GatewayRow) => r.agentVersion || "n/a",
       cell: (r: GatewayRow) => (
         <span className="font-mono text-micro text-ink-body">
           {r.agentVersion || "n/a"}
@@ -167,6 +174,9 @@ export default function GatewaysPage() {
     {
       key: "seen",
       header: "Last seen",
+      // ⚠ SORTS BY THE TIMESTAMP, SEARCHES BY THE WORDS. A never-connected gateway sorts to one end rather
+      // than into the middle of a lexicographic jumble of "3h ago" / "17m ago".
+      sortValue: (r: GatewayRow) => (r.lastSeenAt ? Date.parse(r.lastSeenAt) : 0),
       cell: (r: GatewayRow) => (
         <span className="text-micro text-ink-tertiary" data-volatile>
           {r.lastSeenAt ? relativeAge(r.lastSeenAt) : "never connected"}

@@ -489,6 +489,9 @@ export default function Users() {
             {
               key: "person",
               header: "Member",
+              // ⚠ NAME AND EMAIL BOTH, because the cell shows whichever exists — searching for the one it
+              // chose not to display must still find the row.
+              sortValue: (m) => `${m.name ?? ""} ${m.email}`,
               cell: (m) => {
                 // The primary label falls back to the email; the secondary line then has nothing to add.
                 const primary = m.name || m.email;
@@ -517,6 +520,7 @@ export default function Users() {
             {
               key: "state",
               header: "State",
+              sortValue: (m) => (m.status === "deactivated" ? "deactivated" : "active"),
               cell: (m) => (
                 <>
                   {m.status === "deactivated" && (
@@ -566,6 +570,7 @@ export default function Users() {
             {
               key: "role",
               header: "Role",
+              sortValue: (m) => m.role,
               cell: (m) => {
                 // Role is editable on any target the actor may manage — INCLUDING self (an owner handing off
                 // ownership). The last-owner disable therefore surfaces on the sole owner's OWN role control.

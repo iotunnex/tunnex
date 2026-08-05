@@ -216,6 +216,7 @@ export default function AuditLog() {
             {
               key: "action",
               header: "Action",
+              sortValue: (a) => a.action,
               cell: (a) => (
                 <span className="font-mono text-xs text-slate-300">
                   {a.action}
@@ -268,6 +269,9 @@ export default function AuditLog() {
               key: "age",
               header: "When",
               numeric: true,
+              // ⚠ SORTS BY THE INSTANT, not by the rendered phrase — "3h ago" and "17m ago" order wrongly
+              // as text, and an audit log ordered wrongly by time is worse than one not ordered at all.
+              sortValue: (a) => Date.parse(a.created_at),
               cell: (a) => (
                 <span className="text-xs text-slate-500">
                   {relativeAge(a.created_at)}

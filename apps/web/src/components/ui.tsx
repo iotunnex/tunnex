@@ -1,4 +1,4 @@
-import { cloneElement, isValidElement, useId } from "react";
+import { cloneElement, isValidElement, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
   ButtonHTMLAttributes,
@@ -375,6 +375,18 @@ export interface Column<T> {
   cell: (row: T) => ReactNode;
   /** Numeric/right-aligned columns. Presentation only — never a reason to drop the header. */
   numeric?: boolean;
+  /**
+   * The row's value for this column AS TEXT — what sorting orders by and what the filter matches.
+   *
+   * ⛔ SEPARATE FROM `cell` ON PURPOSE, AND THE REASON IS THE ONE THAT MATTERS: `cell` returns a ReactNode.
+   * Deriving a search key from rendered JSX means reaching into element trees, and anything a cell shows as
+   * an icon, a badge or a coloured dot contributes NOTHING to it. A row would then be invisible to a search
+   * for the very state its badge is announcing.
+   *
+   * ⚠ It may also carry text the cell does NOT display — an owner's email, an id — so a search finds rows by
+   * facts the operator knows even when the column is showing something shorter.
+   */
+  sortValue?: (row: T) => string | number;
 }
 
 /**
@@ -398,6 +410,8 @@ export function DataTable<T>({
   rowKey,
   empty,
   failed,
+  filterable,
+  defaultSortKey,
 }: {
   caption: string;
   columns: Array<Column<T>>;
@@ -426,41 +440,155 @@ export function DataTable<T>({
    * only the page knows what to retry.
    */
   failed: boolean;
+  /**
+   * Show the filter box. Defaults ON whenever any column carries `sortValue` — a table you cannot search is
+   * the reason people reach for the browser's own find bar, which searches only what is on screen and
+   * silently misses everything the page has not rendered.
+   */
+  filterable?: boolean;
+  /** Column key to sort by initially. Omit to keep the caller's order, which is often deliberate. */
+  defaultSortKey?: string;
 }) {
+  const searchable = columns.some((c) => c.sortValue);
+  const showFilter = filterable ?? searchable;
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(
+    defaultSortKey ? { key: defaultSortKey, dir: 1 } : null,
+  );
+
+  const visible = useMemo(() => {
+    let out = rows;
+    const q = query.trim().toLowerCase();
+    if (q) {
+      out = out.filter((r) =>
+        columns.some((c) => c.sortValue && String(c.sortValue(r)).toLowerCase().includes(q)),
+      );
+    }
+    if (sort) {
+      const col = columns.find((c) => c.key === sort.key);
+      if (col?.sortValue) {
+        // Copy before sorting: `rows` belongs to the caller and mutating it would reorder their state.
+        out = [...out].sort((a, b) => {
+          const x = col.sortValue!(a);
+          const y = col.sortValue!(b);
+          if (typeof x === "number" && typeof y === "number") return (x - y) * sort.dir;
+          return String(x).localeCompare(String(y)) * sort.dir;
+        });
+      }
+    }
+    return out;
+  }, [rows, columns, query, sort]);
+
   if (failed) return null;
+
+  // ⛔ THREE EMPTINESSES, NOT ONE, AND THEY ARE DIFFERENT CLAIMS. `failed` (handled above) is "we never found
+  // out". `rows.length === 0` is "there are none". A filter matching nothing is "there are some, none match
+  // what you typed" — and rendering that third case as the second tells an operator a resource does not
+  // exist when it is sitting one keystroke away.
+  //
+  // > **A FILTER IS A NEW WAY TO MANUFACTURE A REASSURING EMPTY**, on a screen whose whole `failed` prop
+  // > exists because of that class. The row count stays visible so the difference is never inferred.
   if (rows.length === 0) return <EmptyState>{empty}</EmptyState>;
+
+  const toggle = (key: string) =>
+    setSort((s: { key: string; dir: 1 | -1 } | null) => (s && s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">
-        <caption className="sr-only">{caption}</caption>
-        <thead>
-          <tr className="text-xs uppercase tracking-wide text-slate-500">
-            {columns.map((c) => (
-              <th
-                key={c.key}
-                scope="col"
-                className={`py-2 pr-4 font-medium ${c.numeric ? "text-right" : ""}`}
-              >
-                {c.header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-white/5">
-          {rows.map((r) => (
-            <tr key={rowKey(r)}>
-              {columns.map((c) => (
-                <td
-                  key={c.key}
-                  className={`py-3 pr-4 align-top ${c.numeric ? "text-right" : ""}`}
-                >
-                  {c.cell(r)}
-                </td>
-              ))}
+    <div>
+      {showFilter && (
+        <div className="mb-2 flex items-center gap-3">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={`Filter ${caption.toLowerCase()}…`}
+            aria-label={`Filter ${caption}`}
+            className="w-56 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 placeholder:text-slate-600 focus:border-white/20 focus:outline-none"
+          />
+          {/* ⚠ THE COUNT IS THE HONEST PART. "3 of 47" makes a narrowed view legible as narrowed; without it
+              a filtered table is indistinguishable from a short one. */}
+          <span className="text-[11px] tabular-nums text-ink-secondary">
+            {query.trim() ? `${visible.length} of ${rows.length}` : `${rows.length}`}
+          </span>
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <caption className="sr-only">{caption}</caption>
+          <thead>
+            {/* Sticky: on a long roster the header is the only thing telling you what a column means, and
+                scrolling past it turns every cell into an unlabelled string. */}
+            <tr className="sticky top-0 z-10 bg-surface-1 text-[11px] uppercase tracking-wide text-slate-500">
+              {columns.map((c) => {
+                const active = sort?.key === c.key;
+                return (
+                  <th
+                    key={c.key}
+                    scope="col"
+                    aria-sort={active ? (sort!.dir === 1 ? "ascending" : "descending") : undefined}
+                    className={`border-b border-white/10 py-1.5 pr-4 font-medium ${c.numeric ? "text-right" : ""}`}
+                  >
+                    {c.sortValue ? (
+                      <button
+                        type="button"
+                        onClick={() => toggle(c.key)}
+                        className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-slate-300"
+                      >
+                        {c.header}
+                        {/* ⛔ AN SVG, NOT A CHARACTER, AND THAT IS NOT A STYLE CHOICE. A text glyph lands in
+                            the header's textContent, so `<th>` text becomes "Member↕" and every test and
+                            query that names a column by its header stops matching. `aria-hidden` does not
+                            help: it removes the glyph from the accessibility tree, not from the text. An
+                            icon with no text node leaves the column's NAME exactly what it says it is. */}
+                        <svg
+                          aria-hidden
+                          viewBox="0 0 8 12"
+                          className={`h-2.5 w-2 shrink-0 ${active ? "text-slate-300" : "text-slate-700"}`}
+                          fill="currentColor"
+                        >
+                          {(!active || sort!.dir === 1) && <path d="M4 0 L8 5 L0 5 Z" />}
+                          {(!active || sort!.dir === -1) && <path d="M4 12 L0 7 L8 7 Z" />}
+                        </svg>
+                      </button>
+                    ) : (
+                      c.header
+                    )}
+                  </th>
+                );
+              })}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {visible.map((r: T, i: number) => (
+              <tr
+                key={rowKey(r)}
+                // Zebra + hover: scanning across a wide row is where the eye loses its line, and this is
+                // presentation only — never the carrier of a state the row needs to announce in words.
+                className={`border-b border-white/5 hover:bg-white/[0.06] ${i % 2 ? "bg-white/[0.02]" : ""}`}
+              >
+                {columns.map((c) => (
+                  <td
+                    key={c.key}
+                    className={`py-1.5 pr-4 align-middle ${c.numeric ? "text-right tabular-nums" : ""}`}
+                  >
+                    {c.cell(r)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {/* ⛔ THE THIRD EMPTINESS, SAID IN WORDS. Never the `empty` copy — that one claims none exist. */}
+      {visible.length === 0 && (
+        <p className="py-6 text-center text-xs text-ink-secondary">
+          No {caption.toLowerCase()} match <span className="font-mono text-slate-300">{query}</span>.{" "}
+          <button type="button" onClick={() => setQuery("")} className="underline hover:text-slate-300">
+            Clear filter
+          </button>{" "}
+          to see all {rows.length}.
+        </p>
+      )}
     </div>
   );
 }

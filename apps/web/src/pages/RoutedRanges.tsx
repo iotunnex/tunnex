@@ -228,6 +228,7 @@ export default function RoutedRangesPage() {
     {
       key: "range",
       header: "Range",
+      sortValue: (r: RangeRow) => r.range,
       cell: (r: RangeRow) => (
         // Monospace and unabbreviated. This is the string a device actually receives in its AllowedIPs; an
         // admin comparing it against a router config needs it character-for-character.
@@ -237,6 +238,7 @@ export default function RoutedRangesPage() {
     {
       key: "site",
       header: "Site",
+      sortValue: (r: RangeRow) => attributionLabel(r.attribution),
       cell: (r: RangeRow) => (
         <span className={`text-cell ${attributionClass(r.attribution)}`}>
           {attributionLabel(r.attribution)}
