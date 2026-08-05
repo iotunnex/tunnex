@@ -478,26 +478,36 @@ export default function Dashboard() {
                   </Panel>
                 )}
 
-                {/* ⛔ THE BENTO: ONE grid, and EVERY ROW SUMS TO 12. A ragged row is the tell that a panel
-                    was placed rather than composed — the design has no row that does not fill.
+                {/* ⛔ MULTI-COLUMN FLOW, NOT A GRID — AND THE GRID'S OWN COMMENT IS WHY.
+                    It claimed "EVERY ROW SUMS TO 12 … Row 3: Needs Attention 8 · System Health 4". Measured:
+                    ALL ELEVEN panels carry `lg:col-span-4`. Nothing spans 8. The bento was documented, then
+                    flattened into a uniform 3-across grid, and the comment kept describing the design rather
+                    than the code — so `lg:grid-cols-12` bought a twelve-column system that only ever
+                    expressed thirds.
 
-                    Row 2: Peer Connection Status 4 · Gateway Health 4 · Recent Activity 4
-                    Row 3: Needs Attention 8 · System Health 4
+                    ⛔ AND A GRID ALIGNS ROWS, WHICH IS THE DEFECT THE FOUNDER REPORTED: every card in a row
+                    is as tall as the TALLEST card in that row. "AI Agents" is three lines and was rendering
+                    the height of a donut plus a four-row legend — a bordered box mostly full of nothing.
+                    Panel's own comment called the stretch deliberate ("keeps every panel in a row the same
+                    height"); that is the thing being reversed, on the founder's word, and deliberately.
 
-                    CUT from the design, each with its reason (docs/S14.4-commit-one.md):
-                      Site-Link Throughput — the spec forbids the field's use as a rate series
-                      Device Posture       — deferred to the Devices section, which owns the posture vocabulary
-                      Network map / HA Hub Set — no hub, generation, pin or handshake-age field exists on Site
-                      Alerts               — composed from sources this screen does not own; Access Events' job
-                      Fleet risk           — Tier-3, not built */}
-                {/* README panel spans on the 12-column base: rows 4+4+4, 4+4+4, 8+4. */}
-                {/* One column until there is room for twelve. A `col-span-4` panel on a 12-column grid at
-                    390px is ~100px wide, and a 120px donut inside it pushes the page sideways. */}
-                <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
-                  <Panel
-                    title="Peer Connection Status"
-                    className="lg:col-span-4"
-                  >
+                    Multi-column flow packs each card directly under the previous one in its column, so a
+                    height difference costs nothing. This is the same fix already accepted on Settings, where
+                    the identical grid produced the identical holes.
+
+                    ⚠ IT CHANGES THE READING ORDER to column-major: panels fill down column 1, then column 2.
+                    Called out because it is a real consequence, not a side effect to discover later.
+
+                    ⚠ AND EVERY CHILD NEEDS `break-inside-avoid`, or a card splits down the middle across a
+                    column boundary — the one hazard of this layout, and it looks like a rendering bug. The
+                    wrapper carries it so no panel has to remember, INCLUDING ones added later.
+
+                    Panels are conditional (AI Agents needs enterprise + a non-empty list; Kubernetes, HA Hub
+                    Set and others gate too), so hand-ordering rows by height could not have worked: which
+                    panels are present varies per org, and a row tuned for one tenant is ragged for the next.
+                    Packing has to be automatic for that reason alone. */}
+                <div className="columns-1 gap-3 lg:columns-3 [&>*]:mb-3 [&>*]:break-inside-avoid">
+                  <Panel title="Peer Connection Status">
                     {/* ⚠ RE-SOURCED TO DEVICES. This counted GATEWAYS — a different and smaller population
                         than the one the panel is named for. A chart can be perfectly honest about the wrong
                         denominator, and nothing in the render would look wrong. */}
@@ -526,7 +536,7 @@ export default function Dashboard() {
                       ⚠ Absent in the open edition: the endpoint answers 403 edition_required, which is a
                       SUCCESSFUL refusal, and agentsRes stays null rather than becoming an error. */}
                   {agentsRes?.ok && agentsRes.data.length > 0 && (
-                    <Panel title="AI Agents" className="lg:col-span-4">
+                    <Panel title="AI Agents">
                       {(() => {
                         const sum = agentSummary(agentsRes.data);
                         return (
@@ -549,7 +559,7 @@ export default function Dashboard() {
                     </Panel>
                   )}
 
-                  <Panel title="Gateway Health" className="lg:col-span-4">
+                  <Panel title="Gateway Health">
                     {nodesRes === null ? (
                       <Loading />
                     ) : !nodesRes.ok ? (
@@ -599,7 +609,7 @@ export default function Dashboard() {
                     )}
                   </Panel>
 
-                  <Panel title="Recent Activity" className="lg:col-span-4">
+                  <Panel title="Recent Activity">
                     {data.recent_activity.length === 0 ? (
                       <EmptyState>No activity yet.</EmptyState>
                     ) : (
@@ -664,7 +674,7 @@ export default function Dashboard() {
                       THREE STATES, NOT TWO. `null` = still loading · `{ok:false}` = we could not look ·
                       `[]` = there are genuinely none. A zero standing in for the middle case would claim an
                       org has no clusters on the strength of a failed request. */}
-                  <Panel title="Kubernetes" className="lg:col-span-4">
+                  <Panel title="Kubernetes">
                     {k8sClustersRes === null || k8sServicesRes === null ? (
                       <Loading />
                     ) : !k8sClustersRes.ok ? (
@@ -721,7 +731,7 @@ export default function Dashboard() {
                     )}
                   </Panel>
 
-                  <Panel title="Site-Link Traffic" className="lg:col-span-4">
+                  <Panel title="Site-Link Traffic">
                     {/* ⛔ THE PANEL IS CATEGORY ONE. THE WIREFRAME'S CHART IS CATEGORY TWO.
                         The counters exist; the TIME SERIES does not. `rx_bytes` is "a raw gauge since the
                         last handshake (display only, never summed as monotonic)" — it RESETS at every
@@ -809,7 +819,7 @@ export default function Dashboard() {
                     )}
                   </Panel>
 
-                  <Panel title="Device Posture" className="lg:col-span-4">
+                  <Panel title="Device Posture">
                     {devicesRes === null ? (
                       <Loading />
                     ) : !devicesRes.ok ? (
@@ -868,7 +878,7 @@ export default function Dashboard() {
                     )}
                   </Panel>
 
-                  <Panel title="HA Hub Set" className="lg:col-span-4">
+                  <Panel title="HA Hub Set">
                     {/* ⚠ THIS PANEL WAS CUT ON A WRONG MEASUREMENT. The audit checked the `Site` schema for
                         hub/generation/pin fields, found none, and declared the data absent — but the hub set
                         is its OWN endpoint and schema, and `hubsetview.ts` already projects it. An absence
@@ -936,7 +946,7 @@ export default function Dashboard() {
                     )}
                   </Panel>
 
-                  <Panel title="Network map" className="lg:col-span-4">
+                  <Panel title="Network map">
                     {/* ⚠ ALSO A RETRACTED CUT. Cut as "no SiteLink schema" — true, and beside the point:
                         `assembleTopology()` already projects sites + their gateways from data this screen
                         fetches. CATEGORY ONE, not category three: the capability exists and has no data yet,
@@ -977,7 +987,7 @@ export default function Dashboard() {
                     )}
                   </Panel>
 
-                  <Panel title="Needs Attention" className="lg:col-span-4">
+                  <Panel title="Needs Attention">
                     {attention === null ? (
                       <Loading />
                     ) : attention.length === 0 ? (
@@ -1007,7 +1017,7 @@ export default function Dashboard() {
                     </p>
                   </Panel>
 
-                  <Panel title="System Health" className="lg:col-span-4">
+                  <Panel title="System Health">
                     <List label="System health">
                       <ListItem>
                         <span className="flex items-center justify-between gap-2">
