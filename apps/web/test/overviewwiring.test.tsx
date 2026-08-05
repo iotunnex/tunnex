@@ -1,3 +1,6 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { stripJsComments } from "./support/source";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   render,
@@ -224,14 +227,33 @@ describe("the CUT panels are ABSENT, not hidden", () => {
     ).toBeNull();
   });
 
-  it("the honest liveness label is used — NEVER 'Online Peers'", async () => {
-    // A render-floor violation in a WORD. `online` is last-handshake recency, not a live session, and the
-    // wireframe's own caption says "never green-while-dead" beneath a label that claims exactly that.
-    show();
-    await waitFor(() =>
-      expect(screen.getByText("Seen in last 3 min")).toBeTruthy(),
-    );
-    expect(screen.queryByText(/online peers/i)).toBeNull();
+  it("⛔ THE FORBIDDEN LIVENESS LABEL APPEARS NOWHERE IN THE APP — the ruling outlived its card", () => {
+    // A render-floor violation in a WORD: `online` is last-handshake RECENCY, not a live session, and the
+    // wireframe's own caption says "never green-while-dead" under a label claiming exactly that. The
+    // founder ruled the qualification belongs IN THE LABEL, and this test guarded the one card that
+    // carried it — "Seen in last 3 min".
+    //
+    // ⛔ THAT CARD WAS REMOVED (replaced by AI Agents), WHICH LEFT THE GUARD WITH NO SUBJECT. Deleting it
+    // would have retired a founder ruling as a side effect of a layout change — the ruling was about how
+    // liveness may be NAMED, not about which card names it, and liveness still renders (Peer Connection
+    // Status, and the Devices surfaces).
+    //
+    // So it is re-pointed at the whole source tree instead of one card, which is STRICTER than what it
+    // replaced: the old version could only see a label on a screen the test happened to render.
+    const src = join(process.cwd(), "src");
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(e.name)) {
+          const body = stripJsComments(readFileSync(full, "utf8"));
+          if (/online\s+peers/i.test(body)) offenders.push(full);
+        }
+      }
+    };
+    walk(src);
+    expect(offenders).toEqual([]);
   });
 });
 
