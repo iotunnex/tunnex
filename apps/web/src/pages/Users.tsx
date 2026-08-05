@@ -395,11 +395,26 @@ export default function Users() {
                 // The primary label falls back to the email; the secondary line then has nothing to add.
                 const primary = m.name || m.email;
                 return (
-                <>
-                  <span className="text-sm text-white">{primary}</span>
-                  {m.user_id === myId && (
-                    <span className="ml-2 text-xs text-slate-500">(you)</span>
-                  )}
+                // ⛔ CAPPED AND TRUNCATED. One member with a 70-character address
+                // (oluwaseun.adebayo-contractor.external@a-very-long-subdomain…) stretched the Member
+                // column across half the table and pushed STATE, DEVICES and ROLE into a huddle at the far
+                // right — every other row then read as mostly empty space. A column sized by its worst row
+                // is a column sized by an outlier.
+                //
+                // ⛔ IT WRAPS, IT DOES NOT TRUNCATE — and that is a ruling, not a preference. A doubled
+                // string HIDES behind an ellipsis: the second copy clips out of view and reads as one copy,
+                // which is the exact defect this cell was fixed for and which its test still guards. So the
+                // column is capped and the address WRAPS onto a second line, where it stays fully readable
+                // and a duplicate would still be visible.
+                //
+                // ⚠ STACKED, NOT INLINE: name over email spends the width twice instead of end to end.
+                <span className="flex max-w-[24rem] flex-col">
+                  <span className="break-all text-sm text-white">
+                    {primary}
+                    {m.user_id === myId && (
+                      <span className="ml-2 text-xs text-slate-500">(you)</span>
+                    )}
+                  </span>
                   {/* ⛔ THE EMAIL IS THE SECONDARY LINE ONLY WHEN A NAME TOOK THE PRIMARY ONE. Unconditionally
                       it rendered the address TWICE for a nameless member — and that is not a corner case:
                       `users.name` is `NOT NULL DEFAULT ''` and `acceptInvitation.name` is OPTIONAL, so 144 of
@@ -408,11 +423,11 @@ export default function Users() {
                       LESS representative than the double. The inverse of S14.10, where the double was more
                       permissive than the substrate; the lesson is the same one from the other side. */}
                   {primary !== m.email && (
-                    <span className="ml-2 font-mono text-xs text-slate-500">
+                    <span className="break-all font-mono text-[11px] text-slate-500">
                       {m.email}
                     </span>
                   )}
-                </>
+                </span>
                 );
               },
             },
@@ -531,75 +546,113 @@ export default function Users() {
                 {outstandingCount(invites, new Date())} outstanding
               </span>
             </div>
-            {invites.length === 0 ? (
-              <p className="mt-2 text-xs text-slate-500">
-                No invitations have been created for this organization.
-              </p>
-            ) : (
-              <ul className="mt-3 space-y-1">
-                {orderInvitations(invites, new Date()).map((inv) => {
-                  const st = invitationState(inv, new Date());
-                  return (
-                    <li
-                      key={inv.id}
-                      data-testid={`invite-${inv.id}`}
-                      data-state={st}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white/5 px-3 py-1.5 text-sm"
-                    >
-                      <span className="flex flex-wrap items-center gap-2">
-                        <span className="text-slate-200">{inv.email}</span>
-                        <span
-                          className={
-                            "rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold " +
-                            (st === "pending"
-                              ? "border-accent-500/40 bg-accent-500/10 text-accent-400"
-                              : st === "expired"
-                                ? "border-warn/40 bg-warn/10 text-warn"
-                                : "border-slate-700 bg-slate-900 text-slate-500")
-                          }
-                        >
-                          {stateLabel(st)}
+            {/* ⛔ A TABLE, BECAUSE THE ROW WAS WRAPPING. Email + badge + role + inviter + two buttons on
+                  one flex line meant a long address pushed Resend/Revoke onto a second row for SOME
+                  invitations and not others — the controls sat in a different place on every row, which is
+                  the one thing a list of identical actions must not do.
+
+                  ⚠ EVERY STATE STILL RENDERS, including accepted and revoked. They are the audit trail of
+                  who was let in and who was withdrawn, and the "N outstanding" count above already keeps
+                  them from inflating the number that matters. */}
+              <div className="mt-3">
+                <DataTable<Invitation>
+                  caption="Invitations"
+                  rows={orderInvitations(invites, new Date())}
+                  rowKey={(inv) => inv.id}
+                  rowAttrs={(inv) => ({
+                    "data-testid": `invite-${inv.id}`,
+                    "data-state": invitationState(inv, new Date()),
+                  })}
+                  failed={false}
+                  pageSize={10}
+                  empty="No invitations have been created for this organization."
+                  // ⛔ CONTROLS APPEAR ONLY WHERE THE SERVER WOULD ACT. Revoke matches
+                  // `accepted_at IS NULL AND revoked_at IS NULL`, so on a terminal row it would change
+                  // nothing and report success — worse than absent. `unavailable` now says WHICH, where the
+                  // old design just omitted the button and left the operator to infer it.
+                  rowActions={[
+                    {
+                      key: "resend",
+                      // ⚠ THE IN-FLIGHT STATE SURVIVED THE MOVE. The per-row button read "Resending…" while
+                      // the request was open; a bar button that stays enabled and silent invites a second
+                      // click and a second email to the same person.
+                      label: inviteBusy?.endsWith("resend") ? "Resending…" : "Resend",
+                      arity: "single",
+                      unavailable: (inv) =>
+                        inviteBusy === inv.email + "resend"
+                          ? "Resending…"
+                          : canResend(invitationState(inv, new Date()))
+                            ? null
+                            : "Only a pending or expired invitation can be resent.",
+                      run: (is) => void inviteAction("resend", is[0].email),
+                    },
+                    {
+                      key: "revoke",
+                      label: inviteBusy?.endsWith("revoke") ? "Revoking…" : "Revoke",
+                      danger: true,
+                      arity: "single",
+                      unavailable: (inv) =>
+                        inviteBusy === inv.email + "revoke"
+                          ? "Revoking…"
+                          : canRevoke(invitationState(inv, new Date()))
+                            ? null
+                            : "This invitation is already accepted or revoked.",
+                      run: (is) => void inviteAction("revoke", is[0].email),
+                    },
+                  ]}
+                  columns={[
+                    {
+                      key: "email",
+                      header: "Invitee",
+                      sortValue: (inv) => inv.email,
+                      cell: (inv) => (
+                        <span className="block max-w-[22rem] truncate text-slate-200" title={inv.email}>
+                          {inv.email}
                         </span>
-                        <span className="text-xs text-slate-500">{inv.role}</span>
-                        {/* The inviter can be GONE — invited_by_user_id is ON DELETE SET NULL, and the
-                            LEFT JOIN keeps the row rather than hiding an outstanding invitation because
-                            its sender left. */}
-                        <span className="text-xs text-slate-600">
-                          invited by {inviterLabel(inv)}
-                        </span>
-                      </span>
-                      <span className="flex gap-2">
-                        {/* Controls appear ONLY where the server would act. Revoke matches
-                            `accepted_at IS NULL AND revoked_at IS NULL`, so on a terminal row it would
-                            change nothing and report success — worse than absent. */}
-                        {canResend(st) && (
-                          <Button
-                            variant="ghost"
-                            disabled={inviteBusy === inv.email + "resend"}
-                            onClick={() => void inviteAction("resend", inv.email)}
+                      ),
+                    },
+                    {
+                      key: "state",
+                      header: "State",
+                      sortValue: (inv) => stateLabel(invitationState(inv, new Date())),
+                      cell: (inv) => {
+                        const st = invitationState(inv, new Date());
+                        return (
+                          <span
+                            className={
+                              "rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold " +
+                              (st === "pending"
+                                ? "border-accent-500/40 bg-accent-500/10 text-accent-400"
+                                : st === "expired"
+                                  ? "border-warn/40 bg-warn/10 text-warn"
+                                  : "border-slate-700 bg-slate-900 text-slate-500")
+                            }
                           >
-                            {inviteBusy === inv.email + "resend"
-                              ? "Resending…"
-                              : "Resend"}
-                          </Button>
-                        )}
-                        {canRevoke(st) && (
-                          <Button
-                            variant="danger"
-                            disabled={inviteBusy === inv.email + "revoke"}
-                            onClick={() => void inviteAction("revoke", inv.email)}
-                          >
-                            {inviteBusy === inv.email + "revoke"
-                              ? "Revoking…"
-                              : "Revoke"}
-                          </Button>
-                        )}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+                            {stateLabel(st)}
+                          </span>
+                        );
+                      },
+                    },
+                    {
+                      key: "role",
+                      header: "Role",
+                      sortValue: (inv) => inv.role,
+                      cell: (inv) => <span className="text-xs text-slate-500">{inv.role}</span>,
+                    },
+                    {
+                      key: "inviter",
+                      header: "Invited by",
+                      // The inviter can be GONE — invited_by_user_id is ON DELETE SET NULL, and the LEFT
+                      // JOIN keeps the row rather than hiding an outstanding invitation because its sender
+                      // left.
+                      sortValue: (inv) => inviterLabel(inv),
+                      cell: (inv) => (
+                        <span className="text-xs text-slate-600">{inviterLabel(inv)}</span>
+                      ),
+                    },
+                  ]}
+                />
+              </div>
             {/* A revocation the operator may not have performed — SupersedePendingInvites clears pending
                 invites on a domain-capture JIT join, and the table records no cause. Named, not claimed. */}
             {invites.some((i) => i.revoked_at) && (
