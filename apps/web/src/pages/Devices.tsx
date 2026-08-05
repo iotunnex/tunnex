@@ -1,5 +1,4 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { PRODUCT_NAME } from "../brand";
 import {
@@ -18,7 +17,7 @@ import {
 import {
   Badge,
   Button,
-  Card,
+  Modal,
   DataTable,
   ErrorText,
   Field,
@@ -87,6 +86,7 @@ export default function Devices() {
   // (D-S9.5-OPTIN(a): absent, not disabled — no dead affordance).
   const [kind, setKind] = useState<ExportKind>("wireguard");
   const [busy, setBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
   const ovpnEnabled = org?.ovpn_enabled === true;
 
   async function loadDevices(orgId: string) {
@@ -217,6 +217,7 @@ export default function Devices() {
       setError(apiErrorMessage(error, "Could not create the device."));
       return;
     }
+    setCreating(false);
     setName("");
     setSecretKind("wireguard");
     setSecret(data.config ?? null); // shown once — the private key is never re-served
@@ -293,26 +294,48 @@ export default function Devices() {
           </div>
         </div>
         <div style={{ flex: 1 }}></div>
+        {/* ⛔ THE CREATE FORM MOVES INTO A MODAL, matching Add rule. Inline, it was a permanently-open
+            four-control card sitting between the page title and the roster — the roster is what this screen
+            is FOR, and it began below a form most visits do not use. A trigger costs one click on the rare
+            visit and gives the list the top of the page on every other one. */}
+        <Button onClick={() => setCreating(true)}>Add device</Button>
       </div>
 
       <ErrorText>{error}</ErrorText>
 
-      {/* ⛔ A LINK, NOT A COPY (S14.6 D2). Gateways lived HERE — 458 lines of fleet management mounted
-          partway down the Devices page, with no route and no nav entry of its own. It is now a screen.
 
-          Devices keeps a POINTER because the two are genuinely related (a device homes to a gateway), and
-          deleting the reference outright would lose that connection for anyone who learned the old location.
-          RENDERING IT TWICE WOULD BE TWO PLACES TO BE WRONG — the same reasoning that collapsed the two
-          network maps onto one `meshFrom`. */}
-      <div style={{ background: "rgba(31,31,31,.72)", backdropFilter: "blur(24px) saturate(140%)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: "12px", padding: "12px 16px", font: "500 12px 'Instrument Sans'", color: "#A9A9A6" }}>
-        Gateways moved to their own screen.{" "}
-        <Link to="/gateways" style={{ color: "#F5F5F5", textDecoration: "underline" }}>
-          Open Gateways
-        </Link>
-      </div>
 
-      <form onSubmit={create}>
-        <Card>
+      {creating && (
+        <Modal
+          title="Add device"
+          size="wide"
+          onDismiss={() => setCreating(false)}
+          actions={
+            <>
+              <Button variant="ghost" onClick={() => setCreating(false)}>
+                Cancel
+              </Button>
+              {/* ⚠ THE SUBMIT LIVES IN THE MODAL'S ACTION ROW, so the form is driven by `form=` rather than
+                  by a nested button — the disabled rules and the busy/OpenVPN labels are unchanged. */}
+              {/* ⚠ THE DISABLED CONDITION IS THE FORM'S OWN, CARRIED VERBATIM. My first version added
+                  `!name.trim()` — a rule this form never had. Moving a control is not licence to change what
+                  it permits, and an invented guard is indistinguishable from a real one once it ships. */}
+              <Button
+                type="submit"
+                form="add-device-form"
+                disabled={
+                  busy ||
+                  selectableNodes(nodes).length === 0 ||
+                  // Several eligible and none chosen: the button must not act on a guess.
+                  (requiresGatewayChoice(nodes) && nodeId === "")
+                }
+              >
+                {busy ? "Creating…" : kind === "openvpn" ? "Export OpenVPN profile" : "Create device"}
+              </Button>
+            </>
+          }
+        >
+      <form id="add-device-form" onSubmit={create}>
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-[12rem] flex-1">
               <Field label="New device name">
@@ -349,21 +372,6 @@ export default function Devices() {
               />
               Full tunnel
             </label>
-            <Button
-              type="submit"
-              disabled={
-                busy ||
-                selectableNodes(nodes).length === 0 ||
-                // Several eligible and none chosen: the button must not act on a guess.
-                (requiresGatewayChoice(nodes) && nodeId === "")
-              }
-            >
-              {busy
-                ? "Creating…"
-                : kind === "openvpn"
-                  ? "Export OpenVPN profile"
-                  : "Create device"}
-            </Button>
           </div>
           {/* ⛔ S14.21b: ASK, DO NOT GUESS. The old rule was "the first active gateway in created_at
               order", which on a real fleet homed a laptop onto an in-cluster Kubernetes gateway
@@ -398,8 +406,9 @@ export default function Devices() {
               No gateway node is enrolled yet - enroll one to create devices.
             </p>
           )}
-        </Card>
       </form>
+        </Modal>
+      )}
 
       {/* The one-time config CEREMONY: the most security-sensitive moment in the
           app. The shared OneTimeSecretModal shows it exactly once (amber, blocks
