@@ -80,3 +80,39 @@ RETURNING org_id;
 UPDATE ovpn_client_certs SET revoked_at = NULL, revoked_cause = NULL
 WHERE device_id = $1 AND revoked_at IS NOT NULL AND revoked_cause = 'cascade'
 RETURNING org_id, serial;
+
+-- name: RevokeOVPNCertsForDeactivatedUser :many
+-- ⛔ DEACTIVATION MUST REACH THE CRL, OR THE REFUSAL IS CONFIGURATIONAL ONLY.
+--
+-- Deactivating a user drops their devices out of the WG peer set and the OVPN CCD roster, and the agent
+-- full-sweeps the stale CCD file — so `ccd-exclusive` refuses the client. That chain is real, and it is ONE
+-- MECHANISM, living in the AGENT. The certificate itself stays cryptographically valid, so a gateway whose
+-- `server.conf` lost `ccd-exclusive` would admit a deactivated user's OpenVPN client on cert alone.
+--
+-- > **A REFUSAL THAT DEPENDS ENTIRELY ON A CONFIG FLAG ON A REMOTE BOX IS NOT DEFENCE IN DEPTH.** The
+-- > control plane can make it cryptographic, and then both halves have to fail for access to survive.
+--
+-- ⚠ CAUSE `user_deactivated`, NOT `cascade`, and the distinction is the one this table already draws: a
+-- cascade cert is revived by a gateway restore, and these must not be — they come back when the USER does,
+-- and by nothing else. A deliberately-revoked cert is revived by neither.
+-- lint:cross-org — keyed by user + org inside the org-scoped deactivate transaction.
+UPDATE ovpn_client_certs c SET revoked_at = now(), revoked_cause = 'user_deactivated'
+WHERE c.org_id = @org_id
+  AND c.device_id IN (SELECT d.id FROM devices d WHERE d.user_id = @user_id AND d.org_id = @org_id AND d.deleted_at IS NULL)
+  AND c.revoked_at IS NULL
+RETURNING c.serial;
+
+-- name: RestoreOVPNCertsForReactivatedUser :many
+-- ⛔ THE SYMMETRIC HALF, AND SHIPPING WITHOUT IT WOULD BE A ONE-WAY DOOR. Reactivation restores memberships,
+-- sessions and the peer set; if the certificate stayed revoked the user would come back `active` everywhere
+-- while their OpenVPN client was refused by the CRL — control plane green, data plane refusing, and the
+-- operator told it succeeded. That exact defect is on record for the node-restore path (review pass 1 #9).
+--
+-- ⚠ `user_deactivated` ONLY. A cert revoked deliberately, or cascaded by a gateway revoke, is NOT revived by
+-- a user coming back — reactivation reverses its own act and no one else's.
+-- lint:cross-org — keyed by user + org inside the org-scoped reactivate transaction.
+UPDATE ovpn_client_certs c SET revoked_at = NULL, revoked_cause = NULL
+WHERE c.org_id = @org_id
+  AND c.device_id IN (SELECT d.id FROM devices d WHERE d.user_id = @user_id AND d.org_id = @org_id AND d.deleted_at IS NULL)
+  AND c.revoked_at IS NOT NULL AND c.revoked_cause = 'user_deactivated'
+RETURNING c.serial;

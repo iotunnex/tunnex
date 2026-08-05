@@ -37,6 +37,22 @@ type MembershipService struct {
 	q       *sqlc.Queries
 	revoker SessionRevoker
 	pusher  DevicePusher
+	crl     CRLRebuilder
+}
+
+// CRLRebuilder regenerates an org's signed OpenVPN CRL from the full current revoked set.
+//
+// ⛔ OPTIONAL, AND ITS ABSENCE IS FAIL-CLOSED IN THE RIGHT DIRECTION. The certs are marked revoked inside the
+// deactivation transaction whether or not this is wired; without it the org's published CRL is merely STALE
+// until the next rebuild, so the worst case is the pre-existing behaviour (ccd-exclusive alone), never worse.
+type CRLRebuilder interface {
+	RebuildCRL(ctx context.Context, orgID uuid.UUID) error
+}
+
+// WithCRLRebuilder wires the OpenVPN CRL rebuild into the deactivate/reactivate cascade.
+func (s *MembershipService) WithCRLRebuilder(c CRLRebuilder) *MembershipService {
+	s.crl = c
+	return s
 }
 
 // NewMembershipService builds a membership service over the given pool.
@@ -113,6 +129,20 @@ func (s *MembershipService) deactivate(ctx context.Context, orgID, targetUserID 
 		if e := cliauth.SweepUser(ctx, q, targetUserID); e != nil {
 			return e
 		}
+		// ⛔ AND IT REACHES THE CRL. Without this the refusal was CONFIGURATIONAL ONLY: the device leaves the
+		// CCD roster and `ccd-exclusive` refuses the client — one mechanism, living in the AGENT, on a
+		// certificate that is still cryptographically valid. A gateway whose server.conf lost that flag would
+		// admit a deactivated user's OpenVPN client on cert alone.
+		//
+		// > **A REFUSAL THAT DEPENDS ENTIRELY ON A CONFIG FLAG ON A REMOTE BOX IS NOT DEFENCE IN DEPTH.**
+		//
+		// Same transaction as the status flip, for the reason the CLI sweep is: a revocation that can be lost
+		// between two statements is a revocation an operator was told happened.
+		if _, e := q.RevokeOVPNCertsForDeactivatedUser(ctx, sqlc.RevokeOVPNCertsForDeactivatedUserParams{
+			OrgID: orgID, UserID: targetUserID,
+		}); e != nil {
+			return e
+		}
 		return writeAuditFn(q)
 	}); err != nil {
 		return false, err
@@ -131,6 +161,13 @@ func (s *MembershipService) deactivate(ctx context.Context, orgID, targetUserID 
 	// policy group-destination must ALSO recompile so the ex-member's /32 leaves its
 	// ruleset within the <5s spec. PushUserNodes would miss those nodes on a
 	// multi-gateway org (single-gateway hid this; the multi-node test guards it).
+	// The CRL is republished from the full revoked set, AFTER the tx commits — a CRL naming a serial whose
+	// revocation later rolled back would refuse a credential the database still considers live.
+	if s.crl != nil {
+		if err := s.crl.RebuildCRL(ctx, orgID); err != nil {
+			return false, err
+		}
+	}
 	if s.pusher != nil {
 		s.pusher.PushOrgNodes(ctx, orgID)
 	}
@@ -149,9 +186,25 @@ func (s *MembershipService) ReactivateMember(ctx context.Context, actor, orgID, 
 		if e := q.SetUserStatus(ctx, sqlc.SetUserStatusParams{ID: targetUserID, Status: "active"}); e != nil {
 			return e
 		}
+		// ⛔ THE SYMMETRIC HALF — shipping the revoke without this would be a ONE-WAY DOOR: the user would come
+		// back active everywhere while their OpenVPN client stayed on the CRL. Control plane green, data plane
+		// refusing, operator told it succeeded — the exact defect on record for the node-restore path.
+		//
+		// ⚠ `user_deactivated` ONLY: a cert revoked deliberately, or cascaded by a gateway revoke, is not
+		// revived by a user coming back. Reactivation reverses its own act and no one else's.
+		if _, e := q.RestoreOVPNCertsForReactivatedUser(ctx, sqlc.RestoreOVPNCertsForReactivatedUserParams{
+			OrgID: orgID, UserID: targetUserID,
+		}); e != nil {
+			return e
+		}
 		return writeAudit(ctx, q, orgID, &actor, "user.reactivated", "user", targetUserID.String(), map[string]any{})
 	}); err != nil {
 		return err
+	}
+	if s.crl != nil {
+		if err := s.crl.RebuildCRL(ctx, orgID); err != nil {
+			return err
+		}
 	}
 	// Restore the user's peers + policy grants to the data plane promptly. ORG-WIDE
 	// (symmetric with deactivate, S7.2 finding #1): nodes referencing this user as a
