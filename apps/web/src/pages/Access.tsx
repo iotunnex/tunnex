@@ -1707,6 +1707,9 @@ function GroupsResourcesSection({
   // confirmation is not optional ceremony — and from a selection bar the same click can take several groups
   // and all of their rules at once, which is strictly more consequential than the per-row version was.
   const [deletingGroups, setDeletingGroups] = useState<UserGroup[]>([]);
+  // ⛔ TABS, NOT A STACK. Two tables one under the other cost a screen of scrolling to reach the second, and
+  // the two are alternatives — an operator is working on groups OR on resources, never reading both at once.
+  const [tab, setTab] = useState<"groups" | "resources">("groups");
 
   return (
     <Card className="mt-4">
@@ -1735,6 +1738,108 @@ function GroupsResourcesSection({
       {/* ⛔ STACKED, NOT SIDE BY SIDE. Two tables in a half-width column each render five columns in the
           space of two — CIDR, protocol and ports would truncate exactly where an operator is comparing them
           against a router config. Each table gets the full row. */}
+      {/* ⛔ TABS ABOVE, ADD-FORM ABOVE THE TABLE. Both creation forms used to sit BELOW their list, so on
+          an org with ten groups the way to make the eleventh was off the bottom of the card — the primary
+          action on the screen, reachable only by scrolling past everything it creates. */}
+      <div className="mt-3 flex gap-1 border-b border-white/10">
+        {(["groups", "resources"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            role="tab"
+            aria-selected={tab === t}
+            onClick={() => setTab(t)}
+            className={`-mb-px border-b-2 px-3 py-1.5 text-sm capitalize ${
+              tab === t
+                ? "border-white/60 text-ink-heading"
+                : "border-transparent text-ink-tertiary hover:text-slate-300"
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+      <div className="mt-3">
+            {tab === "groups" && canManage && (
+              <div className="mt-2 flex gap-2">
+                <Input
+                  placeholder="Group name"
+                  value={newGroup}
+                  onChange={(e) => setNewGroup(e.target.value)}
+                />
+                <Button onClick={addGroup}>Add</Button>
+              </div>
+            )}
+            {tab === "resources" && canManage && (
+              <div className="mt-2 space-y-2">
+                <Input
+                  placeholder="Name"
+                  value={newRes.name}
+                  onChange={(e) =>
+                    setNewRes({ ...newRes, name: e.target.value })
+                  }
+                />
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="CIDR e.g. 10.0.5.0/24"
+                    value={newRes.cidr}
+                    onChange={(e) =>
+                      setNewRes({ ...newRes, cidr: e.target.value })
+                    }
+                  />
+                  <Select
+                    value={newRes.protocol}
+                    onChange={(e) =>
+                      setNewRes({
+                        ...newRes,
+                        protocol: e.target.value as "any" | "tcp" | "udp",
+                      })
+                    }
+                  >
+                    <option value="any">any</option>
+                    <option value="tcp">tcp</option>
+                    <option value="udp">udp</option>
+                  </Select>
+                </div>
+                {/* Feature 1: OPTIONAL port scope. Leave blank = all ports for the protocol; a low alone =
+                    a single port; low+high = a range. Server is authoritative (createResource validates). */}
+                <div className="flex gap-2">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    placeholder="Port (optional)"
+                    value={newRes.portLow}
+                    onChange={(e) =>
+                      setNewRes({ ...newRes, portLow: e.target.value })
+                    }
+                  />
+                  <Input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    placeholder="to (range, optional)"
+                    value={newRes.portHigh}
+                    onChange={(e) =>
+                      setNewRes({ ...newRes, portHigh: e.target.value })
+                    }
+                  />
+                  <Button
+                    onClick={addResource}
+                    disabled={!resPortsValid(newRes.portLow, newRes.portHigh)}
+                  >
+                    Add
+                  </Button>
+                </div>
+                {!resPortsValid(newRes.portLow, newRes.portHigh) && (
+                  <p className="text-xs text-amber-400">
+                    Ports must be 1–65535; leave both blank for all ports, or
+                    set a low ≤ high.
+                  </p>
+                )}
+              </div>
+            )}
+      </div>
       <div className="mt-3 space-y-4">
         {/* ⛔ GROUPS AS A TABLE. Name / members / type / created are the same five facts for every group, and
             an org accumulates them — the list gave no way to search and no way to stop rendering all of them.
@@ -1743,7 +1848,14 @@ function GroupsResourcesSection({
             (the reconciler owns that membership, so say it where the name is), the THREE-ARM member count
             (unfetched renders NOTHING and must never become a 0 nobody asked for; 0 is the loudest state
             here and is styled as a warning, not as metadata), and expansion to manage members. */}
-        <div>
+        {/* ⚠ `hidden`, NOT A CSS CLASS, AND THE DIFFERENCE IS THE POINT. `hidden` takes the panel out of
+            the accessibility tree and out of find-in-page, so a screen reader and ⌘F see what the eye sees —
+            whereas `.opacity-0` or an off-screen class would leave a whole table readable to both while
+            invisible, which is the invisible-is-not-absent failure.
+
+            ⚠ The nodes DO stay in the DOM, deliberately: switching tabs keeps each table's filter, sort and
+            page rather than resetting the operator's view every time they glance at the other one. */}
+        <div hidden={tab !== "groups"}>
           {groupsError ? (
             <LoadRetry error={groupsError} onRetry={load} />
           ) : (
@@ -1840,23 +1952,10 @@ function GroupsResourcesSection({
                   },
                 ]}
               />
-              {canManage && (
-                <div className="mt-2 flex gap-2">
-                  <Input
-                    placeholder="Group name"
-                    value={newGroup}
-                    onChange={(e) => setNewGroup(e.target.value)}
-                  />
-                  <Button onClick={addGroup}>Add</Button>
-                </div>
-              )}
             </>
           )}
         </div>
-        <div>
-          <p className="text-xs font-medium text-slate-400">
-            Resources (CIDR : protocol : ports)
-          </p>
+        <div hidden={tab !== "resources"}>
           {resourcesError ? (
             <LoadRetry error={resourcesError} onRetry={load} />
           ) : (
@@ -1934,75 +2033,6 @@ function GroupsResourcesSection({
                   },
                 ]}
               />
-              {canManage && (
-                <div className="mt-2 space-y-2">
-                  <Input
-                    placeholder="Name"
-                    value={newRes.name}
-                    onChange={(e) =>
-                      setNewRes({ ...newRes, name: e.target.value })
-                    }
-                  />
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="CIDR e.g. 10.0.5.0/24"
-                      value={newRes.cidr}
-                      onChange={(e) =>
-                        setNewRes({ ...newRes, cidr: e.target.value })
-                      }
-                    />
-                    <Select
-                      value={newRes.protocol}
-                      onChange={(e) =>
-                        setNewRes({
-                          ...newRes,
-                          protocol: e.target.value as "any" | "tcp" | "udp",
-                        })
-                      }
-                    >
-                      <option value="any">any</option>
-                      <option value="tcp">tcp</option>
-                      <option value="udp">udp</option>
-                    </Select>
-                  </div>
-                  {/* Feature 1: OPTIONAL port scope. Leave blank = all ports for the protocol; a low alone =
-                      a single port; low+high = a range. Server is authoritative (createResource validates). */}
-                  <div className="flex gap-2">
-                    <Input
-                      type="number"
-                      min={1}
-                      max={65535}
-                      placeholder="Port (optional)"
-                      value={newRes.portLow}
-                      onChange={(e) =>
-                        setNewRes({ ...newRes, portLow: e.target.value })
-                      }
-                    />
-                    <Input
-                      type="number"
-                      min={1}
-                      max={65535}
-                      placeholder="to (range, optional)"
-                      value={newRes.portHigh}
-                      onChange={(e) =>
-                        setNewRes({ ...newRes, portHigh: e.target.value })
-                      }
-                    />
-                    <Button
-                      onClick={addResource}
-                      disabled={!resPortsValid(newRes.portLow, newRes.portHigh)}
-                    >
-                      Add
-                    </Button>
-                  </div>
-                  {!resPortsValid(newRes.portLow, newRes.portHigh) && (
-                    <p className="text-xs text-amber-400">
-                      Ports must be 1–65535; leave both blank for all ports, or
-                      set a low ≤ high.
-                    </p>
-                  )}
-                </div>
-              )}
             </>
           )}
         </div>
