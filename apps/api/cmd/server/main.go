@@ -278,7 +278,12 @@ func main() {
 	// JSONL-degraded + retention on it; the enterprise query port surfaces it. One instance.
 	flowHealth := accesslog.NewHealth()
 
-	membersSvc := tenancy.NewMembershipService(pool, sessions).WithDevicePusher(deviceSvc)
+	// ⛔ THE CRL REBUILD IS WIRED HERE OR DEACTIVATION'S CERT REVOCATION NEVER REACHES A GATEWAY. The certs
+	// are marked revoked in the transaction either way; without this the org's published CRL stays stale
+	// until some other path rebuilds it, and the refusal falls back to ccd-exclusive alone.
+	membersSvc := tenancy.NewMembershipService(pool, sessions).
+		WithDevicePusher(deviceSvc).
+		WithCRLRebuilder(ovpnCRLRebuilder{ovpnSvc})
 	idpSyncPort := apphttp.NewIdpSyncPort(pool, sealer, membersSvc, deviceSvc, logger)
 
 	router, err := apphttp.NewRouter(logger, apphttp.Deps{
@@ -567,4 +572,12 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("api_stopped")
+}
+
+// ovpnCRLRebuilder adapts the OVPN service to tenancy.CRLRebuilder — a one-method seam so the tenancy
+// package does not import the ovpn package (and cannot grow a dependency on its edition-gated surface).
+type ovpnCRLRebuilder struct{ svc *ovpn.Service }
+
+func (r ovpnCRLRebuilder) RebuildCRL(ctx context.Context, orgID uuid.UUID) error {
+	return r.svc.RebuildCRL(ctx, orgID)
 }

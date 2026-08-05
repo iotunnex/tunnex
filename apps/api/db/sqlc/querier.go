@@ -952,6 +952,15 @@ type Querier interface {
 	// RestoreCascadeRevokedDevice.
 	// lint:cross-org — keyed by device_id, which the caller read from the org-scoped candidate set.
 	RestoreCascadeRevokedOVPNCertsForDevice(ctx context.Context, deviceID uuid.UUID) ([]RestoreCascadeRevokedOVPNCertsForDeviceRow, error)
+	// ⛔ THE SYMMETRIC HALF, AND SHIPPING WITHOUT IT WOULD BE A ONE-WAY DOOR. Reactivation restores memberships,
+	// sessions and the peer set; if the certificate stayed revoked the user would come back `active` everywhere
+	// while their OpenVPN client was refused by the CRL — control plane green, data plane refusing, and the
+	// operator told it succeeded. That exact defect is on record for the node-restore path (review pass 1 #9).
+	//
+	// ⚠ `user_deactivated` ONLY. A cert revoked deliberately, or cascaded by a gateway revoke, is NOT revived by
+	// a user coming back — reactivation reverses its own act and no one else's.
+	// lint:cross-org — keyed by user + org inside the org-scoped reactivate transaction.
+	RestoreOVPNCertsForReactivatedUser(ctx context.Context, arg RestoreOVPNCertsForReactivatedUserParams) ([]string, error)
 	// The SWEEP: password reset and account deactivation kill every live CLI
 	// credential exactly like they kill sessions (a surviving credential would be a
 	// back door around the sweep).
@@ -1012,6 +1021,21 @@ type Querier interface {
 	// enough; destroying the facts that explain it is not part of the job. Readers that must ignore a revoked gateway
 	// filter on status — which is one predicate in one place, versus three consequences spread across three surfaces.
 	RevokeNode(ctx context.Context, arg RevokeNodeParams) error
+	// ⛔ DEACTIVATION MUST REACH THE CRL, OR THE REFUSAL IS CONFIGURATIONAL ONLY.
+	//
+	// Deactivating a user drops their devices out of the WG peer set and the OVPN CCD roster, and the agent
+	// full-sweeps the stale CCD file — so `ccd-exclusive` refuses the client. That chain is real, and it is ONE
+	// MECHANISM, living in the AGENT. The certificate itself stays cryptographically valid, so a gateway whose
+	// `server.conf` lost `ccd-exclusive` would admit a deactivated user's OpenVPN client on cert alone.
+	//
+	// > **A REFUSAL THAT DEPENDS ENTIRELY ON A CONFIG FLAG ON A REMOTE BOX IS NOT DEFENCE IN DEPTH.** The
+	// > control plane can make it cryptographic, and then both halves have to fail for access to survive.
+	//
+	// ⚠ CAUSE `user_deactivated`, NOT `cascade`, and the distinction is the one this table already draws: a
+	// cascade cert is revived by a gateway restore, and these must not be — they come back when the USER does,
+	// and by nothing else. A deliberately-revoked cert is revived by neither.
+	// lint:cross-org — keyed by user + org inside the org-scoped deactivate transaction.
+	RevokeOVPNCertsForDeactivatedUser(ctx context.Context, arg RevokeOVPNCertsForDeactivatedUserParams) ([]string, error)
 	// The B2 sweep member: revoking a device revokes ALL its live OVPN certs, returning their serials
 	// so the caller pushes the updated CRL to the gateway (one sweep with address-release + status-clear).
 	// lint:cross-org — keyed by device_id inside the device-revoke transaction, which the caller has

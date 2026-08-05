@@ -823,7 +823,7 @@ export function DataTable<T>({
                 scrolling past it turns every cell into an unlabelled string. */}
             <tr className="sticky top-0 z-10 bg-ink-900 text-[11px] uppercase tracking-wide text-slate-500">
               {showSelect && (
-                <th scope="col" className="w-8 border-b border-white/10 py-1.5 pr-2">
+                <th scope="col" className="w-8 border-b border-white/10 py-1.5 pl-3 pr-2">
                   {/* ⛔ THIS BOX SELECTS THE PAGE, AND ITS LABEL SAYS SO. A header checkbox that quietly
                       means "all 500 matches" is how a bulk revoke becomes an outage — the operator sees ten
                       rows and reasons about ten. Selecting everything is offered separately, by a control
@@ -847,7 +847,7 @@ export function DataTable<T>({
                   />
                 </th>
               )}
-              {columns.map((c) => {
+              {columns.map((c, i) => {
                 const active = sort?.key === c.key;
                 return (
                   <th
@@ -858,7 +858,12 @@ export function DataTable<T>({
                     // alone pushes a numeric column's content to its own right edge, where it lands flush
                     // against the next column's left edge — "0" and a role select ended up touching, and
                     // the eye reads two adjacent columns as one field.
-                    className={`border-b border-white/10 py-1.5 pr-4 font-medium ${c.numeric ? "pl-6 text-right" : ""}`}
+                    // ⚠ THE FIRST COLUMN NEEDS LEFT PADDING OR IT TOUCHES THE TABLE'S EDGE. Every cell had
+                    // `pr-4` and nothing on the left, so column one sat flush against the container while
+                    // every other column had a gap in front of it — the row read as starting at a hard edge
+                    // rather than inside a surface. `i === 0` also covers the checkbox column, which is
+                    // rendered separately and had the same problem.
+                    className={`border-b border-white/10 py-1.5 pr-4 font-medium ${i === 0 && !showSelect ? "pl-3" : ""} ${c.numeric ? "pl-6 text-right" : ""}`}
                   >
                     {c.sortValue ? (
                       <button
@@ -911,7 +916,7 @@ export function DataTable<T>({
                 className={`border-b border-white/5 hover:bg-white/[0.06] ${i % 2 ? "bg-white/[0.02]" : ""}`}
               >
                 {showSelect && (
-                  <td className="w-8 py-1.5 pr-2 align-middle">
+                  <td className="w-8 py-1.5 pl-3 pr-2 align-middle">
                     <input
                       type="checkbox"
                       aria-label={`Select ${labelFor(r)}`}
@@ -926,10 +931,10 @@ export function DataTable<T>({
                     />
                   </td>
                 )}
-                {columns.map((c) => (
+                {columns.map((c, i) => (
                   <td
                     key={c.key}
-                    className={`py-1.5 pr-4 align-middle ${c.numeric ? "pl-6 text-right tabular-nums" : ""}`}
+                    className={`py-1.5 pr-4 align-middle ${i === 0 && !showSelect ? "pl-3" : ""} ${c.numeric ? "pl-6 text-right tabular-nums" : ""}`}
                   >
                     {c.cell(r, { expanded: isOpen, toggle })}
                   </td>

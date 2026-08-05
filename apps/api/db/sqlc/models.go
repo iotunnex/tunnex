@@ -353,15 +353,16 @@ type Organization struct {
 }
 
 type OvpnClientCert struct {
-	ID           uuid.UUID          `json:"id"`
-	OrgID        uuid.UUID          `json:"org_id"`
-	DeviceID     uuid.UUID          `json:"device_id"`
-	Serial       string             `json:"serial"`
-	CommonName   string             `json:"common_name"`
-	NotAfter     time.Time          `json:"not_after"`
-	IssuedAt     time.Time          `json:"issued_at"`
-	RevokedAt    pgtype.Timestamptz `json:"revoked_at"`
-	RevokedCause *string            `json:"revoked_cause"`
+	ID         uuid.UUID          `json:"id"`
+	OrgID      uuid.UUID          `json:"org_id"`
+	DeviceID   uuid.UUID          `json:"device_id"`
+	Serial     string             `json:"serial"`
+	CommonName string             `json:"common_name"`
+	NotAfter   time.Time          `json:"not_after"`
+	IssuedAt   time.Time          `json:"issued_at"`
+	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+	// What revoked this cert, which determines what may revive it: deliberate (nothing revives it), cascade (a gateway restore), user_deactivated (that user being reactivated, and only that).
+	RevokedCause *string `json:"revoked_cause"`
 }
 
 type OvpnCrl struct {
