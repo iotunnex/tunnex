@@ -783,7 +783,7 @@ function HubSetSection({
                     {pinned ? (
                       <Button
                         variant="ghost"
-                        className="px-2 py-0.5 text-xs"
+                        size="sm"
                         disabled={busy}
                         onClick={() => setPin(g.id, null)}
                       >
@@ -792,7 +792,7 @@ function HubSetSection({
                     ) : (
                       <Button
                         variant="ghost"
-                        className="px-2 py-0.5 text-xs"
+                        size="sm"
                         disabled={busy}
                         onClick={() => setPin(g.id, nextPin)}
                       >
