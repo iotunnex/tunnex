@@ -126,7 +126,15 @@ export function applyGatewayFilter(
   groups: GatewayGroup[],
   filter: GatewayFilter,
 ): GatewayGroup[] {
-  if (filter === "all") return groups;
+  // ⛔ UNDER "ALL", AN EMPTY GROUP IS NOT A SECTION — IT IS A HEADING AND A SENTENCE SAYING NOTHING IS HERE,
+  // and it cost a full screen of scrolling between the two groups that did have rows. The CHIP already
+  // reports "Healthy (0)": the count is the answer, and rendering a card to repeat it is the answer twice,
+  // the second time in the space where content should be.
+  //
+  // ⚠ THE EXCEPTION IS THE WHOLE REASON THIS IS NOT A ONE-LINE FILTER. When the operator SELECTS a group,
+  // its emptiness is the answer to the question they just asked, and it must render — an explicitly chosen
+  // filter that produces a blank page is indistinguishable from a page that failed to load.
+  if (filter === "all") return groups.filter((g) => g.rows.length > 0);
   return groups.filter((g) => g.key === filter);
 }
 
