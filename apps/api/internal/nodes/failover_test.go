@@ -213,8 +213,15 @@ func TestFailoverPromotionAudits(t *testing.T) {
 			t.Fatalf("seed %s: %v", name, e)
 		}
 	}
-	mk(primary, "primary", "KP", "p:51820", 1) // pin 1 → configured primary
-	mk(standby, "standby", "KS", "s:51820", 2) // pin 2 → configured standby
+	// ⛔ REAL-SHAPED KEYS, AND THE REASON IS A GUARD THAT NOW ENFORCES IT. `ListSiteGatewaysForOrg` filters
+	// `wg_public_key ~ '^[A-Za-z0-9+/]{43}='` since S15.3 — a malformed key reaching `wg syncconf` is
+	// all-or-nothing and left a real gateway with ZERO peers. "5z1LnyAb6+wK0KCjCqI1jqVbANQsR57+InajBRUZGC8="/"X55Zy5PECLJZf4/QmgPhatfOmQwsaH98sDF2YcmJhzg=" were silently excluded here, so the
+	// hub set came back EMPTY and this test panicked on `Active()[0]`.
+	//
+	// ⚠ THE FIXTURE WAS WRONG, NOT THE GUARD. This is the 16th file of the class the S15.3 fixture sweep
+	// fixed and the one it missed — a placeholder the DATABASE accepts and the DATA PLANE rejects.
+	mk(primary, "primary", "EgFUlft9tlWLCQYEPsZj18ZM/ksOmrGHTrX0CdinwWw=", "p:51820", 1) // pin 1 → configured primary
+	mk(standby, "standby", "IBg+4GpG2Tes1aEmMIC7V4sw6cJYetAd2UQTwgmnyrE=", "s:51820", 2) // pin 2 → configured standby
 
 	svc := NewService(pool, nil, nil)
 	// Reconcile the configured set first: org_hub_set = [primary, standby].
@@ -223,10 +230,10 @@ func TestFailoverPromotionAudits(t *testing.T) {
 	}
 	// Freshness: the STANDBY is fresh (recent handshake with KS); the PRIMARY is STALE (old handshake with KP).
 	now := time.Now()
-	if _, e := pool.Exec(ctx, "INSERT INTO node_peer_status (node_id,public_key,last_handshake_at) VALUES ($1,'KS',$2)", primary, now); e != nil {
+	if _, e := pool.Exec(ctx, "INSERT INTO node_peer_status (node_id,public_key,last_handshake_at) VALUES ($1,'IBg+4GpG2Tes1aEmMIC7V4sw6cJYetAd2UQTwgmnyrE=',$2)", primary, now); e != nil {
 		t.Fatalf("seed fresh standby: %v", e)
 	}
-	if _, e := pool.Exec(ctx, "INSERT INTO node_peer_status (node_id,public_key,last_handshake_at) VALUES ($1,'KP',$2)", standby, now.Add(-10*time.Minute)); e != nil {
+	if _, e := pool.Exec(ctx, "INSERT INTO node_peer_status (node_id,public_key,last_handshake_at) VALUES ($1,'EgFUlft9tlWLCQYEPsZj18ZM/ksOmrGHTrX0CdinwWw=',$2)", standby, now.Add(-10*time.Minute)); e != nil {
 		t.Fatalf("seed stale primary: %v", e)
 	}
 

@@ -2,6 +2,8 @@ package nodes
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"os"
 	"testing"
 	"time"
@@ -54,7 +56,7 @@ func TestElectSiteHubSetOrdering(t *testing.T) {
 	// NO PINS → a SINGLE auto-elected hub (set of one) — today's zero-config behavior, no standbys.
 	t.Run("no pins → single-hub set of one (lowest id)", func(t *testing.T) {
 		topo := siteTopology{gws: []sqlc.ListSiteGatewaysForOrgRow{
-			gw(5, "h:1", "K5", nil, &fresh), gw(2, "h:1", "K2", nil, &fresh), gw(9, "h:1", "K9", nil, &fresh),
+			gw(5, "h:1", "knsbfv3HVkciN84sZHAIBOD3BIMZfbvIc/h65xPcCqI=", nil, &fresh), gw(2, "h:1", "dUBWjkMrPlrb9U4mxyF+UEluQ/XwI7FGiA9Ybk9CROw=", nil, &fresh), gw(9, "h:1", "K9", nil, &fresh),
 		}}
 		if got := ids(electSiteHubSet(topo, now)); string(got) != string([]byte{2}) {
 			t.Fatalf("no pins → set of ONE (lowest-id hub), got %v", got)
@@ -64,9 +66,9 @@ func TestElectSiteHubSetOrdering(t *testing.T) {
 	// PINS present → the set is the PINNED gateways ONLY (HA opt-in); unpinned leaves EXCLUDED, ordered.
 	t.Run("pins → pinned set only, unpinned leaf excluded", func(t *testing.T) {
 		topo := siteTopology{gws: []sqlc.ListSiteGatewaysForOrgRow{
-			gw(7, "h:1", "K7", nil, &fresh),    // unpinned leaf (fresh) — EXCLUDED (the walk's azure-gw)
-			gw(3, "h:1", "K3", pri(2), &stale), // pinned #2
-			gw(5, "h:1", "K5", pri(1), &fresh), // pinned #1 → primary
+			gw(7, "h:1", "K7", nil, &fresh),                                              // unpinned leaf (fresh) — EXCLUDED (the walk's azure-gw)
+			gw(3, "h:1", "K3", pri(2), &stale),                                           // pinned #2
+			gw(5, "h:1", "knsbfv3HVkciN84sZHAIBOD3BIMZfbvIc/h65xPcCqI=", pri(1), &fresh), // pinned #1 → primary
 		}}
 		if got := ids(electSiteHubSet(topo, now)); string(got) != string([]byte{5, 3}) {
 			t.Fatalf("pinned set ordered by priority (5=#1, 3=#2), unpinned 7 excluded, got %v", got)
@@ -87,8 +89,8 @@ func TestElectSiteHubSetOrdering(t *testing.T) {
 	// PINNED-BUT-INCAPABLE → excluded; the set falls back to the capable pin (capability still gates).
 	t.Run("pinned but incapable is excluded", func(t *testing.T) {
 		topo := siteTopology{gws: []sqlc.ListSiteGatewaysForOrgRow{
-			gw(2, "", "K2", pri(1), &fresh),    // pinned #1 but NAT'd → INELIGIBLE
-			gw(4, "h:1", "K4", pri(2), &fresh), // pinned #2, capable → the actual primary
+			gw(2, "", "dUBWjkMrPlrb9U4mxyF+UEluQ/XwI7FGiA9Ybk9CROw=", pri(1), &fresh), // pinned #1 but NAT'd → INELIGIBLE
+			gw(4, "h:1", "K4", pri(2), &fresh),                                        // pinned #2, capable → the actual primary
 		}}
 		if got := ids(electSiteHubSet(topo, now)); string(got) != string([]byte{4}) {
 			t.Fatalf("a pinned-but-NAT'd gateway is excluded; set falls back to the capable pin, got %v", got)
@@ -162,7 +164,7 @@ func TestReconcileHubSetGeneration(t *testing.T) {
 	gen0 := hs.Generation
 
 	// Two capable gateways, gA < gB by id (no pins yet → single-hub set = [gA]).
-	gA, gB := mkGw("K2"), mkGw("K5")
+	gA, gB := mkGw("dUBWjkMrPlrb9U4mxyF+UEluQ/XwI7FGiA9Ybk9CROw="), mkGw("knsbfv3HVkciN84sZHAIBOD3BIMZfbvIc/h65xPcCqI=")
 	if gB.String() < gA.String() {
 		gA, gB = gB, gA
 	}
@@ -352,8 +354,8 @@ func TestGetHubSetView(t *testing.T) {
 			t.Fatalf("seed %s: %v", name, e)
 		}
 	}
-	mk(pr, "primary", "KPR", 1)
-	mk(sb, "standby", "KSB", 2)
+	mk(pr, "primary", "Astbc7xfIzi5K3VnumZWxLcEzVnAp4Qgm8FBJkE5pr4=", 1)
+	mk(sb, "standby", "bEvGneTYHdxxP8w9Ugn5/A2WMq5F3D4zmt+ztfeCmGE=", 2)
 
 	svc := NewService(pool, nil, nil)
 	if _, e := svc.ReconcileHubSet(ctx, org); e != nil {
@@ -362,7 +364,7 @@ func TestGetHubSetView(t *testing.T) {
 	// The PRIMARY is IDLE-but-reporting: a node_peer_status row with rx/tx = 0 (a real link, no traffic yet).
 	// The STANDBY is NOT reporting: NO row.
 	now := time.Now()
-	if _, e := pool.Exec(ctx, "INSERT INTO node_peer_status (node_id,public_key,last_handshake_at,rx_bytes,tx_bytes) VALUES ($1,'KPR',$2,0,0)", sb, now); e != nil {
+	if _, e := pool.Exec(ctx, "INSERT INTO node_peer_status (node_id,public_key,last_handshake_at,rx_bytes,tx_bytes) VALUES ($1,'Astbc7xfIzi5K3VnumZWxLcEzVnAp4Qgm8FBJkE5pr4=',$2,0,0)", sb, now); e != nil {
 		t.Fatalf("seed primary metrics: %v", e)
 	}
 
@@ -420,8 +422,8 @@ func TestReconcileHubSetMembershipAudit(t *testing.T) {
 			t.Fatalf("seed %s: %v", name, e)
 		}
 	}
-	mk(g1, "g1", "KG1", 1)
-	mk(g2, "g2", "KG2", 2)
+	mk(g1, "g1", "PwbD2C7DxRQtXmpFkZ2Dlb0sDx0sOlc6xoZSkw3D16s=", 1)
+	mk(g2, "g2", "5Di08LsTWbS8MfB626cjFTO56X9FTOJbjJX4mcHaAZk=", 2)
 
 	svc := NewService(pool, nil, nil)
 	hs1, e := svc.ReconcileHubSet(ctx, org) // configured=[g1,g2] — the first membership event
@@ -506,8 +508,8 @@ func TestRevokedGatewayLeavesHubSet(t *testing.T) {
 			t.Fatalf("seed %s: %v", name, e)
 		}
 	}
-	mk(primary, "primary", "KPRI", 1)
-	mk(standby, "standby", "KSTB", 2)
+	mk(primary, "primary", "v7uiptQLneLIoUp7JTnk9TFlyfwloQfSQB/Iey6Vt6k=", 1)
+	mk(standby, "standby", "DyDCCz0F5Q7z9eZr3HPOXPV2dnNw6JKELtc6Adu4IEo=", 2)
 
 	svc := NewService(pool, nil, nil)
 	hs1, e := svc.ReconcileHubSet(ctx, org) // configured=[primary, standby]
@@ -600,7 +602,7 @@ func hubMembershipAuditCount(t *testing.T, pool *pgxpool.Pool, org uuid.UUID) in
 // NO reconcile trigger fired — configured shrinks, the generation bumps, a hub_set.membership audit lands.
 func TestFailoverCorrectorHealsConfigured(t *testing.T) {
 	ctx := context.Background()
-	pool, svc, org, ids := hubTestOrg(t, "corr", "KA", "KB")
+	pool, svc, org, ids := hubTestOrg(t, "corr", "H120EdakQ4xkGL5TYkYnFY7DZcGhIHZd1pvgSeesz78=", "xsmeCo1KZBjyFjpQ+kXWZrUttF5rwWYWRTUhQPHVIsA=")
 	a, b := ids[0], ids[1]
 	if _, e := svc.ReconcileHubSet(ctx, org); e != nil { // configured=[a,b]
 		t.Fatalf("reconcile: %v", e)
@@ -633,7 +635,7 @@ func TestFailoverCorrectorHealsConfigured(t *testing.T) {
 // the primary the data plane has failed away from. The store still names it; the VIEW filters it.
 func TestGetHubSetViewFiltersPhantom(t *testing.T) {
 	ctx := context.Background()
-	pool, svc, org, ids := hubTestOrg(t, "phan", "KA", "KB")
+	pool, svc, org, ids := hubTestOrg(t, "phan", "H120EdakQ4xkGL5TYkYnFY7DZcGhIHZd1pvgSeesz78=", "xsmeCo1KZBjyFjpQ+kXWZrUttF5rwWYWRTUhQPHVIsA=")
 	a, b := ids[0], ids[1]
 	if _, e := svc.ReconcileHubSet(ctx, org); e != nil { // configured=[a,b], a is primary
 		t.Fatalf("reconcile: %v", e)
@@ -660,13 +662,13 @@ func TestGetHubSetViewFiltersPhantom(t *testing.T) {
 // demote) changes neither field, so repeated ticks write NOTHING — no generation churn under the new writer.
 func TestFailoverCorrectorIdempotent(t *testing.T) {
 	ctx := context.Background()
-	pool, svc, org, ids := hubTestOrg(t, "idem", "KA", "KB")
+	pool, svc, org, ids := hubTestOrg(t, "idem", "H120EdakQ4xkGL5TYkYnFY7DZcGhIHZd1pvgSeesz78=", "xsmeCo1KZBjyFjpQ+kXWZrUttF5rwWYWRTUhQPHVIsA=")
 	if _, e := svc.ReconcileHubSet(ctx, org); e != nil {
 		t.Fatalf("reconcile: %v", e)
 	}
 	// Both gateways fresh (recent handshake) → nothing to demote, configured already correct.
 	now := time.Now()
-	for _, key := range []string{"KA", "KB"} {
+	for _, key := range []string{"H120EdakQ4xkGL5TYkYnFY7DZcGhIHZd1pvgSeesz78=", "xsmeCo1KZBjyFjpQ+kXWZrUttF5rwWYWRTUhQPHVIsA="} {
 		if _, e := pool.Exec(ctx, "INSERT INTO node_peer_status (node_id,public_key,last_handshake_at) VALUES ($1,$2,$3)", ids[0], key, now); e != nil {
 			t.Fatalf("seed freshness: %v", e)
 		}
@@ -721,8 +723,8 @@ func TestDevicePeerWidenedAcrossHubSet(t *testing.T) {
 			t.Fatalf("seed %s: %v", name, e)
 		}
 	}
-	mk(g1, "g1", "KG1", 1) // primary
-	mk(g2, "g2", "KG2", 2) // standby
+	mk(g1, "g1", "PwbD2C7DxRQtXmpFkZ2Dlb0sDx0sOlc6xoZSkw3D16s=", 1) // primary
+	mk(g2, "g2", "5Di08LsTWbS8MfB626cjFTO56X9FTOJbjJX4mcHaAZk=", 2) // standby
 	usr, dev := uuid.New(), uuid.New()
 	if _, e := pool.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,'U')", usr, usr.String()+"@t"); e != nil {
 		t.Fatalf("seed user: %v", e)
@@ -815,8 +817,8 @@ func TestOVPNDeviceNeverAWireGuardPeerAcrossHubSet(t *testing.T) {
 			t.Fatalf("seed %s: %v", name, e)
 		}
 	}
-	mk(g1, "g1", "KG1", 1) // active primary
-	mk(g2, "g2", "KG2", 2) // standby
+	mk(g1, "g1", "PwbD2C7DxRQtXmpFkZ2Dlb0sDx0sOlc6xoZSkw3D16s=", 1) // active primary
+	mk(g2, "g2", "5Di08LsTWbS8MfB626cjFTO56X9FTOJbjJX4mcHaAZk=", 2) // standby
 	usr := uuid.New()
 	if _, e := pool.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,'U')", usr, usr.String()+"@t"); e != nil {
 		t.Fatalf("seed user: %v", e)
@@ -920,8 +922,8 @@ func TestDeviceDialAuthAndDerivation(t *testing.T) {
 			t.Fatalf("seed %s: %v", name, e)
 		}
 	}
-	mk(g1, "g1", "KG1", 1) // active primary
-	mk(g2, "g2", "KG2", 2) // standby
+	mk(g1, "g1", "PwbD2C7DxRQtXmpFkZ2Dlb0sDx0sOlc6xoZSkw3D16s=", 1) // active primary
+	mk(g2, "g2", "5Di08LsTWbS8MfB626cjFTO56X9FTOJbjJX4mcHaAZk=", 2) // standby
 	owner, other, dev := uuid.New(), uuid.New(), uuid.New()
 	for _, u := range []uuid.UUID{owner, other} {
 		if _, e := pool.Exec(ctx, "INSERT INTO users (id,email,name) VALUES ($1,$2,'U')", u, "dd-"+u.String()[:8]+"@t"); e != nil {
@@ -941,7 +943,7 @@ func TestDeviceDialAuthAndDerivation(t *testing.T) {
 
 	// OWNER → the ACTIVE PRIMARY's dial (g1), even though the device is assigned to g2 (the re-home target).
 	ep, pk, derived, e := svc.DeviceDial(ctx, org, dev, owner)
-	if e != nil || !derived || ep != "g1.example:51820" || pk != "KG1" {
+	if e != nil || !derived || ep != "g1.example:51820" || pk != "PwbD2C7DxRQtXmpFkZ2Dlb0sDx0sOlc6xoZSkw3D16s=" {
 		t.Fatalf("owner must get the ACTIVE-PRIMARY dial, got ep=%q pk=%q derived=%v err=%v", ep, pk, derived, e)
 	}
 
@@ -1002,7 +1004,11 @@ func TestOVPNWidenAndRemotesParityAcrossHubSet(t *testing.T) {
 	g1, g2 := uuid.New(), uuid.New()
 	mk := func(id uuid.UUID, name, host string, prio int) {
 		if _, e := pool.Exec(ctx, "INSERT INTO nodes (id,org_id,name,cert_serial,site_id,wg_public_key,endpoint,hub_priority) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-			id, org, name, "cs-"+id.String()[:8], site, "K"+name, host, prio); e != nil {
+			// ⛔ A DERIVED, REAL-SHAPED KEY. `"K"+name` produced a 3-character placeholder, which
+			// ListSiteGatewaysForOrg now filters (`^[A-Za-z0-9+/]{43}=`) — so the gateway vanished from the
+			// hub set and this test read as a product failure. A computed key is the member of this class a
+			// literal sweep cannot see.
+			id, org, name, "cs-"+id.String()[:8], site, testWGKey(name), host, prio); e != nil {
 			t.Fatalf("seed %s: %v", name, e)
 		}
 	}
@@ -1060,4 +1066,14 @@ func TestOVPNWidenAndRemotesParityAcrossHubSet(t *testing.T) {
 	if r, _ := svc.OVPNRemotes(ctx, org, uuid.New()); r != nil {
 		t.Fatalf("a non-hub-set node must get nil remotes (single remote); got %v", r)
 	}
+}
+
+// testWGKey derives a WELL-FORMED WireGuard public key from a seed — 32 bytes, base64, 43 chars plus '='.
+//
+// ⛔ FIXTURES MUST BE SHAPED LIKE THE THING THEY STAND IN FOR. A placeholder the DATABASE accepts and the
+// DATA PLANE rejects is not a fixture, it is a second product with different rules — and it hid a real
+// defect until an agent enrolled against a real interface and left a gateway with ZERO peers (S15.3).
+func testWGKey(seed string) string {
+	sum := sha256.Sum256([]byte("tunnex-test-" + seed))
+	return base64.StdEncoding.EncodeToString(sum[:])
 }
