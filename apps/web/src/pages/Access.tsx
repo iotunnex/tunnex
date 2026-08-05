@@ -75,6 +75,8 @@ import {
   type LoadState,
   sourceOptions,
   destinationOptions,
+  ruleEffectSummary,
+  ruleEffectCaution,
 } from "../lib/policyview";
 import {
   DIRECTORY_MANAGED_BADGE,
@@ -1480,6 +1482,42 @@ function RuleFormModal({
             else setDstK8sService(o.value);
           }}
         />
+        {/* ⛔ WHAT THE RULE WILL DO, IN WORDS, BEFORE Create. Two pickers and a button let an operator
+            choose two nouns and press go; nothing in that gesture says what the compiler will emit. The gap
+            is enormous — "agent rajan → group Contractors" grants ONE MACHINE UNRESTRICTED ACCESS TO EVERY
+            DEVICE OWNED BY EVERY CONTRACTOR, because a group destination is port-unscoped by construction
+            (compiler.go:442, Protocol: ProtoAny).
+
+            ⚠ A DESCRIPTION, NEVER A REFUSAL. Every pair compiles and every one has a legitimate use. The
+            form's job is that the operator cannot be SURPRISED by their own rule. */}
+        {(() => {
+          const srcLabel =
+            sourceOptions({ groups, members, sites, agents, dstKind, dstSite }).find(
+              (o) =>
+                o.kind === srcKind &&
+                o.value === (srcKind === "group" ? src : srcKind === "user" ? srcUser : srcKind === "site" ? srcSite : srcKind === "agent" ? srcAgent : srcCidr),
+            )?.label ?? (srcKind === "cidr" ? srcCidr : "");
+          const dstLabel =
+            destinationOptions({ groups, resources, sites, services, srcKind, srcSite }).find(
+              (o) =>
+                o.kind === dstKind &&
+                o.value === (dstKind === "group" ? dstGroup : dstKind === "resource" ? dstResource : dstKind === "site" ? dstSite : dstK8sService),
+            )?.label ?? "";
+          if (!srcLabel || !dstLabel) return null;
+          const eff = ruleEffectSummary({ srcKind, srcLabel, dstKind, dstLabel });
+          const caution = ruleEffectCaution(srcKind, dstKind);
+          return (
+            <div
+              data-testid="rule-effect"
+              className={`rounded-md border px-3 py-2 text-xs ${eff.wide ? "border-warn/40 bg-warn/5 text-warn" : "border-white/10 bg-white/5 text-ink-body"}`}
+            >
+              {eff.text}
+              {/* ⚠ THE EXTRA SENTENCE FOR THE ONE SHAPE THAT IS USUALLY A MISTAKE — attached to it alone,
+                  because a caution on every rule is a caution nobody reads. */}
+              {caution && <span className="mt-1 block text-ink-secondary">{caution}</span>}
+            </div>
+          );
+        })()}
         {/* Temporary grant (CREATE only): set an expiry to auto-revoke; empty = permanent.
             Editing an existing rule changes its src/dst; change a temporary grant's window
             with Extend (a window bump), not Edit. */}

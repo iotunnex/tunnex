@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { sourceOptions, destinationOptions, SELF_SITE_REASON } from "../src/lib/policyview";
+import {
+  sourceOptions, destinationOptions, SELF_SITE_REASON,
+  ruleEffectSummary, ruleEffectCaution, DST_SCOPED, DST_WIDE,
+} from "../src/lib/policyview";
 
 /**
  * ⛔ THE VALIDITY RULES, TESTED WITHOUT A DOM — which is why they are pure functions rather than logic inside
@@ -69,5 +72,78 @@ describe("rule option lists — one picker per side", () => {
       groups: G, resources: R, sites: S, services: K, srcKind: "group", srcSite: "",
     });
     expect(new Set(dst.map((o) => o.kind))).toEqual(new Set(["group", "resource", "site", "k8s_service"]));
+  });
+});
+
+/**
+ * ⛔ THE EFFECT SENTENCE — the form's answer to "why was I able to create that?"
+ *
+ * `agent rajan → group Contractors` was creatable and looked ordinary. It grants one machine principal
+ * unrestricted access to every device owned by every Contractor, because a group destination is port-unscoped
+ * by construction (`compiler.go:442`, `Protocol: ProtoAny`). Nothing was wrong with the software; everything
+ * was wrong with what the screen let someone believe they were doing.
+ */
+describe("rule effect summary", () => {
+  it("⭐ A GROUP DESTINATION SAYS *ALL PORTS*, BECAUSE IT IS", () => {
+    const e = ruleEffectSummary({
+      srcKind: "agent", srcLabel: "rajan", dstKind: "group", dstLabel: "Contractors",
+    });
+    expect(e.wide).toBe(true);
+    expect(e.text).toContain("AI agent rajan");
+    expect(e.text).toContain("every device belonging to every member of Contractors");
+    expect(e.text).toContain("ALL ports");
+  });
+
+  it("a site destination is equally unbounded", () => {
+    expect(ruleEffectSummary({ srcKind: "group", srcLabel: "Eng", dstKind: "site", dstLabel: "eu-lan" }).wide).toBe(true);
+  });
+
+  it("⛔ AND A RESOURCE IS NOT — the distinction is the whole point", () => {
+    // Without this, marking everything `wide` would satisfy the assertions above and destroy the signal:
+    // a warning that fires on every rule is one nobody reads.
+    const e = ruleEffectSummary({
+      srcKind: "agent", srcLabel: "rajan", dstKind: "resource", dstLabel: "gitlab",
+    });
+    expect(e.wide).toBe(false);
+    expect(e.text).toContain("declared ports only");
+  });
+
+  it("a k8s service is port-scoped too", () => {
+    expect(ruleEffectSummary({ srcKind: "user", srcLabel: "Ana", dstKind: "k8s_service", dstLabel: "pay" }).wide).toBe(false);
+  });
+
+  it("⚠ THE CAUTION FIRES ONLY FOR THE SHAPE THAT IS USUALLY A MISTAKE", () => {
+    // A machine principal granted unrestricted access to humans' own devices. Legitimate when deliberate,
+    // which is why it is a question about intent rather than a refusal.
+    expect(ruleEffectCaution("agent", "group")).toMatch(/machine principal/);
+    expect(ruleEffectCaution("agent", "site")).toMatch(/machine principal/);
+    // ⛔ And NOT otherwise. A caution on every rule is a caution nobody reads.
+    expect(ruleEffectCaution("agent", "resource")).toBeNull();
+    expect(ruleEffectCaution("group", "group")).toBeNull();
+    expect(ruleEffectCaution("user", "site")).toBeNull();
+  });
+});
+
+describe("option sections — where port scope becomes visible", () => {
+  it("⛔ THE TWO DESTINATION SECTIONS SAY WHICH IS UNBOUNDED", () => {
+    const dst = destinationOptions({
+      groups: G, resources: R, sites: S, services: K, srcKind: "group", srcSite: "",
+    });
+    const scoped = dst.filter((o) => o.kind === "resource" || o.kind === "k8s_service");
+    const wide = dst.filter((o) => o.kind === "group" || o.kind === "site");
+    expect(new Set(scoped.map((o) => o.section))).toEqual(new Set([DST_SCOPED]));
+    expect(new Set(wide.map((o) => o.section))).toEqual(new Set([DST_WIDE]));
+    // The heading carries the fact a per-row tag cannot.
+    expect(DST_WIDE).toMatch(/ALL ports/);
+  });
+
+  it("sources are filed as People / Machines / Networks", () => {
+    // ⛔ An agent gets its OWN section: filing it under People would imply an owner carrying it, and under
+    // Networks would imply a subnet. It is one machine, and that is a third thing.
+    const src = sourceOptions({ groups: G, members: M, sites: S, agents: A, dstKind: "", dstSite: "" });
+    expect(src.find((o) => o.kind === "agent")!.section).toBe("Machines");
+    expect(src.find((o) => o.kind === "user")!.section).toBe("People");
+    expect(src.find((o) => o.kind === "group")!.section).toBe("People");
+    expect(src.find((o) => o.kind === "site")!.section).toBe("Networks");
   });
 });
