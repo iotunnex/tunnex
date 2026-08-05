@@ -103,7 +103,7 @@ const DISPOSITIONS: Record<string, Disposition> = {
   // ── CUT: with the measurement, not the intention.
   OPERATIONS: {
     kind: "cut",
-    why: "MEASURED: backup, version and metrics have ZERO endpoints — backup/restore is `backupctl`, a CLI command, not an API. Leader election and replicas already render as Dashboard's HA Hub Set and System Health panels. Building it means INVENTING READS. Registered: the servable parts return if S11.1 (metrics) lands.",
+    why: "MEASURED: backup, version and metrics have ZERO endpoints — backup/restore is `backupctl`, a CLI command, not an API. Leader election and replicas already render as Dashboard's HA Hub Set panel. (⚠ THIS REASON NAMED A SECOND PANEL, `System Health`, WHICH WAS REMOVED FROM Overview on the founder's instruction — the control-plane liveness it showed still renders, in AppShell, on every screen rather than one. The citation is corrected rather than left: a cut justified by a surface that no longer exists is an undocumented gap, and nothing here MECHANICALLY checks that a panel named in a `why` still exists — these strings rot silently.) Building it means INVENTING READS. Registered: the servable parts return if S11.1 (metrics) lands.",
   },
   LICENSE: {
     kind: "cut",
