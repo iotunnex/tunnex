@@ -1,5 +1,5 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 // THE FIRST COMPONENT TEST IN THIS REPO, and it exists for a gap the pure tier cannot close.
@@ -46,6 +46,11 @@ vi.mock("qrcode.react", () => ({ QRCodeSVG: () => null }));
 
 import Devices from "../src/pages/Devices";
 
+// ⚠ NO CLEANUP EXISTED IN THIS FILE. That was survivable while every test rendered once; the moment two
+// do, the first render's DOM is still mounted and "Add device" matches twice — a strict-mode violation that
+// looks like a component bug and is a harness one. At module scope so it covers the older tests too.
+afterEach(cleanup);
+
 describe("device creation homes on an ACTIVE gateway (S13.1 Slice 3 — the wiring)", () => {
   beforeEach(() => {
     posts.length = 0;
@@ -62,6 +67,9 @@ describe("device creation homes on an ACTIVE gateway (S13.1 Slice 3 — the wiri
     );
 
     // Wait for the fleet to load, then create a device through the real form.
+    // ⚠ The create form is a MODAL now (matching Add rule), so it has to be opened before its fields
+    // exist. The subject of this test is unchanged: which gateway id the POST carries.
+    fireEvent.click(await screen.findByRole("button", { name: "Add device" }));
     const nameInput = await waitFor(() => screen.getByPlaceholderText("my-laptop"));
     fireEvent.change(nameInput, { target: { value: "test-laptop" } });
     fireEvent.click(screen.getByRole("button", { name: /create device/i }));
@@ -74,5 +82,43 @@ describe("device creation homes on an ACTIVE gateway (S13.1 Slice 3 — the wiri
       "the device must be homed on the ACTIVE gateway; homing it on the revoked one issues a one-time config " +
         "that can never connect, and a one-time secret cannot be re-issued",
     ).toBe("live-gateway");
+  });
+});
+
+/**
+ * ⛔ THE CREATE FORM IS A MODAL, AND THE ROSTER OWNS THE TOP OF THE PAGE.
+ *
+ * Inline, it was a permanently-open four-control card between the title and the list — and the list is what
+ * this screen is FOR. A trigger costs one click on the rare visit that creates a device, and gives the
+ * roster the top of the page on every other one.
+ */
+describe("Devices — creation is a dialog, not a permanent form", () => {
+  const open = async () => {
+    render(<MemoryRouter><Devices /></MemoryRouter>);
+    const btn = await screen.findByRole("button", { name: "Add device" });
+    fireEvent.click(btn);
+  };
+  it("⛔ THE FORM IS ABSENT UNTIL ASKED FOR", async () => {
+    render(<MemoryRouter><Devices /></MemoryRouter>);
+    const trigger = await screen.findByRole("button", { name: "Add device" });
+    // Nothing of the form is on the page…
+    expect(screen.queryByPlaceholderText("my-laptop")).toBeNull();
+    expect(screen.queryByRole("button", { name: /create device/i })).toBeNull();
+    // …until the trigger is used.
+    fireEvent.click(trigger);
+    expect(screen.getByPlaceholderText("my-laptop")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /create device/i })).toBeTruthy();
+  });
+
+  it("⚠ AND EXACTLY ONE SUBMIT — moving a control must not leave a copy behind", async () => {
+    // The first attempt kept the form's own button AND added one to the modal's action row, so two controls
+    // claimed the same verb. Playwright and testing-library both call that ambiguous; an operator would too.
+    await open();
+    expect(screen.getAllByRole("button", { name: /create device|export openvpn profile/i })).toHaveLength(1);
+  });
+
+  it("⛔ THE MIGRATION BANNER IS GONE — a first-time reader is not owed a note about where something USED to be", () => {
+    render(<MemoryRouter><Devices /></MemoryRouter>);
+    expect(screen.queryByText(/Gateways moved to their own screen/i)).toBeNull();
   });
 });
