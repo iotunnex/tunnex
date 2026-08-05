@@ -8,7 +8,7 @@ import {
   type Member,
 } from "../lib/api";
 import { endSentence, relativeAge } from "../lib/format";
-import { Button, Card, ErrorText, Field, Input } from "./ui";
+import { Button, Card, DataTable, ErrorText, Field, Input } from "./ui";
 import { OneTimeSecretModal } from "./OneTimeSecret";
 
 // MachineCredentials (S10.2) — the owner-only Settings panel to mint / list / revoke the GitOps operator's
@@ -215,109 +215,126 @@ export function MachineCredentials({
               failing. Assign an owner to restore it.
             </p>
           )}
-          <ul className="mt-3 space-y-1">
-            {creds.data.map((c) => (
-              <li
-                key={c.id}
-                data-owned={c.owner_user_id ? "yes" : "no"}
-                className="flex items-center justify-between gap-3 rounded-md bg-white/5 px-3 py-2 text-sm"
-              >
-                <span className="min-w-0 text-slate-200">
-                  {c.name}
-                  <span className="ml-2 font-mono text-xs text-slate-500">
-                    {c.fingerprint}
+          {/* ⛔ A TABLE, BECAUSE THIS IS TABULAR AND IT PAGES. Credential / owner / created / last seen /
+              status are the same five facts for every row, and an org accumulates these — the list gave no
+              way to find one and no way to stop rendering all of them.
+
+              ⚠ THE OWNER COLUMN IS WHY THIS SCREEN EXISTS. It reads `owner_email`, the SERVER's resolution
+              from `users` (D22), never the member roster — the roster cannot name an owner who has LEFT the
+              org, which is precisely the row accountability is for. */}
+          <DataTable<MachineCredential>
+            caption="Machine credentials"
+            rows={creds.data}
+            rowKey={(c) => c.id}
+            rowAttrs={(c) => ({ "data-owned": c.owner_user_id ? "yes" : "no" })}
+            failed={false}
+            pageSize={10}
+            empty="No machine credentials have been minted."
+            columns={[
+              {
+                key: "name",
+                header: "Credential",
+                sortValue: (c) => `${c.name} ${c.fingerprint}`,
+                cell: (c) => (
+                  <span className="flex flex-col">
+                    <span className="text-slate-200">{c.name}</span>
+                    <span className="font-mono text-[10px] text-slate-500">{c.fingerprint}</span>
                   </span>
-                  <span className="ml-2 text-xs text-slate-500">
-                    created {relativeAge(c.created_at)}
-                    {/* ⛔ "last seen", LABELLED. `last_used_at` is stamped on every successful auth — it is
-                        LAST AUTHENTICATED AT and nothing more. A credential idle for a day may be an hourly
-                        GitOps reconcile or abandoned, and this column cannot tell them apart. The spec now
-                        says so explicitly; the UI must not re-invent what the spec refused. No in-use badge,
-                        no active/idle, no threshold. */}
-                    {c.last_used_at
-                      ? ` · last seen ${relativeAge(c.last_used_at)}`
-                      : " · never seen"}
-                  </span>
-                  {/* ⛔ THE MOMENT A CREDENTIAL ACQUIRED AN OWNER, THAT FACT BECAME INVISIBLE. On a
-                      screen whose entire purpose is accountability, the assigned state was the one
-                      state that said nothing at all.
-                      ⛔ AND IT READS `owner_email`, THE SERVER'S RESOLUTION, NOT THE MEMBER ROSTER (D22
-                      ruled). The roster lookup that was here is REMOVED rather than kept alongside: two
-                      resolvers for one fact is the one-truth violation in its plainest form, and the
-                      client's copy is the one that CANNOT SEE A DEPARTED MEMBER.
-                      ⚠ AND THAT IS THE ROW THIS SCREEN EXISTS FOR. Nothing pins a membership, so an owner
-                      who leaves the org keeps the credential and drops off the roster — the roster-based
-                      render went blank at exactly the moment accountability mattered. The server resolves
-                      from `users`, which survives both leaving and deactivation.
-                      The fallback is for a genuinely unrecoverable identity only; ON DELETE RESTRICT means
-                      an assigned credential cannot outlive its user row, so it should be unreachable. */}
-                  {c.owner_user_id ? (
-                    <span className="ml-2 text-xs text-ink-secondary">
-                      · owner{" "}
-                      <span className="text-slate-300">
-                        {c.owner_email ?? "no longer a known account"}
-                      </span>
+                ),
+              },
+              {
+                key: "owner",
+                header: "Owner",
+                // ⛔ THE UNOWNED STATE IS SEARCHABLE BY THE WORDS THE BADGE USES. A badge contributes no
+                // text, so without this the rows that are actively FAILING would be the least findable.
+                sortValue: (c) => c.owner_email ?? "no owner refused",
+                cell: (c) =>
+                  c.owner_user_id ? (
+                    <span className="text-xs text-slate-300">
+                      {/* The fallback is for a genuinely unrecoverable identity only; ON DELETE RESTRICT
+                          means an assigned credential cannot outlive its user row. */}
+                      {c.owner_email ?? "no longer a known account"}
                     </span>
                   ) : (
                     <span
                       data-badge="refused"
-                      className="ml-2 rounded border border-danger/40 px-1.5 py-0.5 text-[10px] text-danger"
+                      className="rounded border border-danger/40 px-1.5 py-0.5 text-[10px] text-danger"
                     >
                       no owner — refused
                     </span>
-                  )}
-                </span>
-                <span className="flex shrink-0 items-center gap-2">
-                  {canManage && !c.owner_user_id && (
-                    <>
-                      <label className="sr-only" htmlFor={`owner-${c.id}`}>
-                        Owner for {c.name}
-                      </label>
-                      {/* ⛔ NO SUGGESTED OWNER. `created_by` does not exist, so there is nothing to pre-select
-                          from — a default here would be a client-invented value sitting where a server fact
-                          belongs. The placeholder says the system does not know. */}
-                      <select
-                        id={`owner-${c.id}`}
-                        value={owner[c.id] ?? ""}
-                        onChange={(e) =>
-                          setOwner((o) => ({ ...o, [c.id]: e.target.value }))
-                        }
-                        className="rounded border border-line bg-surface-inset px-2 py-1 text-xs"
-                      >
-                        <option value="">Choose an owner…</option>
-                        {/* ⛔ UNVERIFIED ACCOUNTS ARE NOT OFFERED (D21 ruled). Ownership is an
-                            accountability claim, and an account that cannot perform org mutations —
-                            requireVerifiedUser gates those — cannot be held accountable for what a
-                            credential does.
-                            ⚠ THIS FILTER IS PRESENTATION, NOT ENFORCEMENT. The server refuses an
-                            unverified owner at the handler AND inside the UPDATE statement; removing
-                            this line would change what is offered, not what is permitted. */}
-                        {members
-                          .filter((m) => m.email_verified)
-                          .map((m) => (
-                            <option key={m.user_id} value={m.user_id}>
-                              {m.email}
-                            </option>
-                          ))}
-                      </select>
-                      <Button
-                        variant="ghost"
-                        disabled={busy || !owner[c.id]}
-                        onClick={() => void assign(c.id)}
-                      >
-                        Assign
+                  ),
+              },
+              {
+                key: "created",
+                header: "Created",
+                sortValue: (c) => Date.parse(c.created_at),
+                cell: (c) => <span className="text-xs text-slate-500">{relativeAge(c.created_at)}</span>,
+              },
+              {
+                key: "seen",
+                header: "Last seen",
+                // ⛔ "last seen", LABELLED. `last_used_at` is stamped on every successful auth — it is LAST
+                // AUTHENTICATED AT and nothing more. A credential idle for a day may be an hourly GitOps
+                // reconcile or abandoned, and this column cannot tell them apart. No in-use badge, no
+                // active/idle, no threshold: the UI must not re-invent what the spec refused.
+                sortValue: (c) => (c.last_used_at ? Date.parse(c.last_used_at) : 0),
+                cell: (c) => (
+                  <span className="text-xs text-slate-500">
+                    {c.last_used_at ? relativeAge(c.last_used_at) : "never seen"}
+                  </span>
+                ),
+              },
+              {
+                key: "actions",
+                header: "",
+                cell: (c) => (
+                  <span className="flex items-center justify-end gap-2">
+                    {canManage && !c.owner_user_id && (
+                      <>
+                        <label className="sr-only" htmlFor={`owner-${c.id}`}>
+                          Owner for {c.name}
+                        </label>
+                        {/* ⛔ NO SUGGESTED OWNER. `created_by` does not exist, so a default here would be a
+                            client-invented value sitting where a server fact belongs. */}
+                        <select
+                          id={`owner-${c.id}`}
+                          value={owner[c.id] ?? ""}
+                          onChange={(e) => setOwner((o) => ({ ...o, [c.id]: e.target.value }))}
+                          className="rounded border border-line bg-surface-inset px-2 py-1 text-xs"
+                        >
+                          <option value="">Choose an owner…</option>
+                          {/* ⛔ UNVERIFIED ACCOUNTS ARE NOT OFFERED (D21). An account that cannot perform
+                              org mutations cannot be held accountable for what a credential does.
+                              ⚠ PRESENTATION, NOT ENFORCEMENT — the server refuses at the handler AND in
+                              the UPDATE. */}
+                          {members
+                            .filter((m) => m.email_verified)
+                            .map((m) => (
+                              <option key={m.user_id} value={m.user_id}>
+                                {m.email}
+                              </option>
+                            ))}
+                        </select>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy || !owner[c.id]}
+                          onClick={() => void assign(c.id)}
+                        >
+                          Assign
+                        </Button>
+                      </>
+                    )}
+                    {canManage && (
+                      <Button size="sm" variant="ghost" onClick={() => revoke(c.id)}>
+                        Revoke
                       </Button>
-                    </>
-                  )}
-                  {canManage && (
-                    <Button variant="ghost" onClick={() => revoke(c.id)}>
-                      Revoke
-                    </Button>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ul>
+                    )}
+                  </span>
+                ),
+              },
+            ]}
+          />
           {/* The refusal is stated ABOVE the rows now. What is left here is the thing that genuinely
               belongs under the list: why there is nothing to pre-select. */}
           {canManage && creds.data.some((c) => !c.owner_user_id) && (
