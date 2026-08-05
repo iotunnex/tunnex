@@ -114,7 +114,7 @@ describe("AuditLog — wiring: paging must use the APPLIED filter set, not the o
     withAuth(<AuditLog />);
 
     const loadMore = await waitFor(() =>
-      screen.getByRole("button", { name: "Load more" }),
+      screen.getByRole("button", { name: "Load more from server" }),
     );
     expect(queries.at(-1)?.action).toBeUndefined(); // the initial page: no filters applied
 
@@ -173,5 +173,40 @@ describe("AuditLog — the actor column names the human", () => {
       .getAllByRole("row")
       .find((r) => r.textContent?.includes("Ada Auditor"))!;
     expect(firstRow.textContent).not.toMatch(/\bsystem\b/);
+  });
+});
+
+/**
+ * ⛔ TWO PAGERS ON ONE SCREEN, AND THE FIX WAS TO NAME THEM RATHER THAN DELETE ONE.
+ *
+ * This page fetches with a keyset cursor (server-side) AND renders a table that pages what has been fetched
+ * (client-side). Fearing the collision, I first disabled the client pager here — which made this the one
+ * screen that dumped every loaded row at once, the exact thing pagination exists to prevent. The founder saw
+ * it on sight.
+ *
+ * > **TWO PAGERS CONTRADICT EACH OTHER ONLY WHILE THEY ARE SILENT ABOUT WHICH SET THEY DESCRIBE.** The
+ * > table's count says "of N loaded"; the server control says "from server" on its face.
+ */
+describe("AuditLog — it pages what it has, and can fetch more", () => {
+  it("⛔ DOES NOT RENDER EVERY LOADED ROW AT ONCE", async () => {
+    // The fixture serves 51 rows. Before this fix all 51 rendered; a page is 25.
+    withAuth(<AuditLog />);
+    const table = await waitFor(() => screen.getByRole("table", { name: "Audit events" }));
+    // 25 body rows + 1 header. The precise number matters: "fewer than 51" would also pass on a
+    // component that rendered one row, which is a different defect wearing the same result.
+    expect(within(table).getAllByRole("row")).toHaveLength(26);
+    // 50, not 51: the page fetches PAGE+1 purely to probe for more and displays PAGE. The count
+    // describes what is SHOWN, never the probe row.
+    expect(screen.getByText("Showing 1–25 of 50")).toBeTruthy();
+  });
+
+  it("⚠ AND BOTH CONTROLS ARE PRESENT AND DISTINGUISHABLE", async () => {
+    // The client pager moves within what is loaded; the server control extends what is loaded. If either
+    // disappeared, one of the two sets would become unreachable — the client pager's absence was the
+    // original defect, and the server control's absence would cap the log at one fetch forever.
+    withAuth(<AuditLog />);
+    await waitFor(() => screen.getByRole("table", { name: "Audit events" }));
+    expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Load more from server" })).toBeTruthy();
   });
 });

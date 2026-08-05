@@ -140,13 +140,15 @@ export default function AccessEvents() {
       </Card>
 
       <div className="mt-4">
-        {/* ⛔ NO CLIENT PAGER HERE: this page ALREADY pages server-side with a keyset cursor behind
-                "Load more". Two paging controls on one screen disagree — "Load more" appends rows the
-                operator cannot see without advancing a second pager, and the count then describes neither
-                the fetch nor the view. The server's cursor is the one that must win, because it is the one
-                that bounds the query. */}
-            <DataTable<AccessEvent>
-              pageSize={0}
+        {/* ⛔ TWO PAGERS, AND THEY ARE NOT RIVALS ONCE THEY ARE NAMED. This page pages SERVER-SIDE with a
+                keyset cursor; the table pages the rows already FETCHED. I first disabled the client pager to
+                avoid the collision, which meant this screen dumped everything loaded at once — the one thing
+                the pager exists to stop, and the founder saw it immediately.
+
+                They compose as long as each says which set it is talking about: the table's count reads
+                "of N" where N is what has been LOADED, and the server control says so on its face. Silence
+                about which set a number describes is what makes two pagers contradict each other. */}
+        <DataTable<AccessEvent>
           caption="Access events"
           rows={events}
           rowKey={(e) => e.id}

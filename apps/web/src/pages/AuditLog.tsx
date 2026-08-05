@@ -211,8 +211,15 @@ export default function AuditLog() {
                 operator cannot see without advancing a second pager, and the count then describes neither
                 the fetch nor the view. The server's cursor is the one that must win, because it is the one
                 that bounds the query. */}
+            {/* ⛔ TWO PAGERS, AND THEY ARE NOT RIVALS ONCE THEY ARE NAMED. This page pages SERVER-SIDE with a
+                keyset cursor; the table pages the rows already FETCHED. I first disabled the client pager to
+                avoid the collision, which meant this screen dumped everything loaded at once — the one thing
+                the pager exists to stop, and the founder saw it immediately.
+
+                They compose as long as each says which set it is talking about: the table's count reads
+                "of N" where N is what has been LOADED, and the server control says so on its face. Silence
+                about which set a number describes is what makes two pagers contradict each other. */}
             <DataTable
-              pageSize={0}
           caption="Audit events"
           rows={entries}
           rowKey={(a) => a.id}
@@ -297,7 +304,7 @@ export default function AuditLog() {
               org && fetchPage(org.id, applied, entries[entries.length - 1])
             }
           >
-            {busy ? "Loading…" : "Load more"}
+            {busy ? "Loading…" : "Load more from server"}
           </Button>
         </div>
       )}
