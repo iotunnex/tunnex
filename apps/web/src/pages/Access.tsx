@@ -34,6 +34,7 @@ import {
   Select,
   DataTable,
 } from "../components/ui";
+import { relativeAge } from "../lib/format";
 import { EntityPicker } from "../components/EntityPicker";
 import { ComposeGate } from "../components/ComposeGate";
 import { LoadRetry } from "../components/LoadRetry";
@@ -2214,40 +2215,68 @@ function DeviceApprovalSection({
       {modeError && <LoadRetry error={modeError} onRetry={load} />}
       <ErrorText>{err}</ErrorText>
 
-      <p className="mt-3 text-xs font-medium text-slate-400">Pending devices</p>
+      {/* ⛔ PENDING DEVICES AS A TABLE. A device awaiting approval is the ONE list here where the operator
+          is being asked to make a security decision — and the row gave them a name and an IP with no owner,
+          no platform, no age. Approving a device you cannot attribute is approving a device.
+
+          ⚠ The wait is shown because it is the fact that decides urgency: a request from four minutes ago
+          and one from nine days ago are different situations wearing the same row. */}
       {pendingError ? (
         <LoadRetry error={pendingError} onRetry={load} />
       ) : (
-        <ul className="mt-2 space-y-1">
-          {pending.map((d) => (
-            <li
-              key={d.id}
-              className="flex items-center justify-between rounded-md bg-white/5 px-3 py-2 text-sm text-slate-200"
-            >
-              <span>
-                {d.name} <span className="text-slate-500">{d.assigned_ip}</span>
-              </span>
-              {canManage && (
-                <span className="flex gap-2">
-                  <Button onClick={() => decide(d.id, "approve")}>
-                    Approve
-                  </Button>
-                  <Button
-                    variant="danger"
-                    onClick={() => decide(d.id, "reject")}
-                  >
-                    Reject
-                  </Button>
-                </span>
-              )}
-            </li>
-          ))}
-          {pending.length === 0 && (
-            <li className="text-xs text-slate-500">
-              No devices awaiting approval.
-            </li>
-          )}
-        </ul>
+        <DataTable<Device>
+          caption="Pending devices"
+          rows={pending}
+          rowKey={(d) => d.id}
+          failed={false}
+          pageSize={10}
+          empty="No devices awaiting approval."
+          rowActions={
+            canManage
+              ? [
+                  {
+                    key: "approve",
+                    label: "Approve",
+                    run: (ds: Device[]) => {
+                      void Promise.all(ds.map((d) => decide(d.id, "approve")));
+                    },
+                  },
+                  {
+                    key: "reject",
+                    label: "Reject",
+                    danger: true,
+                    run: (ds: Device[]) => {
+                      void Promise.all(ds.map((d) => decide(d.id, "reject")));
+                    },
+                  },
+                ]
+              : undefined
+          }
+          columns={[
+            {
+              key: "name",
+              header: "Device",
+              sortValue: (d) => d.name,
+              cell: (d) => <span className="text-slate-200">{d.name}</span>,
+            },
+            {
+              key: "ip",
+              header: "Address",
+              sortValue: (d) => d.assigned_ip ?? "",
+              cell: (d) => (
+                <span className="font-mono text-xs text-slate-500">{d.assigned_ip}</span>
+              ),
+            },
+            {
+              key: "waiting",
+              header: "Waiting",
+              sortValue: (d) => Date.parse(d.created_at),
+              cell: (d) => (
+                <span className="text-xs text-slate-500">{relativeAge(d.created_at)}</span>
+              ),
+            },
+          ]}
+        />
       )}
     </Card>
   );
@@ -2389,7 +2418,7 @@ function PostureChecksSection({
               </div>
               {canManage ? (
                 <Select
-                  className="w-32"
+                  width="auto"
                   value={diskMode}
                   disabled={busy}
                   onChange={(e) =>
@@ -2420,7 +2449,7 @@ function PostureChecksSection({
               </div>
               {canManage ? (
                 <Select
-                  className="w-32"
+                  width="auto"
                   value={osMode}
                   disabled={busy}
                   onChange={(e) => setOsMode(e.target.value as CheckMode)}

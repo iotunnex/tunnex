@@ -147,12 +147,27 @@ export function ErrorText({ children }: { children: ReactNode }) {
 // inline (S7.4a). Same border/bg/focus tokens as Input so the two read as one family.
 export function Select({
   className = "",
+  width = "full",
   children,
   ...props
-}: SelectHTMLAttributes<HTMLSelectElement> & { children: ReactNode }) {
+}: SelectHTMLAttributes<HTMLSelectElement> & {
+  children: ReactNode;
+  /**
+   * `auto` for a control that should be as wide as its options, not as wide as its container.
+   *
+   * ⛔ A REAL PROP, NOT AN OVERRIDE CLASS — the same Tailwind trap `Button.size` documents, and it had
+   * already bitten here. `w-full` is baked into the base, so a caller passing `className="w-32"` gets
+   * whichever rule the generated stylesheet happens to order LAST, which is not attribute order. The two
+   * posture selects were written `w-32` and rendered full width: an Off/Warn/Require control stretched
+   * across two thirds of a card, which reads as a text field, not a choice of three.
+   *
+   * Swapping the class means only one of them exists.
+   */
+  width?: "full" | "auto";
+}) {
   return (
     <select
-      className={`w-full rounded-md border border-white/10 bg-ink-900 px-3 py-2 text-sm text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-400 ${className}`}
+      className={`${width === "auto" ? "w-auto min-w-[9rem]" : "w-full"} rounded-md border border-white/10 bg-ink-900 px-3 py-2 text-sm text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-400 ${className}`}
       {...props}
     >
       {children}
