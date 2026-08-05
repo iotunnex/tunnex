@@ -854,7 +854,11 @@ export function DataTable<T>({
                     key={c.key}
                     scope="col"
                     aria-sort={active ? (sort!.dir === 1 ? "ascending" : "descending") : undefined}
-                    className={`border-b border-white/10 py-1.5 pr-4 font-medium ${c.numeric ? "text-right" : ""}`}
+                    // ⚠ A RIGHT-ALIGNED COLUMN NEEDS PADDING ON ITS *LEFT*, not only its right. `pr-4`
+                    // alone pushes a numeric column's content to its own right edge, where it lands flush
+                    // against the next column's left edge — "0" and a role select ended up touching, and
+                    // the eye reads two adjacent columns as one field.
+                    className={`border-b border-white/10 py-1.5 pr-4 font-medium ${c.numeric ? "pl-6 text-right" : ""}`}
                   >
                     {c.sortValue ? (
                       <button
@@ -925,7 +929,7 @@ export function DataTable<T>({
                 {columns.map((c) => (
                   <td
                     key={c.key}
-                    className={`py-1.5 pr-4 align-middle ${c.numeric ? "text-right tabular-nums" : ""}`}
+                    className={`py-1.5 pr-4 align-middle ${c.numeric ? "pl-6 text-right tabular-nums" : ""}`}
                   >
                     {c.cell(r, { expanded: isOpen, toggle })}
                   </td>

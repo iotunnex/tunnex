@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
-import {
+import { fireEvent,
   render,
   screen,
   waitFor,
@@ -249,9 +249,13 @@ describe("Devices — wiring", () => {
     await waitFor(() =>
       expect(screen.getByRole("table", { name: "Devices" })).toBeTruthy(),
     );
-    for (const h of ["Device", "Address", "State", "Posture", "Actions"]) {
+    // ⚠ "Actions" left this list because the verbs left the ROWS — Approve / Reject / Revoke now live in
+    // the selection bar. The claim is unchanged (every column a reader sees is named); the affordance it
+    // used to head is asserted below, where it now lives.
+    for (const h of ["Device", "Address", "State", "Posture"]) {
       expect(screen.getByRole("columnheader", { name: h }), h).toBeTruthy();
     }
+    expect(screen.getAllByRole("checkbox").length).toBeGreaterThan(0);
   });
 });
 
@@ -305,5 +309,56 @@ describe("Devices — failure path", () => {
         needs_reexport: true,
       },
     );
+  });
+});
+
+/**
+ * ⛔ A STATE A SURFACE DISPLAYS AND CANNOT ACT ON IS A DEAD END.
+ *
+ * This page listed a device with a `pending` badge and rendered its Actions cell `null` — Revoke was offered
+ * for `active` only. Approve and Reject existed, and their sole call site was the Device-approval card on
+ * ACCESS POLICIES, so an operator looking straight at a pending device had to already know it was governed
+ * from a different screen. Found by the founder, on the screen where it is most obvious.
+ */
+describe("Devices — a pending device can be acted on HERE", () => {
+  // ⚠ `DEVICES` is a SHARED, MUTATED array — an earlier test in this file empties and refills it, so an
+  // appended test inherits whatever ran before. Set it explicitly rather than depending on order.
+  const seed = (rows: unknown[]) => {
+    DEVICES.length = 0;
+    (DEVICES as unknown[]).push(...rows);
+  };
+
+  it("⛔ APPROVE IS OFFERED ON A PENDING DEVICE — the verb that had no call site on this screen", async () => {
+    seed([{ id: "d-p", name: "unapproved-phone", status: "pending", assigned_ip: "10.99.0.15" }]);
+    render(
+      <MemoryRouter>
+        <Devices />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByRole("table", { name: "Devices" })).toBeTruthy());
+    fireEvent.click(await screen.findByRole("checkbox", { name: /^Select unapproved-phone/ }));
+
+    expect(screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: "Reject" }).hasAttribute("disabled")).toBe(false);
+
+    // ⛔ AND REVOKE IS *NOT* OFFERED FOR IT, with the reason. A pending device is REJECTED, not revoked —
+    // two different decisions — and revoking one would be a no-op the server reports as success.
+    const revoke = screen.getByRole("button", { name: "Revoke" });
+    expect(revoke.hasAttribute("disabled")).toBe(true);
+    expect(revoke.getAttribute("title")).toMatch(/pending device cannot be revoked/);
+  });
+
+  it("⚠ …AND THE CONVERSE, so 'always enabled' cannot pass: an ACTIVE device revokes and cannot be approved", async () => {
+    seed([{ id: "d-a", name: "live-laptop", status: "active", assigned_ip: "10.99.0.20" }]);
+    render(
+      <MemoryRouter>
+        <Devices />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByRole("table", { name: "Devices" })).toBeTruthy());
+    fireEvent.click(await screen.findByRole("checkbox", { name: /^Select live-laptop/ }));
+
+    expect(screen.getByRole("button", { name: "Revoke" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled")).toBe(true);
   });
 });

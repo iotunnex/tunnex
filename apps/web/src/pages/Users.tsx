@@ -484,6 +484,9 @@ export default function Users() {
             {
               key: "role",
               header: "Role",
+              // ⚠ NOT `numeric`. The role control sits directly after the right-aligned DEVICES count, so
+              // without its own left padding a "0" and a <select> render touching — see the numeric padding
+              // in DataTable. This column is left-aligned and takes the gap from that side.
               sortValue: (m) => m.role,
               cell: (m) => {
                 // Role is editable on any target the actor may manage — INCLUDING self (an owner handing off
