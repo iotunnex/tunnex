@@ -404,7 +404,14 @@ function RulesSection({
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<PolicyRule | null>(null);
   const [extendingGrant, setExtendingGrant] = useState<PolicyRule | null>(null);
-  const [disablingRule, setDisablingRule] = useState<PolicyRule | null>(null); // F3: the rule pending a disable-confirm
+  // F3: the rules pending a disable-confirm. PLURAL since the verbs moved to the selection bar — and
+  // disabling five live allows at once is strictly MORE consequential than disabling one, so the ceremony
+  // grew with the set rather than being dropped for convenience.
+  const [disablingRules, setDisablingRules] = useState<PolicyRule[]>([]);
+  // ⛔ DELETE NOW CONFIRMS, AND THAT IS A DELIBERATE ADDITION. Per-row it was one click on one rule; from a
+  // selection bar the same click can destroy fifteen. An unconfirmed bulk delete of authorization rules is
+  // the kind of control that is only ever wrong once.
+  const [deletingRules, setDeletingRules] = useState<PolicyRule[]>([]);
   // SINGLE source of truth for the partial-swap warning: the SET of rule ids a create-then-
   // delete left un-deleted. The notice is DERIVED (staleNoticeText) — no separate state to
   // desync ([291]/[309]/[371]). Pruned ONLY on a successful load (amendment A), per-id (B).
@@ -772,6 +779,84 @@ function RulesSection({
                   {rulesEmptyCopy(rulesEmptyState({ rulesResult, modeResult, renderedCount: rules.length })).text}
                 </span>
               }
+              // ⛔ THE VERBS LIVE IN ONE BAR, NOT ON EVERY ROW. Fifteen rules meant forty-five buttons —
+              // the same three verbs redrawn fifteen times, crowding out the thing the row is actually
+              // about. `unavailable` is what makes that safe rather than merely tidier: a GitOps-managed
+              // grant refuses every mutation, and the bar names that BEFORE the click instead of skipping
+              // the row afterwards.
+              rowActions={
+                canManage
+                  ? [
+                      {
+                        key: "edit",
+                        label: "Edit",
+                        arity: "single",
+                        unavailable: (r: PolicyRule) =>
+                          grantControls(ruleRow(r, groups, resources, members, sites, loaded, services))
+                            .withheld
+                            ? managedGrantWarning()
+                            : canEditRuleInModal(r)
+                              ? null
+                              : "This rule's source or destination is not editable here.",
+                        run: (rs: PolicyRule[]) => setEditing(rs[0]),
+                      },
+                      {
+                        key: "extend",
+                        label: "Extend",
+                        arity: "single",
+                        unavailable: (r: PolicyRule) =>
+                          grantControls(ruleRow(r, groups, resources, members, sites, loaded, services))
+                            .withheld
+                            ? managedGrantWarning()
+                            : grantExpiry(r, Date.now()).extendable
+                              ? null
+                              : "Only a temporary grant can be extended.",
+                        run: (rs: PolicyRule[]) => setExtendingGrant(rs[0]),
+                      },
+                      {
+                        key: "enable",
+                        label: "Enable",
+                        // F3: enable is ADDITIVE and therefore one click, in bulk as on a single row.
+                        unavailable: (r: PolicyRule) =>
+                          grantControls(ruleRow(r, groups, resources, members, sites, loaded, services))
+                            .withheld
+                            ? managedGrantWarning()
+                            : r.enabled
+                              ? "Already enabled."
+                              : null,
+                        run: (rs: PolicyRule[]) => {
+                          void Promise.all(rs.map((r) => setEnabled(r.id, true)));
+                        },
+                      },
+                      {
+                        key: "disable",
+                        label: "Disable",
+                        // ⛔ F3'S ASYMMETRIC CEREMONY SURVIVES THE MOVE. Disabling withdraws a live allow in
+                        // seconds, so it confirms — and it must still confirm when it is doing so to five
+                        // rules at once, which is strictly more consequential than doing it to one.
+                        unavailable: (r: PolicyRule) =>
+                          grantControls(ruleRow(r, groups, resources, members, sites, loaded, services))
+                            .withheld
+                            ? managedGrantWarning()
+                            : r.enabled
+                              ? null
+                              : "Already disabled.",
+                        run: (rs: PolicyRule[]) => setDisablingRules(rs),
+                      },
+                      {
+                        key: "delete",
+                        label: "Delete",
+                        danger: true,
+                        unavailable: (r: PolicyRule) =>
+                          grantControls(ruleRow(r, groups, resources, members, sites, loaded, services))
+                            .withheld
+                            ? managedGrantWarning()
+                            : null,
+                        run: (rs: PolicyRule[]) => setDeletingRules(rs),
+                      },
+                    ]
+                  : undefined
+              }
               columns={[
                 {
                   key: "src",
@@ -911,54 +996,6 @@ function RulesSection({
                     );
                   },
                 },
-                {
-                  key: "actions",
-                  header: "",
-                  cell: (r) => {
-                    if (!canManage) return null;
-                    const row = ruleRow(r, groups, resources, members, sites, loaded, services);
-                    const exp = grantExpiry(r, Date.now());
-                    return grantControls(row).withheld ? (
-                      // D2 cond 1: withhold EVERY dashboard mutation (extend/edit/disable/delete) on a
-                      // GitOps-managed grant — warn at the point of editing, never silently revert on
-                      // reconcile.
-                      <span
-                        className="text-xs text-amber-400/90"
-                        title={managedGrantWarning()}
-                        aria-label={managedGrantWarning()}
-                      >
-                        edit the CR
-                      </span>
-                    ) : (
-                      <span className="flex justify-end gap-1.5">
-                        {exp.extendable && (
-                          <Button size="sm" variant="ghost" onClick={() => setExtendingGrant(r)}>
-                            Extend
-                          </Button>
-                        )}
-                        {canEditRuleInModal(r) && (
-                          <Button size="sm" variant="ghost" onClick={() => setEditing(r)}>
-                            Edit
-                          </Button>
-                        )}
-                        {/* F3: enable = one click (additive); disable = confirm (revokes live access
-                            instantly). */}
-                        {r.enabled ? (
-                          <Button size="sm" variant="ghost" onClick={() => setDisablingRule(r)}>
-                            Disable
-                          </Button>
-                        ) : (
-                          <Button size="sm" variant="ghost" onClick={() => setEnabled(r.id, true)}>
-                            Enable
-                          </Button>
-                        )}
-                        <Button size="sm" variant="danger" onClick={() => del(r.id)}>
-                          Delete
-                        </Button>
-                      </span>
-                    );
-                  },
-                },
               ]}
             />
           </div>
@@ -1004,35 +1041,28 @@ function RulesSection({
       )}
       {/* F3: the disable-confirm — NAMES the rule's own subject→destination + the immediate effect. Only
           disable gets this (enable is one-click). Danger-styled; Cancel or backdrop dismisses. */}
-      {disablingRule &&
+      {disablingRules.length > 0 &&
         (() => {
-          const row = ruleRow(
-            disablingRule,
-            groups,
-            resources,
-            members,
-            sites,
-            loaded,
-          );
-          const r = disablingRule;
+          const rs = disablingRules;
+          const one = rs.length === 1 ? rs[0] : null;
+          const row = one
+            ? ruleRow(one, groups, resources, members, sites, loaded, services)
+            : null;
           return (
             <Modal
-              title="Disable rule?"
+              title={rs.length === 1 ? "Disable rule?" : `Disable ${rs.length} rules?`}
               danger
-              onDismiss={() => setDisablingRule(null)}
+              onDismiss={() => setDisablingRules([])}
               actions={
                 <>
-                  <Button
-                    variant="ghost"
-                    onClick={() => setDisablingRule(null)}
-                  >
+                  <Button variant="ghost" onClick={() => setDisablingRules([])}>
                     Cancel
                   </Button>
                   <Button
                     variant="danger"
                     onClick={async () => {
-                      setDisablingRule(null);
-                      await setEnabled(r.id, false);
+                      setDisablingRules([]);
+                      await Promise.all(rs.map((r) => setEnabled(r.id, false)));
                     }}
                   >
                     Disable
@@ -1040,12 +1070,75 @@ function RulesSection({
                 </>
               }
             >
-              <p className="text-sm text-slate-300">
-                {disableConfirmText(row.src.label, row.dst.label)}
-              </p>
+              {/* ⚠ ONE RULE STILL NAMES ITSELF. The single-rule sentence was specific — which source loses
+                  which destination — and a plural rewrite that dropped it would make the common case vaguer
+                  in order to serve the rare one. */}
+              {row ? (
+                <p className="text-sm text-slate-300">
+                  {disableConfirmText(row.src.label, row.dst.label)}
+                </p>
+              ) : (
+                <div className="text-sm text-slate-300">
+                  <p>These allow rules stop applying within seconds. Access they grant is withdrawn.</p>
+                  {/* ⛔ THE SET IS SHOWN, NOT COUNTED. "Disable 5 rules?" asks the operator to trust their
+                      own memory of a selection they made across pages and filters. */}
+                  <ul className="mt-2 max-h-48 space-y-0.5 overflow-y-auto text-xs text-slate-400">
+                    {rs.map((r) => {
+                      const rr = ruleRow(r, groups, resources, members, sites, loaded, services);
+                      return (
+                        <li key={r.id}>
+                          {rr.src.label} → {rr.dst.label}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
             </Modal>
           );
         })()}
+
+      {deletingRules.length > 0 && (
+        <Modal
+          title={deletingRules.length === 1 ? "Delete rule?" : `Delete ${deletingRules.length} rules?`}
+          danger
+          onDismiss={() => setDeletingRules([])}
+          actions={
+            <>
+              <Button variant="ghost" onClick={() => setDeletingRules([])}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onClick={async () => {
+                  const rs = deletingRules;
+                  setDeletingRules([]);
+                  for (const r of rs) await del(r.id);
+                }}
+              >
+                Delete
+              </Button>
+            </>
+          }
+        >
+          <div className="text-sm text-slate-300">
+            <p>
+              Deleting is permanent. Disabling keeps the rule and its history — prefer it if you may want
+              this access back.
+            </p>
+            <ul className="mt-2 max-h-48 space-y-0.5 overflow-y-auto text-xs text-slate-400">
+              {deletingRules.map((r) => {
+                const rr = ruleRow(r, groups, resources, members, sites, loaded, services);
+                return (
+                  <li key={r.id}>
+                    {rr.src.label} → {rr.dst.label}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </Modal>
+      )}
     </Card>
   );
 }
