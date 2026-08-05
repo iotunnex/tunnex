@@ -143,7 +143,7 @@ func TestMutationsFirePush(t *testing.T) {
 		f := seed(t, pool)
 		s, n := newSvc()
 		g, _ := s.CreateGroup(f.ctx, f.org, "g", "")
-		res, err := s.CreateResource(f.ctx, f.org, policyResource())
+		res, err := s.CreateResource(f.ctx, f.org, policyResource(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -511,7 +511,7 @@ func TestRegrantAfterLapseSucceeds(t *testing.T) {
 	f := seed(t, pool)
 	s := policy.NewService(pool)
 	s.SetNotifier(&fakeNotifier{})
-	res, err := s.CreateResource(f.ctx, f.org, policyResource())
+	res, err := s.CreateResource(f.ctx, f.org, policyResource(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -642,7 +642,7 @@ func TestAuditedDeletesPersistMetadata(t *testing.T) {
 	t.Run("resource.deleted", func(t *testing.T) {
 		f := seed(t, pool)
 		s := policy.NewService(pool)
-		r, err := s.CreateResource(f.ctx, f.org, policyResource())
+		r, err := s.CreateResource(f.ctx, f.org, policyResource(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -656,7 +656,7 @@ func TestAuditedDeletesPersistMetadata(t *testing.T) {
 		f := seed(t, pool)
 		s := policy.NewService(pool)
 		g, _ := s.CreateGroup(f.ctx, f.org, "g", "")
-		r, err := s.CreateResource(f.ctx, f.org, policyResource())
+		r, err := s.CreateResource(f.ctx, f.org, policyResource(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -739,7 +739,7 @@ func TestSetPolicyRuleEnabledNoOpNoPushNoAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("group: %v", err)
 	}
-	res, err := s.CreateResource(f.ctx, f.org, policyResource())
+	res, err := s.CreateResource(f.ctx, f.org, policyResource(), nil)
 	if err != nil {
 		t.Fatalf("resource: %v", err)
 	}

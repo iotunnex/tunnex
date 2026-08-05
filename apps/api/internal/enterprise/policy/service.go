@@ -389,6 +389,31 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 	default:
 		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_request", "dst_kind must be resource, group, site, or k8s_service")
 	}
+	// ⛔ THE FIRST CROSS-FIELD CHECK THIS FUNCTION HAS EVER HAD, AND ITS ABSENCE WAS THE DEFECT.
+	//
+	// Every check above validates ONE side: that src_kind=group carries a src_group_id, that dst_kind=site
+	// carries a dst_site_id. Twenty checks, all of the shape "does this side have its own id", and not one
+	// of them reads the two kinds TOGETHER or asks whether they name the same thing.
+	//
+	// > **A SITE CANNOT REACH ITSELF THROUGH ITS OWN GATEWAY.** Two hosts on one LAN are switched locally;
+	// > their traffic never enters that gateway's forward chain, so the compiler emits an allow that CANNOT
+	// > MATCH — a rule rendering `active` while enforcing nothing.
+	//
+	// ⚠ REFUSED RATHER THAN WARNED, and the distinction is the one the warn-not-refuse convention turns on.
+	// OUTSIDE RANGES and VANISHED describe things that are true today and may become false — a CIDR comes
+	// in-world when a range is declared, a Service returns when it is re-exposed. This is false BY
+	// CONSTRUCTION: there is no future state of the world in which a LAN reaching itself starts working, so
+	// a warning here would never clear and would only teach the operator to ignore warnings.
+	//
+	// ⛔ AND IT LIVES HERE, NOT IN THE FORM. The web UI, the tunnex CLI and the GitOps CR path all reach this
+	// function; a dropdown that omits the option guards one caller of three.
+	if srcKind == "site" && in.DstKind == "site" && in.SrcSiteID != nil && in.DstSiteID != nil &&
+		*in.SrcSiteID == *in.DstSiteID {
+		return sqlc.PolicyRule{}, apierr.BadRequest("invalid_rule_self_site",
+			"a site cannot be both the source and the destination: hosts on one LAN reach each other "+
+				"directly, so this rule would enforce nothing")
+	}
+
 	// A temporary grant must expire in the FUTURE (a past expiry is a no-op grant —
 	// reject it rather than silently create a rule that never compiles).
 	if in.ExpiresAt != nil && !in.ExpiresAt.After(time.Now()) {
@@ -447,6 +472,31 @@ func (s *Service) CreatePolicyRule(ctx context.Context, orgID uuid.UUID, in poli
 					return apierr.BadRequest("site_not_found", "dst site not found")
 				}
 				return e
+			}
+		}
+		// ⛔ THE NARROWED TWIN OF THE SELF-SITE REFUSAL. `src_kind=cidr` is a site source narrowed to a
+		// literal prefix, so a CIDR that lies INSIDE the destination site's own subnet is the same
+		// impossible rule wearing a different kind: a LAN address reaching its own LAN, through the gateway
+		// that never sees that traffic.
+		//
+		// ⚠ NEEDS THE SUBNETS, so it lives in the transaction rather than beside its twin — and the
+		// asymmetry is worth the correctness. A CIDR in ANY OTHER site, or in no site at all, is untouched:
+		// the second is the OUTSIDE RANGES warn case, which self-clears and must not become a refusal.
+		if srcKind == "cidr" && in.DstKind == "site" && in.SrcCIDR != nil && in.DstSiteID != nil {
+			src, e := netip.ParsePrefix(*in.SrcCIDR)
+			if e != nil {
+				return apierr.BadRequest("invalid_request", "src_cidr must be a valid CIDR")
+			}
+			subs, e := q.ListSiteSubnets(ctx, *in.DstSiteID)
+			if e != nil {
+				return e
+			}
+			for _, sub := range subs {
+				if sub.Cidr.Contains(src.Addr()) {
+					return apierr.BadRequest("invalid_rule_self_site",
+						"this source CIDR is inside the destination site's own subnet ("+sub.Cidr.String()+"): "+
+							"hosts on one LAN reach each other directly, so this rule would enforce nothing")
+				}
 			}
 		}
 		if in.DstK8sServiceID != nil { // S10.3: the dst Service must exist in THIS org and be LIVE (not
