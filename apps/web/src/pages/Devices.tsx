@@ -240,6 +240,33 @@ export default function Devices() {
     await loadDevices(org.id);
   }
 
+  /**
+   * ⛔ APPROVE / REJECT WERE UNREACHABLE FROM THE SCREEN THAT SHOWS PENDING DEVICES.
+   *
+   * This page lists a device with a `pending` badge and its Actions cell rendered `null` — Revoke was offered
+   * for `active` only. The endpoints existed and their sole call site was the Device-approval card on Access
+   * Policies, so an operator looking at the pending device had to already know it was governed from another
+   * screen entirely.
+   *
+   * > **A STATE A SURFACE DISPLAYS AND CANNOT ACT ON IS A DEAD END** — and `pending` is the one state on this
+   * > roster that exists precisely because someone must decide about it.
+   */
+  async function decide(id: string, action: "approve" | "reject") {
+    if (!org) return;
+    setError(null);
+    const { error } = await api.POST(
+      action === "approve"
+        ? "/api/v1/organizations/{orgId}/devices/{deviceId}/approve"
+        : "/api/v1/organizations/{orgId}/devices/{deviceId}/reject",
+      { params: { path: { orgId: org.id, deviceId: id } } },
+    );
+    if (error) {
+      setError(apiErrorMessage(error, `Could not ${action} the device.`));
+      return;
+    }
+    await loadDevices(org.id);
+  }
+
   function download() {
     if (!secret) return;
     // The private key is served exactly once, so this download must not fail:
@@ -468,6 +495,42 @@ export default function Devices() {
           caption="Devices"
           rows={shown}
           rowKey={(d) => d.id}
+          // ⛔ THE VERBS LEAVE THE ROWS — and APPROVE / REJECT ARRIVE, which this screen never had.
+          // `unavailable` states each rule rather than encoding it in a button that simply does not render:
+          // a pending device's Actions cell used to be blank, which says nothing about why.
+          rowActions={[
+            {
+              key: "approve",
+              label: "Approve",
+              unavailable: (d) =>
+                d.status === "pending" ? null : "Only a device awaiting approval can be approved.",
+              run: (ds) => {
+                void Promise.all(ds.map((d) => decide(d.id, "approve")));
+              },
+            },
+            {
+              key: "reject",
+              label: "Reject",
+              danger: true,
+              unavailable: (d) =>
+                d.status === "pending" ? null : "Only a device awaiting approval can be rejected.",
+              run: (ds) => {
+                void Promise.all(ds.map((d) => decide(d.id, "reject")));
+              },
+            },
+            {
+              key: "revoke",
+              label: "Revoke",
+              danger: true,
+              // ⚠ Revoking a REVOKED device is a no-op the server would report as success — worse than
+              // absent. Pending is rejected, not revoked; the two words are different decisions.
+              unavailable: (d) =>
+                d.status === "active" ? null : `A ${d.status} device cannot be revoked.`,
+              run: (ds) => {
+                void Promise.all(ds.map((d) => revoke(d.id)));
+              },
+            },
+          ]}
           empty="No devices yet."
           failed={error != null}
           columns={[
@@ -581,17 +644,6 @@ export default function Devices() {
                   </>
                 );
               },
-            },
-            {
-              key: "actions",
-              header: "Actions",
-              numeric: true,
-              cell: (d) =>
-                d.status === "active" ? (
-                  <Button variant="danger" onClick={() => revoke(d.id)}>
-                    Revoke
-                  </Button>
-                ) : null,
             },
           ]}
         />
