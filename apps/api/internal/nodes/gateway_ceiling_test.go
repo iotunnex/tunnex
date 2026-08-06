@@ -31,7 +31,7 @@ func TestTheBandsAreTheFoundersNumbers(t *testing.T) {
 		{licence.TierScale, "unlimited"},
 	} {
 		got := "unlimited"
-		if c := licence.GatewayCeiling[tc.tier]; c != nil {
+		if c, _ := licence.GatewayCeilingFor(tc.tier); c != nil {
 			got = itoa(*c)
 		}
 		if got != tc.want {
