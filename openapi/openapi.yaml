@@ -4247,6 +4247,14 @@ components:
             silently fork on the next bump).
         # SSO providers this deployment can offer (empty in the open edition, so
         # the SPA hides SSO entirely rather than showing buttons that error).
+        # ⛔ THE DEPLOYMENT QUESTION, ANSWERED UNAUTHENTICATED. The login page reads /meta before anyone has
+        # signed in, and it needs to know whether this deployment is already set up — to hide "Create an
+        # account", and to stop routing a brand-new user to a create-org form they may not use.
+        #
+        # ⚠ A HINT, NEVER THE BOUNDARY: auth.Signup and tenancy.checkMayCreateOrg both refuse on the server
+        # regardless. Hiding a link is not closing a door, and a refused endpoint behind a visible link is a
+        # dead end — so both halves exist and neither is load-bearing alone.
+        setup_complete: { type: boolean }
         sso_providers:
           type: array
           items: { type: string, enum: [google, microsoft] }

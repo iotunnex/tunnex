@@ -25,6 +25,36 @@ func (s apiServer) Signup(ctx context.Context, req api.SignupRequestObject) (api
 	if req.Body.Name != nil {
 		name = *req.Body.Name
 	}
+	// ⛔ THE PUBLIC SIGNUP DOOR CLOSES ONCE THE DEPLOYMENT IS SET UP (founder-ruled).
+	//
+	// A self-hosted deployment is ONE COMPANY. Everyone inside arrives by invitation or SSO domain capture
+	// — both acts by someone already here. An open form after setup produces only ORPHAN ACCOUNTS on a
+	// private control plane, which is what it did on the first attempt.
+	//
+	// ⚠ THE GATE IS ON THE HANDLER, NOT THE SERVICE, AND THAT IS DELIBERATE. This endpoint is `Signup`'s
+	// ONLY caller, so handler-gating is complete coverage of the PUBLIC door — while `auth.Service.Signup`
+	// stays a usable domain operation. Pushing it into the service instead broke every test that mints a
+	// user against a seeded database, which was the signal that the check was sitting at the wrong layer:
+	// "is this deployment open to public registration" is a policy question about the ENDPOINT, not about
+	// what it means to create an account.
+	//
+	// ⭐ NEITHER ADMISSION PATH TOUCHES THIS, measured: `/auth/invitations/accept` is `security: []` and
+	// calls CreateUser itself (invites.go:158); SSO domain capture mints on the callback. Both are proven
+	// independent by TestAdmissionPathsDoNotDependOnSignup.
+	//
+	// ⚠ FIRST RUN STAYS OPEN — same self-closing signal the org boundary uses, and it counts soft-deleted
+	// rows so deleting every organization cannot reopen it.
+	if s.orgs != nil {
+		done, e := s.orgs.SetupComplete(ctx)
+		if e != nil {
+			return nil, e
+		}
+		if done {
+			return nil, apierr.Forbidden("signup_closed",
+				"This deployment is already set up. Accounts are created by invitation — ask an "+
+					"administrator to invite you, and the invitation link will set up your account.")
+		}
+	}
 	if err := s.auth.Signup(ctx, string(req.Body.Email), name, req.Body.Password); err != nil {
 		return nil, err
 	}

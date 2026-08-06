@@ -69,6 +69,15 @@ func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) erro
 	return tx.Commit(ctx)
 }
 
+// SetupComplete reports whether this deployment has ever been set up.
+//
+// ⛔ THE SAME SIGNAL THE ORG BOUNDARY AND THE SIGNUP GATE USE — one question, one answer, three consumers.
+// Counting soft-deleted rows means deleting every organization cannot reopen setup.
+func (s *Service) SetupComplete(ctx context.Context) (bool, error) {
+	ever, err := s.q.CountOrganizationsEver(ctx)
+	return ever > 0, err
+}
+
 // checkMayCreateOrg answers WHO may bring an organization into existence, which is a different question
 // from HOW MANY may exist (that is checkOrgCeiling, and it is commercial).
 //

@@ -125,6 +125,36 @@ export default function CreateOrg() {
     }
   }
 
+  // ⛔ THE FORM IS NEVER OFFERED TO SOMEONE WHO CANNOT USE IT.
+  //
+  // RequireNoOrg asks one question — "do you have an organization?" — and a brand-new account has none, so
+  // it routes here. That account does not hold `can_create_orgs`, so submitting hit a refusal.
+  //
+  // ⚠ A FORM OFFERED TO SOMEONE WHO CANNOT USE IT IS WORSE THAN NO FORM: it costs them an attempt to learn
+  // what the screen could have told them first. The invitation card is the correct destination for exactly
+  // this state, it already existed, and it was one FAILED SUBMIT away. Now it is the first thing they see.
+  if (state.status === "authed" && !state.user.can_create_orgs) {
+    return (
+      <AuthLayout>
+        <h1 className="text-xl font-semibold text-white">
+          Invitation required
+        </h1>
+        <p className="mt-2 text-sm text-slate-400">
+          This {PRODUCT_NAME} deployment is already set up. Accounts join by
+          invitation — ask an administrator to invite you, and the invitation
+          link will bring you straight in.
+        </p>
+        <button
+          type="button"
+          onClick={() => void logout()}
+          className="mt-5 inline-block text-xs text-slate-400 hover:text-slate-200"
+        >
+          Sign out
+        </button>
+      </AuthLayout>
+    );
+  }
+
   if (ceilingMsg) {
     return (
       <AuthLayout>
