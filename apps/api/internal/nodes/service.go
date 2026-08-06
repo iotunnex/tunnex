@@ -331,11 +331,22 @@ func (s *Service) ceilingRefusal(tier licence.Tier, ceiling int, live int64) str
 	if ceiling == 1 {
 		unit = "gateway"
 	}
+	// ⛔ THE LAST SENTENCE IS NOT POLISH — IT IS THE ONLY WARNING AN OPERATOR GETS.
+	//
+	// This refusal fires AFTER `ConsumeJoinToken`, so the token is already spent. The ceiling is per-org
+	// and the org is only knowable once the token is read, so the check cannot be hoisted above it the way
+	// the grace check was. Registered as a known asymmetry, not fixed.
+	//
+	// ⚠ WHAT MAKES IT WORTH A SENTENCE: an operator who upgrades and retries with the SAME token gets
+	// `invalid_join_token` — a second, unrelated error that describes none of this and sends them hunting
+	// for a token problem that does not exist. Telling them here costs one line; not telling them costs a
+	// support round-trip at the exact moment the product first says no to them.
 	return fmt.Sprintf(
 		"This deployment is on the %s band, which allows %d %s, and %d are already enrolled. "+
 			"Nothing running is affected — existing gateways keep working, and this refusal applies only "+
 			"to enrolling a new one. To add another: upgrade the licence, or revoke a gateway you no "+
-			"longer use to free a slot.",
+			"longer use to free a slot. Note that this join token has been used up — mint a new one "+
+			"before retrying.",
 		tier, ceiling, unit, live)
 }
 
