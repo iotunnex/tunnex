@@ -380,3 +380,14 @@ func (s *Service) ListAuditLogs(ctx context.Context, orgID uuid.UUID, f AuditFil
 	}
 	return s.q.ListAuditLogsByOrg(ctx, p)
 }
+
+// RecordLicenseInstall audits a licence installation (S12.1 slice 6).
+//
+// ⛔ IT BELONGS IN THE RECORD BESIDE ORG DELETION. Installing a licence changes what the WHOLE deployment
+// may do — gateway count, org count, whether SSO exists at all.
+//
+// ⚠ THE KEY ITSELF IS NEVER RECORDED. The licence id, tier and kid identify it completely for any later
+// question; the key is a credential and an audit row is not where credentials go.
+func (s *Service) RecordLicenseInstall(ctx context.Context, orgID, actor uuid.UUID, meta map[string]any) error {
+	return writeAudit(ctx, s.q, orgID, &actor, "license.installed", "license", "", meta)
+}

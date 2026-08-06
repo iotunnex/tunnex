@@ -207,6 +207,23 @@ const (
 	K8sServiceProtocolUdp K8sServiceProtocol = "udp"
 )
 
+// Defines values for LicenseStatusState.
+const (
+	Expired    LicenseStatusState = "expired"
+	Lapsed     LicenseStatusState = "lapsed"
+	Unlicensed LicenseStatusState = "unlicensed"
+	Valid      LicenseStatusState = "valid"
+)
+
+// Defines values for LicenseStatusTier.
+const (
+	Community LicenseStatusTier = "community"
+	Growth    LicenseStatusTier = "growth"
+	Scale     LicenseStatusTier = "scale"
+	Starter   LicenseStatusTier = "starter"
+	Trial     LicenseStatusTier = "trial"
+)
+
 // Defines values for MemberRole.
 const (
 	MemberRoleAdmin  MemberRole = "admin"
@@ -1013,6 +1030,12 @@ type IdpSyncHealth struct {
 // IdpSyncHealthProvider defines model for IdpSyncHealth.Provider.
 type IdpSyncHealthProvider string
 
+// InstallLicenseRequest defines model for InstallLicenseRequest.
+type InstallLicenseRequest struct {
+	// Key The licence key, as emailed. Begins `tnxl_`.
+	Key string `json:"key"`
+}
+
 // Invitation defines model for Invitation.
 type Invitation struct {
 	AcceptedAt      *time.Time          `json:"accepted_at"`
@@ -1105,6 +1128,35 @@ type K8sService struct {
 
 // K8sServiceProtocol defines model for K8sService.Protocol.
 type K8sServiceProtocol string
+
+// LicenseStatus defines model for LicenseStatus.
+type LicenseStatus struct {
+	// ClockWentBackwards The deployment's clock moved materially backwards. Reported, never enforced — a backward clock is overwhelmingly a VM restore or an NTP correction.
+	ClockWentBackwards *bool      `json:"clock_went_backwards,omitempty"`
+	ExpiresAt          *time.Time `json:"expires_at"`
+
+	// Features The named capabilities this tier grants.
+	Features []string `json:"features"`
+
+	// GatewayCeiling Gateways this deployment may ENROL. null means unlimited. Running gateways are never stopped.
+	GatewayCeiling *int `json:"gateway_ceiling"`
+
+	// GraceEndsAt When gated capabilities stop. Absent unless expired.
+	GraceEndsAt *time.Time `json:"grace_ends_at"`
+
+	// OrgCeiling Organizations it may CREATE. null means unlimited.
+	OrgCeiling *int `json:"org_ceiling"`
+
+	// State unlicensed = no key, Community, not an error. expired = past expiry but inside grace; NOTHING STOPS. lapsed = past grace; gated capabilities stop and the VPN does not.
+	State LicenseStatusState `json:"state"`
+	Tier  LicenseStatusTier  `json:"tier"`
+}
+
+// LicenseStatusState unlicensed = no key, Community, not an error. expired = past expiry but inside grace; NOTHING STOPS. lapsed = past grace; gated capabilities stop and the VPN does not.
+type LicenseStatusState string
+
+// LicenseStatusTier defines model for LicenseStatus.Tier.
+type LicenseStatusTier string
 
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
@@ -1807,6 +1859,9 @@ type RegisterK8sClusterJSONRequestBody = RegisterK8sClusterRequest
 // ExposeK8sServiceJSONRequestBody defines body for ExposeK8sService for application/json ContentType.
 type ExposeK8sServiceJSONRequestBody = ExposeK8sServiceRequest
 
+// InstallLicenseJSONRequestBody defines body for InstallLicense for application/json ContentType.
+type InstallLicenseJSONRequestBody = InstallLicenseRequest
+
 // MintMachineCredentialJSONRequestBody defines body for MintMachineCredential for application/json ContentType.
 type MintMachineCredentialJSONRequestBody = MintMachineCredentialRequest
 
@@ -2242,6 +2297,14 @@ type ClientInterface interface {
 
 	// GetK8sService request
 	GetK8sService(ctx context.Context, orgId openapi_types.UUID, serviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetLicense request
+	GetLicense(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InstallLicenseWithBody request with any body
+	InstallLicenseWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	InstallLicense(ctx context.Context, orgId openapi_types.UUID, body InstallLicenseJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListMachineCredentials request
 	ListMachineCredentials(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3738,6 +3801,42 @@ func (c *Client) UnexposeK8sService(ctx context.Context, orgId openapi_types.UUI
 
 func (c *Client) GetK8sService(ctx context.Context, orgId openapi_types.UUID, serviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetK8sServiceRequest(c.Server, orgId, serviceId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetLicense(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetLicenseRequest(c.Server, orgId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InstallLicenseWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInstallLicenseRequestWithBody(c.Server, orgId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) InstallLicense(ctx context.Context, orgId openapi_types.UUID, body InstallLicenseJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInstallLicenseRequest(c.Server, orgId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -7873,6 +7972,87 @@ func NewGetK8sServiceRequest(server string, orgId openapi_types.UUID, serviceId 
 	return req, nil
 }
 
+// NewGetLicenseRequest generates requests for GetLicense
+func NewGetLicenseRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/license", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewInstallLicenseRequest calls the generic InstallLicense builder with application/json body
+func NewInstallLicenseRequest(server string, orgId openapi_types.UUID, body InstallLicenseJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewInstallLicenseRequestWithBody(server, orgId, "application/json", bodyReader)
+}
+
+// NewInstallLicenseRequestWithBody generates requests for InstallLicense with any type of body
+func NewInstallLicenseRequestWithBody(server string, orgId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/license", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListMachineCredentialsRequest generates requests for ListMachineCredentials
 func NewListMachineCredentialsRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -10420,6 +10600,14 @@ type ClientWithResponsesInterface interface {
 	// GetK8sServiceWithResponse request
 	GetK8sServiceWithResponse(ctx context.Context, orgId openapi_types.UUID, serviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetK8sServiceResponse, error)
 
+	// GetLicenseWithResponse request
+	GetLicenseWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetLicenseResponse, error)
+
+	// InstallLicenseWithBodyWithResponse request with any body
+	InstallLicenseWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InstallLicenseResponse, error)
+
+	InstallLicenseWithResponse(ctx context.Context, orgId openapi_types.UUID, body InstallLicenseJSONRequestBody, reqEditors ...RequestEditorFn) (*InstallLicenseResponse, error)
+
 	// ListMachineCredentialsWithResponse request
 	ListMachineCredentialsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListMachineCredentialsResponse, error)
 
@@ -12343,6 +12531,52 @@ func (r GetK8sServiceResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r GetK8sServiceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetLicenseResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *LicenseStatus
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r GetLicenseResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetLicenseResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type InstallLicenseResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *LicenseStatus
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r InstallLicenseResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InstallLicenseResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -14428,6 +14662,32 @@ func (c *ClientWithResponses) GetK8sServiceWithResponse(ctx context.Context, org
 		return nil, err
 	}
 	return ParseGetK8sServiceResponse(rsp)
+}
+
+// GetLicenseWithResponse request returning *GetLicenseResponse
+func (c *ClientWithResponses) GetLicenseWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetLicenseResponse, error) {
+	rsp, err := c.GetLicense(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetLicenseResponse(rsp)
+}
+
+// InstallLicenseWithBodyWithResponse request with arbitrary body returning *InstallLicenseResponse
+func (c *ClientWithResponses) InstallLicenseWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InstallLicenseResponse, error) {
+	rsp, err := c.InstallLicenseWithBody(ctx, orgId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInstallLicenseResponse(rsp)
+}
+
+func (c *ClientWithResponses) InstallLicenseWithResponse(ctx context.Context, orgId openapi_types.UUID, body InstallLicenseJSONRequestBody, reqEditors ...RequestEditorFn) (*InstallLicenseResponse, error) {
+	rsp, err := c.InstallLicense(ctx, orgId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInstallLicenseResponse(rsp)
 }
 
 // ListMachineCredentialsWithResponse request returning *ListMachineCredentialsResponse
@@ -17443,6 +17703,72 @@ func ParseGetK8sServiceResponse(rsp *http.Response) (*GetK8sServiceResponse, err
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest K8sService
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetLicenseResponse parses an HTTP response from a GetLicenseWithResponse call
+func ParseGetLicenseResponse(rsp *http.Response) (*GetLicenseResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetLicenseResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest LicenseStatus
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInstallLicenseResponse parses an HTTP response from a InstallLicenseWithResponse call
+func ParseInstallLicenseResponse(rsp *http.Response) (*InstallLicenseResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InstallLicenseResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest LicenseStatus
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

@@ -33,6 +33,7 @@
     "device:restore",
     "device_health:manage",
     "k8s:manage",
+    "license:manage",
     "machine:manage",
     "member:invite",
     "member:list",

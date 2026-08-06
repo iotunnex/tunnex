@@ -54,6 +54,7 @@ import {
 } from "../lib/poolview";
 import { useAuth } from "../lib/auth";
 import { Button, Card, ErrorText, Field, Input } from "../components/ui";
+import { LicenceCard } from "../components/LicenceCard";
 import { MfaSettings } from "../components/MfaSettings";
 import { MachineCredentials } from "../components/MachineCredentials";
 
@@ -150,7 +151,14 @@ export default function Settings() {
           a column boundary — which looks exactly like a rendering bug and is the one hazard this layout has.
           The wrapper carries it so no section has to remember. */}
       <div className="mt-6 columns-1 gap-3.5 lg:columns-2 2xl:columns-3">
-        <div className="mb-3.5 break-inside-avoid">
+        {/* ⚠ Owner-only to INSTALL; every member sees the entitlement, because a user who hits a ceiling
+            needs to know why without asking an owner. */}
+        {org && (
+          <div className="mb-3.5 break-inside-avoid">
+            <LicenceCard orgId={org.id} canManage={myRole === "owner"} />
+          </div>
+        )}
+<div className="mb-3.5 break-inside-avoid">
           <MfaSettings />
         </div>
 
