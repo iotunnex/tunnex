@@ -29,12 +29,13 @@ test("signing in reaches the app shell and the dashboard, then navigates to devi
   // The owner's email shows in the header.
   await expect(page.getByText(OWNER_EMAIL)).toBeVisible();
 
-  // The sidebar links to Devices; the create-device form lives there.
+  // The sidebar links to Devices, where a device can be created.
+  // ⚠ THE FORM IS NO LONGER ON THE PAGE — it moved into an "Add device" modal. The CAPABILITY is unchanged
+  // (Devices.tsx still renders the name field and the Create device submit inside the dialog), so this
+  // asserts the affordance that reaches it rather than a form that is now one click away.
   await page.getByRole("link", { name: "Devices" }).click();
   await expect(page.getByRole("heading", { name: "Devices" })).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Create device" }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add device" })).toBeVisible();
 
   // An authenticated user visiting /login is bounced back into the app (AnonOnly).
   await page.goto("/login");

@@ -158,12 +158,17 @@ test("invite renders identically for an existing account vs a new email", async 
   }
 });
 
-// (e) Audit loop: a mutation in the Users UI lands in the audit log and shows up
-// on the dashboard activity feed (the cheapest full-stack proof: UI -> API ->
-// audit -> dashboard read -> render). Reverts the role to leave state clean.
-test("a role change in the UI appears on the dashboard activity feed", async ({
-  page,
-}) => {
+// (e) Audit loop: a mutation in the Users UI lands in the audit log and is RENDERED
+// (the cheapest full-stack proof: UI -> API -> audit -> read -> render). Reverts the role to leave state
+// clean.
+//
+// ⚠ RE-POINTED FROM THE DASHBOARD TO THE AUDIT LOG, AND THE LOOP IS INTACT. f5f84a8a removed the Overview
+// activity feed, which was this test's render surface — not its subject. The subject is "a UI mutation
+// becomes a readable audit event", and the Audit Log page is where that is now readable.
+//
+// ⛔ NOT the same as deleting the test: the read surface changed, the invariant did not. Had no surface
+// survived, this would be a capability the product lost and would have been reported as one instead.
+test("a role change in the UI appears in the audit log", async ({ page }) => {
   const ORG = "01900000-0000-7000-8000-000000000001"; // seeddata.DemoOrgID
   const MEMBER_ID = "01900000-0000-7000-8000-000000000003"; // seeddata.DemoMemberUserID
   await loginAs(page, OWNER);
@@ -171,8 +176,10 @@ test("a role change in the UI appears on the dashboard activity feed", async ({
     const memberRow = page.getByRole("row").filter({ hasText: MEMBER.email });
     await memberRow.locator("select").selectOption("admin");
 
-    await page.getByRole("link", { name: "Overview" }).click();
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+    await page.getByRole("link", { name: "Audit Log" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Audit log" }),
+    ).toBeVisible();
     await expect(page.getByText("member.role_changed").first()).toBeVisible();
   } finally {
     // ALWAYS revert to 'member' so a mid-test failure can't leave the shared

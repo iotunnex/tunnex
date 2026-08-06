@@ -345,9 +345,15 @@ visual-update: ## Re-render the visual baselines. THE RESULT MUST BE ITS OWN COM
 e2e: ## One command: bring the stack up healthy, run API integration + Playwright e2e
 	$(COMPOSE) up -d --wait
 	@echo ">> API integration tests (unit + trigger schema check against live DB)"
+	@# -p 1 IS NOT OPTIONAL, and it was missing here while test-editions had it. These packages share ONE
+	@# database and several commit fixture rows without rolling back, so concurrent packages interfere.
+	@# The interference was always present and only ever intermittent; the S12.1 organization ceiling made
+	@# it reliable, because a concurrently-committed org now consumes the ONLY Community slot and
+	@# TestOrgLifecycle's first create is refused. The ceiling exposed the race, it did not cause it —
+	@# lifecycle_test.go's own comment has described this exact class since S8.5.
 	docker run --rm --network $(NET) -v "$(PWD)/apps/api":/src -w /src -e GOFLAGS=-mod=readonly \
 	  -e TUNNEX_TEST_DATABASE_URL="postgres://$(PG_USER):$(PG_PASS)@postgres:5432/$(PG_DB)?sslmode=disable" \
-	  $(GO_IMAGE) go test ./...
+	  $(GO_IMAGE) go test -p 1 ./...
 	@echo ">> Playwright browser e2e (SPA -> API correlation chain)"
 	docker run --rm --network $(NET) -v "$(PWD)/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
 	  $(PW_IMAGE) sh -c "npm install --no-audit --no-fund --silent && npx playwright test"
