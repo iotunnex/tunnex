@@ -102,10 +102,35 @@ func TestOnlyBootstrapOrInsidersMayCreateAnOrg(t *testing.T) {
 		t.Errorf("the refusal does not mention being invited: %s", ae.Message)
 	}
 
-	// ── 3. AN INSIDER MAY — this is what the switcher's "+ New organization" runs on ──────────────────
+	// ── 3. ⛔ MEMBERSHIP IS NOT THE CAPABILITY — THE WHOLE RULING IN ONE ASSERTION ────────────────────
+	//
+	// A member of an existing organization is an INSIDER and still may not create. Authority inside org A
+	// cannot license an act that creates org B. Without this leg the boundary is just "signed up vs not",
+	// which any invited member trivially clears.
+	member := mkUser()
+	if _, e := tx.Exec(ctx, "INSERT INTO memberships (org_id,user_id,role) VALUES ($1,$2,'member')",
+		first.ID, member); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := svc.CreateOrganization(ctx, member, "ByMember", "bymember-"+uuid.NewString()[:8]); e == nil {
+		t.Fatal("⛔ A MEMBER OF ANOTHER ORGANIZATION CREATED ONE. Being admitted to org A is not authority " +
+			"over the deployment, and this is the ruling the whole change exists for")
+	}
+
+	// ── 4. A HOLDER MAY. The bootstrap founder was granted the capability in the same tx that used it. ─
 	if _, e := svc.CreateOrganization(ctx, founder, "Second", "second-"+uuid.NewString()[:8]); e != nil {
-		t.Errorf("⛔ a member of an existing org was refused a second one — the paid multi_org capability "+
-			"is unreachable: %v", e)
+		t.Errorf("⛔ the capability holder was refused — the paid multi_org capability is unreachable "+
+			"and the deployment cannot grow: %v", e)
+	}
+	// ⚠ AND THE GRANT PERSISTED. Bootstrap's condition is destroyed by using it, so authority that was
+	// only implied by `ever == 0` would evaporate the instant the first org existed.
+	var may bool
+	if e := tx.QueryRow(ctx, "SELECT can_create_orgs FROM users WHERE id=$1", founder).Scan(&may); e != nil {
+		t.Fatal(e)
+	}
+	if !may {
+		t.Error("⛔ bootstrap did not GRANT the capability, only exercised it — the founder would lose the " +
+			"ability to create anything the moment the first organization existed")
 	}
 
 	// ── 4. ⛔ DELETING EVERY ORG MUST NOT REOPEN SETUP ────────────────────────────────────────────────

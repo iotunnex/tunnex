@@ -1,3 +1,6 @@
+import { useNavigate } from "react-router-dom";
+
+import { useAuth } from "../lib/auth";
 import { useOrg } from "../lib/useOrg";
 
 /**
@@ -16,8 +19,20 @@ import { useOrg } from "../lib/useOrg";
  */
 export function OrgSwitcher() {
   const { orgs, org, setOrg } = useOrg();
+  const { state } = useAuth();
+  const navigate = useNavigate();
+  // ⛔ THE CAPABILITY, NOT A ROLE. `can_create_orgs` is deployment-scoped — the only such field this
+  // product has — because a permission granted inside org A cannot license creating org B.
+  //
+  // ⚠ AN AFFORDANCE HINT, NEVER THE BOUNDARY. The server refuses regardless (tenancy.checkMayCreateOrg),
+  // so a client that ignores this gains nothing; it only decides whether offering the action is honest.
+  const mayCreate =
+    state.status === "authed" && Boolean(state.user.can_create_orgs);
 
-  if (orgs.length < 2 || !org) return null;
+  // ⭐ THE "ABSENT BELOW 2" RULE RELAXES ONLY FOR A HOLDER, and only because the switcher is now the ONLY
+  // place org creation lives. A control with one option still teaches nothing — but for someone who may
+  // create a second organization it is not a one-option control, it is the entry point.
+  if ((orgs.length < 2 && !mayCreate) || !org) return null;
 
   return (
     <label className="flex min-w-0 items-center gap-2">
@@ -37,6 +52,15 @@ export function OrgSwitcher() {
           </option>
         ))}
       </select>
+      {mayCreate && (
+        <button
+          type="button"
+          onClick={() => navigate("/create-org")}
+          className="shrink-0 whitespace-nowrap text-cell text-accent hover:underline"
+        >
+          + New
+        </button>
+      )}
     </label>
   );
 }

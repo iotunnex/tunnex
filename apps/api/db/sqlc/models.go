@@ -472,6 +472,7 @@ type User struct {
 	CreatedAt       time.Time          `json:"created_at"`
 	UpdatedAt       time.Time          `json:"updated_at"`
 	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	CanCreateOrgs   bool               `json:"can_create_orgs"`
 }
 
 type UserGroup struct {

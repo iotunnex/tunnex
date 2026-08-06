@@ -483,6 +483,11 @@ type Querier interface {
 	// org context exists; org_id is a column on the returned row. Only verified
 	// claims are returned (partial unique index guarantees at most one).
 	GetVerifiedClaimForDomain(ctx context.Context, domain string) (DomainClaim, error)
+	// ⚠ Used ONCE, at bootstrap, inside the same transaction that creates the first organization.
+	// ⛔ `deleted_at IS NULL` IS NOT BOILERPLATE HERE — the lint asked and the answer is a real filter, not an
+	// annotation. Granting deployment-level authority to a soft-deleted account would arm an identity that is
+	// meant to be gone, and a later undelete would restore it silently holding a capability nobody granted it.
+	GrantOrgCreation(ctx context.Context, id uuid.UUID) error
 	// lint:cross-org — user-scoped login challenge.
 	IncrementMfaChallengeAttempts(ctx context.Context, id uuid.UUID) (int32, error)
 	// The id is app-generated (uuid v7) so the SAME id identifies the row in BOTH the PG
@@ -1225,6 +1230,7 @@ type Querier interface {
 	// lint:cross-org — spans a user's orgs by design: does ANY org the user belongs to enforce MFA?
 	// The D8/D5 enforcement predicate (local-auth users only; SSO is exempt at the login seam).
 	UserInEnforcingOrg(ctx context.Context, userID uuid.UUID) (bool, error)
+	UserMayCreateOrgs(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
 var _ Querier = (*Queries)(nil)
