@@ -94,6 +94,15 @@ test("green stays reserved: no stat card renders it", async ({ page }) => {
 
   // Every stat card on the screen, not a named sample — a sample would keep passing after a new card
   // arrives wearing brand-green.
+  // ⛔ WAIT FOR A CARD BEFORE COUNTING CARDS. `locator.count()` is an INSTANTANEOUS query — unlike
+  // `expect(...).toBeVisible()` it does not retry — and `login()` returns as soon as the Overview HEADING
+  // is up, which is before the counts have loaded. Counting there races the render.
+  //
+  // ⚠ AND THE RACE HID INSIDE THE VACUITY FLOOR, WHICH IS THE INSTRUCTIVE PART. The floor exists to catch
+  // "zero cards would pass this test forever"; it fired for a completely different reason — zero cards YET
+  // — and reported a true statement about a page that was merely not finished. A floor that cannot tell
+  // "absent" from "not yet" is a flake with a good explanation attached.
+  await expect(page.getByRole("group", { name: "Members" })).toBeVisible();
   const values = page.locator('[role="group"] span.font-bold');
   const n = await values.count();
   expect(n).toBeGreaterThan(0); // vacuity floor: zero cards would pass this test forever
