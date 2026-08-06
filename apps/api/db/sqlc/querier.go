@@ -165,6 +165,13 @@ type Querier interface {
 	// counting them as "online" would be dishonest.
 	CountOnlineDevicesByOrg(ctx context.Context, arg CountOnlineDevicesByOrgParams) (int64, error)
 	CountOrganizations(ctx context.Context) (int64, error)
+	// ⛔ INCLUDES SOFT-DELETED ROWS, DELIBERATELY, AND THAT IS THE WHOLE POINT.
+	//
+	// This answers "has this deployment ever been set up", which is a DIFFERENT question from
+	// CountOrganizations' "how many exist now". The bootstrap window — the one moment a stranger may create
+	// the first organization — must key on the former. Keyed on the latter, deleting every organization
+	// REOPENS setup, and the next person to reach the URL becomes owner of the deployment.
+	CountOrganizationsEver(ctx context.Context) (int64, error)
 	// lint:cross-org — spans a user's orgs to protect the last-owner invariant on
 	// global deactivation; each row's org_id is used in the correlated subquery.
 	CountOrgsWhereSoleOwner(ctx context.Context, userID uuid.UUID) (int64, error)

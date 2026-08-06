@@ -89,6 +89,23 @@ func (q *Queries) CountOrganizations(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countOrganizationsEver = `-- name: CountOrganizationsEver :one
+SELECT count(*) FROM organizations
+`
+
+// ⛔ INCLUDES SOFT-DELETED ROWS, DELIBERATELY, AND THAT IS THE WHOLE POINT.
+//
+// This answers "has this deployment ever been set up", which is a DIFFERENT question from
+// CountOrganizations' "how many exist now". The bootstrap window — the one moment a stranger may create
+// the first organization — must key on the former. Keyed on the latter, deleting every organization
+// REOPENS setup, and the next person to reach the URL becomes owner of the deployment.
+func (q *Queries) CountOrganizationsEver(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countOrganizationsEver)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createOrganization = `-- name: CreateOrganization :one
 INSERT INTO organizations (name, slug)
 VALUES ($1, $2)

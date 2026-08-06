@@ -69,6 +69,48 @@ func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) erro
 	return tx.Commit(ctx)
 }
 
+// checkMayCreateOrg answers WHO may bring an organization into existence, which is a different question
+// from HOW MANY may exist (that is checkOrgCeiling, and it is commercial).
+//
+// ⭐ TWO CALLERS ARE LEGITIMATE AND THE CONDITION IS SELF-CLOSING — no setting, nothing to configure
+// wrong, nothing an operator must remember to turn on:
+//
+//  1. BOOTSTRAP — the deployment has ZERO organizations. Somebody has to make the first one, and on a
+//     fresh install there is nobody inside to invite them. ⚠ This window closes BY ITSELF the instant the
+//     first org exists, which is why it needs no flag: the condition that opens it is destroyed by using
+//     it, exactly once, forever.
+//
+//  2. AN INSIDER — the caller is already a member of some organization. They were admitted by someone
+//     already inside (an invitation, or SSO domain capture), so creating another is an act by a known
+//     party, not by a stranger. This is what the org switcher's "+ New organization" runs on.
+//
+// ⛔ EVERYONE ELSE IS REFUSED, AND THAT IS THE WHOLE FIX. A verified account with no membership lands
+// NOWHERE until it is invited or its domain is captured — and both of those are acts by someone already
+// inside. Which is precisely what the invitation flow already assumed: `/accept-invite` is `security: []`
+// and mints the account itself, so being invited IS the admission and the account is only the credential.
+//
+// ⚠ THE REFUSAL IS 403 WITH A HUMAN REASON, not a 404. Hiding the endpoint would leave a signed-up user
+// staring at a funnel that silently goes nowhere; they need to be told an invitation is how they get in.
+func (s *Service) checkMayCreateOrg(ctx context.Context, creator uuid.UUID) error {
+	ever, err := s.q.CountOrganizationsEver(ctx)
+	if err != nil {
+		return err
+	}
+	if ever == 0 {
+		return nil // bootstrap: this deployment has never been set up
+	}
+	mine, err := s.q.ListMembershipsByUser(ctx, creator)
+	if err != nil {
+		return err
+	}
+	if len(mine) > 0 {
+		return nil // an insider, admitted by someone already here
+	}
+	return apierr.Forbidden("invitation_required",
+		"This deployment is already set up. New organizations can only be created by someone who is "+
+			"already a member — ask an administrator to invite you, then sign in to accept.")
+}
+
 // checkOrgCeiling refuses creating an organization beyond the licensed ceiling.
 //
 // ⚠ A nil manager means Community — the fail-open default. A deployment that upgrades into this code keeps
@@ -134,6 +176,19 @@ func (s *Service) CreateOrganization(ctx context.Context, creator uuid.UUID, nam
 	// was eliminated at compile time in the enterprise binary — the branch was not present, rather than
 	// present-and-false. With one binary the question is a runtime one and must be asked every time.
 	if err := s.checkOrgCeiling(ctx); err != nil {
+		return sqlc.Organization{}, err
+	}
+	// ⛔ SIGNING UP CREATES AN ACCOUNT. IT MUST NEVER CREATE AN ORGANIZATION. (founder-ruled)
+	//
+	// `/api/v1/auth/signup` is `security: []` — open to anyone who can reach the deployment, with no
+	// invitation, no allow-list and no domain restriction. Until this line, a stranger could sign up,
+	// verify an email they control, and become OWNER of a new organization on a private VPN control plane.
+	//
+	// ⛔ AND THE ONLY THING STOPPING THEM WAS A COMMERCIAL NUMBER. The org ceiling held it to one on
+	// Community — so the product's sole signup control was a limit the customer PAYS TO REMOVE. Install
+	// Growth and you have bought 19 more self-service owner slots; install Scale and there is no limit at
+	// all. A licence must never be the thing standing between an anonymous visitor and ownership.
+	if err := s.checkMayCreateOrg(ctx, creator); err != nil {
 		return sqlc.Organization{}, err
 	}
 

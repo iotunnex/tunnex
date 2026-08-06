@@ -76,6 +76,17 @@ export default function CreateOrg() {
         // gained a membership (an invite accepted in another tab, JIT-join, or an
         // admin adding them) — that user belongs in the dashboard, not a dead-end.
         // Only a still-0-membership user sees the invitation-only card (branch 3).
+        // ⛔ THE FUNNEL SENDS EVERY 0-MEMBERSHIP USER HERE, AND MOST OF THEM MAY NOT CREATE ANYTHING.
+        //
+        // Signing up creates an ACCOUNT, never an organization: a stranger with a verified email is
+        // refused `invitation_required` by the server. Without this branch they met a bare red error on a
+        // form the funnel had just routed them to — told no, with no idea why, and no way forward.
+        //
+        // ⚠ SAME CARD AS THE CEILING CASE, because the user's situation is identical: they cannot proceed
+        // and somebody already inside has to admit them. Only the reason differs, and the server states it.
+        if (apiErrorCode(error) === "invitation_required") {
+          return setCapped(true);
+        }
         if (apiErrorCode(error) === "org_limit_reached") {
           const { data: orgs } = await api.GET("/api/v1/organizations");
           if ((orgs?.length ?? 0) > 0)
