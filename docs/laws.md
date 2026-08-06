@@ -5414,3 +5414,42 @@ failure as the comment, one layer out: a description that outlived what it descr
 
 ⭐ **This is the dormant-machinery law's twin, and the inverse of it.** Dormant machinery is code that runs
 and does nothing. This is prose that does nothing and reads as if it will.
+
+## ⛔ WHEN A MIGRATION BACKFILLS, CHECK WHAT THE SEED DOES FOR THE SAME COLUMN — ONLY ONE OF THEM RUNS ON A FRESH INSTALL
+
+**S12.5, and a human caught it, not a test.** Migration `0073` added `users.can_create_orgs DEFAULT false`
+and grandfathered existing owners, which is correct and necessary — a deployment upgrading into it must not
+lose the ability to administer itself. **The seed's `UpsertUser` never mentioned the column**, so it took
+the default.
+
+| | order | result |
+|---|---|---|
+| **Developer's rig** | data already exists → migrate | backfill matches the demo owner → **granted** → works |
+| **Fresh install** | migrate → seed | backfill matches **nothing** → seed inserts at default → **not granted** |
+
+> ## ⛔ **THE BACKFILL DOES NOT FIX THE SEED. IT HIDES THAT THE SEED IS BROKEN, ON EXACTLY THE MACHINE THE
+> ## AUTHOR IS LOOKING AT.**
+
+Everyone who ran it locally saw it work. Every fresh rig — every new reviewer, every clean CI volume, every
+customer install — got a demo owner who could not create an organization and could not run the walk.
+
+### ⭐ THE CHECK CANNOT BE A DATABASE TEST
+
+A test that queried the database would have **passed on the machine whose state caused the blindness**. The
+guard reads the **SEED SOURCE** and asserts the column is stated for every account it creates — including
+the ones that must NOT have it.
+
+⚠ **Silence is the bug.** An unstated column is not neutral: it is a vote for the default, cast invisibly,
+and readable only where a migration has already voted the other way.
+
+> ## ⭐ **A MIGRATION THAT BACKFILLS AND A SEED THAT INSERTS ARE TWO ANSWERS TO ONE QUESTION. THEY MUST
+> ## AGREE — AND SINCE ONLY THE SEED RUNS ON A FRESH INSTALL, THE SEED IS THE ONE THAT DECIDES.**
+
+⚠ **AND KEEP THE FIXTURE REPRESENTATIVE.** The seed grants the capability to exactly ONE account and
+explicitly withholds it from the rest, because signup now creates an account and never an organization — so
+*cannot create* is the MAJORITY case a real deployment produces. A fixture where everybody holds a
+capability gives the boundary nothing to be seen against.
+
+⛔ **A fixture value inherited from a migration clause is how a fixture stops representing anything**: the
+no-org onboarding account read `true` on old rigs purely because an e2e run had once given it an org and the
+backfill then caught it.
