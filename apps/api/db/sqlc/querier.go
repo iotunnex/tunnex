@@ -146,6 +146,13 @@ type Querier interface {
 	CountDevicesForUserCap(ctx context.Context, arg CountDevicesForUserCapParams) (int64, error)
 	// Any origin — the refuse-unless-empty guard (D1) must see a hand-added member too.
 	CountGroupMembers(ctx context.Context, arg CountGroupMembersParams) (int64, error)
+	// The gateway count the enrolment ceiling is checked against (S12.1 slice 4).
+	//
+	// ⛔ LIVE ONLY: a revoked gateway is not a gateway. Counting it would let a revoke permanently consume a
+	// band slot — the same defect class as the agent unique-index that a revoke bricked.
+	// ⚠ nodes has no deleted_at — revoked_at IS the retirement marker here. Checked against the live schema
+	// rather than assumed from the sibling tables that do have one.
+	CountLiveNodesForOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
 	// Org roster size. Joins users to exclude soft-deleted accounts (whose
 	// membership row survives a soft-delete); deactivated members are still on the
 	// roster, so they are intentionally counted.

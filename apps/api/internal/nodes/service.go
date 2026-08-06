@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -30,6 +31,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/ipalloc"
 	"github.com/tunnexio/tunnex/apps/api/internal/k8s"
+	"github.com/tunnexio/tunnex/apps/api/internal/licence"
 	"github.com/tunnexio/tunnex/apps/api/internal/pgerr"
 	"github.com/tunnexio/tunnex/apps/api/internal/policyspec"
 	"github.com/tunnexio/tunnex/apps/api/internal/wgkey"
@@ -152,10 +154,12 @@ type PolicyProvider interface {
 
 // Service provides node control-plane operations.
 type Service struct {
-	pool   *pgxpool.Pool
-	q      *sqlc.Queries
-	ca     *agentca.CA
-	policy PolicyProvider // nil => open build / not wired
+	// licence answers the entitlement questions. ⚠ nil means Community — the fail-open default.
+	licence *licence.Manager
+	pool    *pgxpool.Pool
+	q       *sqlc.Queries
+	ca      *agentca.CA
+	policy  PolicyProvider // nil => open build / not wired
 	// sealer supplies the keyed proof-of-secret fingerprint (S4.5 convention)
 	// written to the join-token audit rows, so issuance and redemption correlate
 	// without the raw token ever entering the audit stream.
@@ -286,6 +290,55 @@ type EnrollResult struct {
 
 // Enroll consumes a join token and issues the agent's first certificate. The
 // token is single-use; the cert serial becomes the node's identity.
+// checkGatewayCeiling refuses an enrolment that would exceed the licensed band.
+//
+// ⛔ ENROLMENT ONLY. Nothing running is ever stopped by this — it is the whole reason the trial band is 2
+// and not 20 (docs/laws.md: a temporary grant of a create-time limit is a permanent grant of everything
+// created under it).
+//
+// ⚠ A nil manager means Community, matching the fail-open default: a deployment that upgrades into this
+// code keeps one gateway rather than losing the ability to enrol at all.
+func (s *Service) checkGatewayCeiling(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID) error {
+	tier := s.effectiveTier(time.Now())
+	ceiling := licence.GatewayCeiling[tier]
+	if ceiling == nil {
+		return nil // unlimited
+	}
+	live, err := q.CountLiveNodesForOrg(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	if live < int64(*ceiling) {
+		return nil
+	}
+	// ⭐ THE MESSAGE IS THE FEATURE. It names the band, the ceiling, what is already enrolled, and what to
+	// do — because this refusal is correct behaviour that looks like a broken install if it only says no.
+	return apierr.New(403, "gateway_limit_reached", s.ceilingRefusal(tier, *ceiling, live))
+}
+
+// effectiveTier resolves the entitlement tier. ⚠ nil manager => Community, the fail-open default.
+func (s *Service) effectiveTier(now time.Time) licence.Tier {
+	if s.licence == nil {
+		return licence.TierCommunity
+	}
+	return s.licence.Evaluate(now).Tier
+}
+
+// ceilingRefusal is the message an operator actually reads. ⭐ Extracted so it is testable without a
+// database — the wording is the part of this slice worth guarding.
+func (s *Service) ceilingRefusal(tier licence.Tier, ceiling int, live int64) string {
+	unit := "gateways"
+	if ceiling == 1 {
+		unit = "gateway"
+	}
+	return fmt.Sprintf(
+		"This deployment is on the %s band, which allows %d %s, and %d are already enrolled. "+
+			"Nothing running is affected — existing gateways keep working, and this refusal applies only "+
+			"to enrolling a new one. To add another: upgrade the licence, or revoke a gateway you no "+
+			"longer use to free a slot.",
+		tier, ceiling, unit, live)
+}
+
 func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentVersion string) (EnrollResult, error) {
 	var res EnrollResult
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
@@ -304,6 +357,18 @@ func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentV
 		}
 		if nodeName == "" {
 			return apierr.BadRequest("node_name_required", "a node name is required")
+		}
+		// ⛔ THE GATEWAY CEILING — AT ENROLMENT ONLY (S12.1 slice 4).
+		//
+		// Community 1 · trial 2 · Starter 5 · Growth 20 · Scale unlimited. A RUNNING GATEWAY IS NEVER
+		// STOPPED and an UPGRADE IS NOT AN ENROLMENT: a deployment already over its band keeps everything
+		// it has and simply cannot add another. There is no special case for pre-existing excess, because
+		// the enrolment-only rule already produces the right behaviour.
+		//
+		// ⚠ AND THE REFUSAL SAYS WHICH BAND AND WHICH CEILING. A bare failure here is the first thing a
+		// real customer meets, and "enrolment failed" tells them nothing they can act on.
+		if e := s.checkGatewayCeiling(ctx, q, tok.OrgID); e != nil {
+			return e
 		}
 		iss, e := s.ca.SignCSR([]byte(csrPEM), nodeName)
 		if e != nil {
@@ -2329,4 +2394,11 @@ func (s *Service) allocateAgentDevice(ctx context.Context, q *sqlc.Queries, orgI
 		Transport: "wireguard",
 	})
 	return err
+}
+
+// WithLicence wires the entitlement source. ⚠ Optional by construction: a Service without one behaves as
+// Community, which is the fail-open default rather than a failure.
+func (s *Service) WithLicence(m *licence.Manager) *Service {
+	s.licence = m
+	return s
 }

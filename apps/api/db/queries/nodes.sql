@@ -394,3 +394,13 @@ LEFT JOIN users u ON u.id = d.user_id
 LEFT JOIN device_status ds ON ds.device_id = d.id
 WHERE d.org_id = $1 AND d.kind = 'agent' AND d.deleted_at IS NULL
 ORDER BY (u.email IS NULL) DESC, d.name;
+
+-- name: CountLiveNodesForOrg :one
+-- The gateway count the enrolment ceiling is checked against (S12.1 slice 4).
+--
+-- ⛔ LIVE ONLY: a revoked gateway is not a gateway. Counting it would let a revoke permanently consume a
+-- band slot — the same defect class as the agent unique-index that a revoke bricked.
+-- ⚠ nodes has no deleted_at — revoked_at IS the retirement marker here. Checked against the live schema
+-- rather than assumed from the sibling tables that do have one.
+SELECT count(*) FROM nodes
+WHERE org_id = $1 AND revoked_at IS NULL;

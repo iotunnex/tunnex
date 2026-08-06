@@ -98,6 +98,24 @@ func (q *Queries) ConsumeRekeyChallenge(ctx context.Context, arg ConsumeRekeyCha
 	return i, err
 }
 
+const countLiveNodesForOrg = `-- name: CountLiveNodesForOrg :one
+SELECT count(*) FROM nodes
+WHERE org_id = $1 AND revoked_at IS NULL
+`
+
+// The gateway count the enrolment ceiling is checked against (S12.1 slice 4).
+//
+// ⛔ LIVE ONLY: a revoked gateway is not a gateway. Counting it would let a revoke permanently consume a
+// band slot — the same defect class as the agent unique-index that a revoke bricked.
+// ⚠ nodes has no deleted_at — revoked_at IS the retirement marker here. Checked against the live schema
+// rather than assumed from the sibling tables that do have one.
+func (q *Queries) CountLiveNodesForOrg(ctx context.Context, orgID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countLiveNodesForOrg, orgID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createJoinToken = `-- name: CreateJoinToken :one
 INSERT INTO node_join_tokens (org_id, node_name, token_hash, expires_at, issued_by, enrols_kind)
 VALUES ($1, $2, $3, $4, $5, COALESCE(NULLIF($6::text, ''), 'gateway'))
