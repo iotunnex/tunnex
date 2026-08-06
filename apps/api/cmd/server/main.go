@@ -293,7 +293,7 @@ func main() {
 	membersSvc := tenancy.NewMembershipService(pool, sessions).
 		WithDevicePusher(deviceSvc).
 		WithCRLRebuilder(ovpnCRLRebuilder{ovpnSvc})
-	idpSyncPort := apphttp.NewIdpSyncPort(pool, sealer, membersSvc, deviceSvc, logger)
+	idpSyncPort := apphttp.NewIdpSyncPort(pool, sealer, membersSvc, deviceSvc, licenceMgr, logger)
 
 	router, err := apphttp.NewRouter(logger, apphttp.Deps{
 		Licence:               licenceMgr,
