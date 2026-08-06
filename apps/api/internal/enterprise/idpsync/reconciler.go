@@ -28,6 +28,11 @@ type Reconciler struct {
 	store    Store
 	deprov   Deprovisioner
 	now      func() time.Time
+	// provisioningAllowed reports whether the licence still entitles this deployment to PROVISION.
+	// nil = allowed (no licence system wired yet, and the pre-S12.1 behaviour).
+	//
+	// ⭐ D1, RULED: A LICENCE MAY STOP GRANTING ACCESS. IT MUST NEVER STOP REMOVING IT.
+	provisioningAllowed func() bool
 }
 
 // SyncGroup is one IdP→Tunnex group mapping to reconcile.
@@ -78,6 +83,23 @@ func NewReconciler(p DirectoryProvider, s Store, d Deprovisioner, now func() tim
 		now = time.Now
 	}
 	return &Reconciler{provider: p, store: s, deprov: d, now: now}
+}
+
+// WithProvisioningGate injects the licence predicate. A separate setter rather than a NewReconciler
+// parameter so the DEFAULT is "allowed" — the pre-licence behaviour — and so no existing caller silently
+// acquires a gate it did not ask for.
+//
+// ⛔ THE GATE IS ON THE ADDITIVE HALF ONLY, BY CONSTRUCTION. There is deliberately no equivalent hook for
+// removals: the way to be sure a licence can never stop a revocation is that no seam exists through which
+// it could.
+func (r *Reconciler) WithProvisioningGate(fn func() bool) *Reconciler {
+	r.provisioningAllowed = fn
+	return r
+}
+
+// mayProvision reports whether the ADDITIVE half of converge may run.
+func (r *Reconciler) mayProvision() bool {
+	return r.provisioningAllowed == nil || r.provisioningAllowed()
 }
 
 // ReconcileConfig reconciles every mapped group for one org+provider, then records the poll's
@@ -185,19 +207,38 @@ func (r *Reconciler) converge(ctx context.Context, orgID uuid.UUID, provider str
 	var errs []error
 
 	// Adds (grant). Fail-closed: collect + continue (a failed add just means fewer grants).
+	//
+	// ⭐ D1 (RULED): A LICENCE MAY STOP GRANTING ACCESS. IT MUST NEVER STOP REMOVING IT.
+	//
+	// On a lapsed licence THIS BLOCK IS SKIPPED and the two below still run. Joiners stop being
+	// provisioned — the capability the customer was paying for — while leavers keep losing access,
+	// because that is not a feature being sold, it is the product not leaking access.
+	//
+	// ⛔ THE OBVIOUS IMPLEMENTATION IS THE WRONG ONE, AND IT LOOKS LIKE THE CONVENTION. The precedent is
+	// ReleaseAllHealthBlocks (devices/health.go:260), which RELEASES posture enforcement on downgrade.
+	// Copying it here means "stop reconciling", which freezes membership at the last sync and leaves a
+	// directory-removed person with working access indefinitely. Posture is a RESTRICTION, so releasing it
+	// is safe; sync is a REVOCATION MECHANISM, so releasing it is the fail-open. See docs/laws.md.
+	//
+	// ⚠ The desired-set computation above is SHARED and ungated, so removals are still derived only from a
+	// SUCCESSFULLY-FETCHED member set — the fail-static property is untouched by this gate.
 	currentSet := map[uuid.UUID]bool{}
 	for _, m := range currentMembers {
 		currentSet[m.UserID] = true
 	}
-	for _, uid := range sortedUUIDKeys(desired) {
-		if !currentSet[uid] {
-			did, e := r.store.AddIdpGroupMember(ctx, orgID, g.ID, uid, desired[uid])
-			if e != nil {
-				errs = append(errs, fmt.Errorf("add %s: %w", uid, e))
-				continue
-			}
-			if did { // false on an idempotent no-op → no redundant push
-				changed = true
+	// Evaluated ONCE, before the loop: a predicate re-read per member could grant half a group and skip the
+	// rest, which is a state no operator could explain and no test would reliably reproduce.
+	if r.mayProvision() {
+		for _, uid := range sortedUUIDKeys(desired) {
+			if !currentSet[uid] {
+				did, e := r.store.AddIdpGroupMember(ctx, orgID, g.ID, uid, desired[uid])
+				if e != nil {
+					errs = append(errs, fmt.Errorf("add %s: %w", uid, e))
+					continue
+				}
+				if did { // false on an idempotent no-op → no redundant push
+					changed = true
+				}
 			}
 		}
 	}

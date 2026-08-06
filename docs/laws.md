@@ -4820,3 +4820,58 @@ that is *wrong* gets read; an output that is merely *narrower than assumed* gets
 
 **The check:** before treating a local result as evidence, ask **what would this command have to see in order
 to fail?** ⛔ If the answer excludes the thing you changed, the command is not evidence about it.
+
+---
+
+## ⛔ "DOWNGRADE RELEASES ENFORCEMENT" IS A LAW ABOUT **RESTRICTIONS**. A REVOCATION MECHANISM RELEASED THE SAME WAY IS A FAIL-OPEN
+
+**Found while designing S12.1's IdP-sync downgrade (D1), against a precedent that was cited to me as the
+model to follow — and the precedent is correct, and copying it produces the hole.**
+
+`devices/health.go:260` — `ReleaseAllHealthBlocks` frees every posture-blocked device on downgrade, audited
+as `health_blocks_released_on_downgrade`. It is right, and it is the convention this codebase reaches for
+whenever an enterprise capability lapses.
+
+Apply it to IdP directory sync and you get: **stop reconciling.** Membership then freezes at the last
+successful sync, the compiler keeps compiling those grants, the gateways keep enforcing them, and **a person
+removed from the customer's directory keeps working access indefinitely.**
+
+The two look identical — both are "the paid feature stops" and both end up **more permissive** — and they
+are opposite:
+
+| | posture | IdP sync |
+| --- | --- | --- |
+| what the paid feature **does** | a **RESTRICTION** — it blocks devices | a **REVOCATION MECHANISM** — it removes access |
+| release it | devices unblock → more permissive → **safe** | removals stop → more permissive → **the hole** |
+
+> ## **RELEASING A RESTRICTION RETURNS THE SYSTEM TO ITS DEFAULT. RELEASING A REVOCATION MECHANISM STRANDS
+> ## THE SYSTEM AT A PAST STATE OF THE WORLD, AND CALLS IT CURRENT.**
+
+**The test: ask what the capability's ABSENCE means, not what its release does.** Absent posture
+enforcement, nothing was ever blocked — a clean default. Absent sync, membership means *"true as of the last
+poll"* while every surface renders it as *"true"*. **Staleness that is indistinguishable from currency is
+the actual defect**, and "release the enforcement" is the phrasing that hides it.
+
+⭐ **THE RULING THAT FOLLOWS, AND IT IS THE DURABLE PART:**
+
+> # **A LICENCE MAY STOP GRANTING ACCESS. IT MUST NEVER STOP REMOVING IT.**
+
+Implemented as the additive/subtractive split in `idpsync/reconciler.go` — the licence gates the Adds block
+and there is deliberately **no seam at all** through which it could reach Removes or Deprovision. The way to
+be certain a licence can never stop a revocation is that there is nowhere to put the check.
+
+### ⚠ WHY THIS ONE IS FILED, WHEN THE CODE ALREADY ENCODES IT
+
+**It fires on the person following precedent CORRECTLY.** Every other failure in this file is someone
+missing a rule; this is someone applying one, from the right place, and landing on a security hole. The
+instruction that set this work going **named the posture precedent as the model to follow** — the analogy
+was in the brief, not invented by the implementer. An engineer who reads `ReleaseAllHealthBlocks`, copies
+its shape, and writes "release on downgrade" will have done everything the codebase asked of them.
+
+**A convention that is safe in every instance so far is not a law — it is an unexamined sample.** The class
+this belongs to is the one where the guard exists, the reasoning is sound, and the SUBJECT is different in a
+way the phrasing cannot express. Same shape as *A GUARD WRITTEN FOR A HAZARD IS NOT A GUARD AGAINST THE
+HAZARD*, one level up: here the guard is not even wrong, it is **wrong for this noun**.
+
+⛔ **So the question to ask of any downgrade path is not "what does release mean here" but "is this thing a
+restriction or a revocation".** Only the first releases.
