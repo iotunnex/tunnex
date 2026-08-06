@@ -35,6 +35,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	"github.com/tunnexio/tunnex/apps/api/internal/k8s"
 	"github.com/tunnexio/tunnex/apps/api/internal/leader"
+	"github.com/tunnexio/tunnex/apps/api/internal/licence"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/machineauth"
 	"github.com/tunnexio/tunnex/apps/api/internal/mail"
@@ -200,7 +201,15 @@ func main() {
 	logger.Info("agent_ca_ready", slog.Bool("first_boot", caFirstBoot), slog.String("ca_fp", agentCA.Fingerprint()))
 
 	authSvc := auth.NewService(pool, mailer, cfg.AppBaseURL, sessions, logger)
-	nodeSvc := nodes.NewService(pool, agentCA, sealer)
+	// ⛔ ONE MANAGER, SHARED. Every gated question — gateway enrolment, org creation, SSO, IdP sync — must
+	// read the SAME entitlement. Two managers would be two answers, and the one a capability happened to
+	// hold would decide what a customer could do.
+	//
+	// ⚠ Its zero value is Community, which is the fail-open default: a deployment with no key is complete
+	// and supported, not broken.
+	licenceMgr := &licence.Manager{}
+
+	nodeSvc := nodes.NewService(pool, agentCA, sealer).WithLicence(licenceMgr)
 	// S7.2: wire the Zero Trust policy source for the desired state (nil in the open
 	// build -> no policy field -> agents keep the legacy mesh).
 	nodeSvc.SetPolicyProvider(apphttp.NewNodePolicyProvider(pool))
@@ -287,7 +296,8 @@ func main() {
 	idpSyncPort := apphttp.NewIdpSyncPort(pool, sealer, membersSvc, deviceSvc, logger)
 
 	router, err := apphttp.NewRouter(logger, apphttp.Deps{
-		Orgs:                  tenancy.NewService(pool),
+		Licence:               licenceMgr,
+		Orgs:                  tenancy.NewService(pool).WithLicence(licenceMgr),
 		CliAuth:               cliAuthSvc,
 		Machine:               machineAuthSvc,
 		Auth:                  authSvc,

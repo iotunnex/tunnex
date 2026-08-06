@@ -47,6 +47,17 @@ const (
 	// It is the AUTHORIZATION HALF of D3. A proof of possession may never overturn a human decision, so the only
 	// thing that can is another human, holding a permission that says so.
 	PermDeviceRestore Permission = "device:restore"
+
+	// PermLicenseManage governs installing a licence key (S12.1).
+	//
+	// ⛔ OWNER-ONLY, AND DELIBERATELY NOT A REUSE OF org:update. Installing a licence changes what the
+	// WHOLE DEPLOYMENT may do — how many gateways, how many organizations, whether SSO exists — and an
+	// admin who can rename an org must not thereby be able to change the commercial entitlement of every
+	// org on the box. Named per capability, like every other permission here.
+	//
+	// ⚠ Reading the entitlement is NOT gated by this: any member may see which tier they are on, because a
+	// user hitting a ceiling needs to understand why without asking an owner.
+	PermLicenseManage Permission = "license:manage"
 	// PermMfaManage governs ORG-LEVEL MFA (S7.5.5, enterprise): the enforce toggle + admin-reset
 	// of a member's MFA. Named per feature (NOT a policy/member reuse) — MFA governance is its own
 	// axis, and admin-reset is an account-takeover-adjacent power (disenroll-only, audited,
@@ -140,6 +151,7 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermMfaManage:          true,
 		PermSiteManage:         true,
 		PermK8sManage:          true,
+		PermLicenseManage:      true,
 		PermMachineManage:      true, // owner-only: minting a non-human org principal is org-delete-grade
 	},
 	// RoleOperator (S10.2) — the machine credential's fixed role, scoped to exactly the operator's verbs

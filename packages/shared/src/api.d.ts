@@ -1328,6 +1328,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/license": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * What this deployment is entitled to
+         * @description The current entitlement, whether or not a licence key is installed. An absent licence is COMMUNITY — not an error — so this always answers.
+         */
+        get: operations["getLicense"];
+        put?: never;
+        /**
+         * Install a licence key — takes effect immediately, no restart
+         * @description Verifies the key offline against the public key set compiled into this build and installs it. A key that does not verify is REFUSED and the existing entitlement is left untouched.
+         */
+        post: operations["installLicense"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/invitations/accept": {
         parameters: {
             query?: never;
@@ -2451,6 +2477,34 @@ export interface components {
         SetPolicyRuleEnabledRequest: {
             /** @description F3: true = the rule contributes its allow; false = disabled (permission withdrawn, as-if-absent under default-deny). */
             enabled: boolean;
+        };
+        InstallLicenseRequest: {
+            /** @description The licence key, as emailed. Begins `tnxl_`. */
+            key: string;
+        };
+        LicenseStatus: {
+            /**
+             * @description unlicensed = no key, Community, not an error. expired = past expiry but inside grace; NOTHING STOPS. lapsed = past grace; gated capabilities stop and the VPN does not.
+             * @enum {string}
+             */
+            state: "unlicensed" | "valid" | "expired" | "lapsed";
+            /** @enum {string} */
+            tier: "community" | "trial" | "starter" | "growth" | "scale";
+            /** @description Gateways this deployment may ENROL. null means unlimited. Running gateways are never stopped. */
+            gateway_ceiling: number | null;
+            /** @description Organizations it may CREATE. null means unlimited. */
+            org_ceiling: number | null;
+            /** @description The named capabilities this tier grants. */
+            features: string[];
+            /** Format: date-time */
+            expires_at?: string | null;
+            /**
+             * Format: date-time
+             * @description When gated capabilities stop. Absent unless expired.
+             */
+            grace_ends_at?: string | null;
+            /** @description The deployment's clock moved materially backwards. Reported, never enforced — a backward clock is overwhelmingly a VM restore or an NTP correction. */
+            clock_went_backwards?: boolean;
         };
         ZeroTrustMode: {
             /**
@@ -5223,6 +5277,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ZeroTrustMode"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getLicense: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current entitlement. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LicenseStatus"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    installLicense: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstallLicenseRequest"];
+            };
+        };
+        responses: {
+            /** @description Installed. The response is the new entitlement. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LicenseStatus"];
                 };
             };
             default: components["responses"]["Error"];

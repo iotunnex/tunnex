@@ -20,6 +20,10 @@ import (
 // keyed by lower(operationId) so a valid body accompanies gated POST/PATCH ops
 // (otherwise the validator 400s on the missing body before auth is checked).
 var walkBodies = map[string]string{
+	// ⚠ A body is required so the 401 is about AUTHENTICATION, not about a missing field. Without one the
+	// spec validator answers 400 first and the walk cannot tell "you are not signed in" from "your JSON is
+	// wrong" — which is exactly the confusion the walk exists to rule out.
+	"installlicense": `{"key":"tnxl_walk-probe"}`,
 	"createorganization": `{"name":"Walk","slug":"walk-test"}`,
 	"updateorganization": `{"name":"Walk"}`,
 	"setssoconfig":       `{"client_id":"x","client_secret":"y","enabled":true}`,

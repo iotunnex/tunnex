@@ -25,6 +25,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	"github.com/tunnexio/tunnex/apps/api/internal/k8s"
+	"github.com/tunnexio/tunnex/apps/api/internal/licence"
 	applog "github.com/tunnexio/tunnex/apps/api/internal/log"
 	"github.com/tunnexio/tunnex/apps/api/internal/machineauth"
 	"github.com/tunnexio/tunnex/apps/api/internal/mfa"
@@ -41,17 +42,20 @@ type AuthFunc func(r *http.Request) *authctx.Principal
 
 // Deps are the router's dependencies.
 type Deps struct {
-	Orgs      *tenancy.Service
-	CliAuth   *cliauth.Service
-	Auth      *auth.Service
-	Members   *tenancy.MembershipService
-	Invites   *invites.Service
-	Nodes     *nodes.Service
-	Devices   *devices.Service
-	Ovpn      *ovpn.Service // OPEN (D-S9.1-6): OpenVPN PKI + export. CA loads lazily (D-S9.5-OPTIN a)
-	Sites     *sites.Service
-	K8s       *k8s.Service         // OPEN (all editions, S10.3): K8s cluster/Service connectivity
-	Machine   *machineauth.Service // OPEN (S10.2): machine credentials (GitOps operator identity)
+	Orgs    *tenancy.Service
+	CliAuth *cliauth.Service
+	Auth    *auth.Service
+	Members *tenancy.MembershipService
+	Invites *invites.Service
+	Nodes   *nodes.Service
+	Devices *devices.Service
+	Ovpn    *ovpn.Service // OPEN (D-S9.1-6): OpenVPN PKI + export. CA loads lazily (D-S9.5-OPTIN a)
+	Sites   *sites.Service
+	K8s     *k8s.Service         // OPEN (all editions, S10.3): K8s cluster/Service connectivity
+	Machine *machineauth.Service // OPEN (S10.2): machine credentials (GitOps operator identity)
+	// Licence is the entitlement source. ⚠ Never nil in production; a nil manager would mean Community,
+	// which is the fail-open default rather than a failure.
+	Licence   *licence.Manager
 	Sessions  *session.Store
 	Mfa       *mfa.Service  // OPEN (all editions): TOTP enrollment + login challenge (S7.5.5)
 	SSO       ssoPort       // nil => open build (SSO endpoints return edition_required)
@@ -218,7 +222,7 @@ func NewRouter(logger *slog.Logger, d Deps) (http.Handler, error) {
 		},
 	}))
 
-	srv := apiServer{orgs: d.Orgs, cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, ovpn: d.Ovpn, sites: d.Sites, k8s: d.K8s, machine: d.Machine, sessions: d.Sessions, mfa: d.Mfa, sso: d.SSO, policy: d.Policy, accessLog: d.AccessLog, idpSync: d.IdpSync, deviceApprovalEnabled: d.DeviceApprovalEnabled, deviceHealthEnabled: d.DeviceHealthEnabled, mfaEnforceEnabled: d.MfaEnforceEnabled, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL, nodeAgentImage: d.NodeAgentImage}
+	srv := apiServer{orgs: d.Orgs, licence: licenceOrCommunity(d.Licence), cliAuth: d.CliAuth, auth: d.Auth, members: d.Members, invites: d.Invites, nodes: d.Nodes, devices: d.Devices, ovpn: d.Ovpn, sites: d.Sites, k8s: d.K8s, machine: d.Machine, sessions: d.Sessions, mfa: d.Mfa, sso: d.SSO, policy: d.Policy, accessLog: d.AccessLog, idpSync: d.IdpSync, deviceApprovalEnabled: d.DeviceApprovalEnabled, deviceHealthEnabled: d.DeviceHealthEnabled, mfaEnforceEnabled: d.MfaEnforceEnabled, cookieSecure: d.CookieSecure, appBaseURL: d.AppBaseURL, nodeAgentImage: d.NodeAgentImage}
 	// Default-deny MFA-enrollment gate (S7.5.5 D8, enterprise): runs after auth attaches the
 	// principal; a gated user is restricted to enrollment. Registered before the routes so it
 	// wraps every operation (self-arming — a new endpoint is gated by construction).
@@ -249,4 +253,16 @@ func validationErrorHandler(w http.ResponseWriter, message string, statusCode in
 			"message": message,
 		},
 	})
+}
+
+// licenceOrCommunity guarantees a usable manager.
+//
+// ⛔ THE FAIL-OPEN DEFAULT, AND IT IS HERE SO THERE IS NO WINDOW WHERE A CAPABILITY ASKS AND NOTHING
+// ANSWERS. A nil *Manager would panic on the first entitlement question; an empty one answers "Community",
+// which is exactly what a deployment with no licence is entitled to.
+func licenceOrCommunity(m *licence.Manager) *licence.Manager {
+	if m == nil {
+		return &licence.Manager{}
+	}
+	return m
 }
