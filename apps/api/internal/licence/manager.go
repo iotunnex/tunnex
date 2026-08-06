@@ -151,9 +151,39 @@ func (m *Manager) Has(f Feature, now time.Time) bool {
 //
 // ⛔ AT ENROLMENT ONLY. Running gateways are never stopped, and an UPGRADE IS NOT AN ENROLMENT: a
 // deployment already running three gateways keeps all three and cannot add a fourth.
+// ⛔ RULED: `gw` IS AUTHORITATIVE WHEN THE KEY CARRIES IT. The tier map is the DEFAULT, not the answer.
+//
+// The alternative was to delete `gw` from the wire. Rejected, and the reason is commercial rather than
+// technical: `gw` is resolved AT MINT precisely so a later band-table change cannot re-price a key already
+// in a customer's hands. Deleting it would mean a customer's ceiling silently follows whatever the CURRENT
+// build's map says — so shipping a release that lowers Growth from 20 to 15 would quietly take five
+// gateways off every existing Growth customer, mid-term, without anyone deciding to.
+//
+// > ## ⭐ **A SIGNED KEY IS A CONTRACT. THE MAP IS THE PRICE LIST. WHEN THEY DISAGREE, THE CONTRACT WINS.**
+//
+// ⚠ AND THIS ENDS THE RENDER-FLOOR VIOLATION RATHER THAN LIVING WITH IT. Until now the key ASSERTED a
+// ceiling — signed, attested, unrecallable — and the product ignored it. A claim that is cryptographically
+// attested and operationally inert is worse than no claim: `gw: 20` shipped on a trial key and was true of
+// nothing.
+//
+// ⚠ THE TWO CANNOT DRIFT GOING FORWARD, which is what makes trusting the key safe: the issuer computes
+// `gw` from `BANDS[band].gateways` at mint, `BANDS` is the single source in that repo, and
+// `band_agreement_test.go` pins it against the Go map by hand in both repos.
+//
+// ⛔ A KEY WITH NO `gw` FALLS BACK TO THE MAP. Keys minted before S12.1 carry neither `tier` nor `gw`; they
+// read as Community, which is exactly what they could do when they were signed.
 func (m *Manager) GatewayCeilingNow(now time.Time) *int {
-	c, _ := GatewayCeilingFor(m.Evaluate(now).Tier)
-	return c
+	m.mu.RLock()
+	c := m.claims
+	m.mu.RUnlock()
+	st := m.Evaluate(now)
+	// ⚠ ONLY WHILE THE LICENCE STILL GRANTS ITS TIER. Once lapsed, Evaluate falls to Community and the
+	// signed ceiling goes with it — a contract that has expired is not a contract.
+	if c != nil && c.Gateways != nil && st.Tier != TierCommunity {
+		return c.Gateways
+	}
+	ceil, _ := GatewayCeilingFor(st.Tier)
+	return ceil
 }
 
 // OrgCeilingNow is the number of organizations this deployment may CREATE. nil means unlimited.

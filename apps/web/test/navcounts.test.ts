@@ -84,3 +84,49 @@ describe("countFrom — the Loaded<T> mapping, gated after a mutation exposed it
     ).toEqual({ state: "ok", value: 0 });
   });
 });
+
+// ⛔ THE GATEWAY BADGE IS USED/CEILING (founder-ruled), AND EVERY CASE HERE IS ONE A REAL DEPLOYMENT SITS IN.
+//
+// It used to be online/total. `1/6` sat beside a licence card reading 20, and the two looked like one fact
+// disagreeing with itself — they were two different facts wearing the same shape.
+describe("the gateway badge is headroom, not liveness", () => {
+  const ok = (value: number) => ({ state: "ok" as const, value });
+  const failed = { state: "failed" as const };
+
+  it("renders used over ceiling", () => {
+    expect(gatewayBadgeText(ok(6), ok(20))).toBe("6/20");
+  });
+
+  // ⭐ UNLIMITED IS `∞` — never the word, never a blank. A blank denominator reads as a loading state and
+  // the reader waits for a number that is never coming.
+  it("renders ∞ for an unlimited ceiling", () => {
+    expect(gatewayBadgeText(ok(37), null)).toBe("37/∞");
+  });
+
+  // ⛔ COMMUNITY'S STEADY STATE. `1/1` is the expected condition of every free deployment — using the one
+  // gateway it has. It is TRUE, and it must render plainly rather than be softened, hidden, or alarmed.
+  it("renders 1/1 on Community without hiding or softening it", () => {
+    expect(gatewayBadgeText(ok(1), ok(1))).toBe("1/1");
+  });
+
+  // ⛔ NO CLAMP, NO ERROR. A deployment sits ABOVE its band whenever a licence lapses or a tier is
+  // downgraded — running gateways are never stopped, so exceeding the ceiling is a NORMAL state. Clamping
+  // to 20/20 would hide the one number the operator needs to act on.
+  it("renders an over-ceiling deployment truthfully", () => {
+    expect(gatewayBadgeText(ok(24), ok(20))).toBe("24/20");
+  });
+
+  // ⛔ EITHER SIDE UNKNOWN => NO BADGE. `6/?` asserts one half as fact while implying the other is merely
+  // late, when the reader cannot tell which half is real.
+  it("renders nothing when either side is unknown", () => {
+    expect(gatewayBadgeText(failed, ok(20))).toBeNull();
+    expect(gatewayBadgeText(ok(6), failed)).toBeNull();
+  });
+
+  // ⚠ AND ZERO IS A NUMBER. A deployment with no gateways yet renders 0/1, not an absent badge — the
+  // empty state is information, and hiding it is how "you have none" becomes indistinguishable from
+  // "we could not tell".
+  it("renders zero used", () => {
+    expect(gatewayBadgeText(ok(0), ok(1))).toBe("0/1");
+  });
+});

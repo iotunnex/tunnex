@@ -103,9 +103,28 @@ export default function CreateOrg() {
           Invitation required
         </h1>
         <p className="mt-2 text-sm text-slate-400">
-          This {PRODUCT_NAME} deployment already has an organization and the
-          open edition supports a single one. Ask an administrator to invite
-          you, then sign in to accept.
+          This {PRODUCT_NAME} deployment already has an organization, and its
+          licence allows a single one. Ask an administrator to invite you, then
+          sign in to accept.
+        </p>
+        {/* ⚠ THE ROUTE IS FOR THE ADMINISTRATOR, NOT THIS VISITOR — and saying so is the point.
+            Whoever is reading this cannot install a licence: they have no organization, so they have no
+            settings screen and no owner role anywhere. Offering them an "install a licence" button would
+            be a route to a 403. What they CAN do is tell the person who runs the deployment which limit
+            they hit, so the sentence names it and the link goes to the public page rather than into a
+            product they cannot yet enter. */}
+        <p className="mt-2 text-sm text-slate-400">
+          If you run this deployment, its organization limit is raised by
+          installing a licence —{" "}
+          <a
+            href="https://tunnex.io/trial"
+            target="_blank"
+            rel="noreferrer"
+            className="text-accent hover:underline"
+          >
+            request one ↗
+          </a>
+          .
         </p>
         <Link
           to="/login"

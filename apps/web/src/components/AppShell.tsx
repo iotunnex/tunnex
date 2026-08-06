@@ -106,7 +106,7 @@ function badgeFor(to: string, c: NavCounts): string | null {
   //
   // A BADGE PARKED ON THE NEAREST AVAILABLE ITEM OUTLIVES THE REASON IT WAS PARKED THERE.
   if (to === "/gateways")
-    return gatewayBadgeText(c.gatewaysOnline, c.gatewaysTotal);
+    return gatewayBadgeText(c.gatewaysTotal, c.gatewayCeiling);
   if (to === "/sites") return badgeText(c.sites);
   if (to === "/devices") return badgeText(c.devices);
   return null;

@@ -2,6 +2,7 @@ package licence
 
 import (
 	"crypto/ed25519"
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -28,12 +29,28 @@ import (
 // ⚠ REGENERATED IN S12.1 when `tier` entered the wire format, and TRANSCRIBED BY HAND from the tunnex-web
 // twin — never derived from it, never shared through a package. If only one side had been updated the
 // other would be red right now, which is the entire reason two literals exist.
+// goldenKeys is the golden vector's OWN key set.
+//
+// ⛔ THE GOLDEN KID IS NO LONGER IN TrustedKeys, AND THAT IS THE POINT. Its private half is a published
+// test seed, so trusting it in production meant anyone could mint themselves a Scale licence. The vector
+// still proves what it always proved — that this repo's Go verifier and tunnex-web's TS signer agree
+// byte-for-byte — because the guard is about the FORMAT, not about which keys ship.
+//
+// ⚠ It verifies through the same `Verify` production uses; only the key set differs.
+func goldenKeys() map[string]ed25519.PublicKey {
+	b, err := base64.RawURLEncoding.DecodeString(GoldenPublicKey)
+	if err != nil || len(b) != ed25519.PublicKeySize {
+		panic("golden public key is malformed")
+	}
+	return map[string]ed25519.PublicKey{GoldenKid: ed25519.PublicKey(b)}
+}
+
 const goldenWire = "tnxl_eyJ2IjoxLCJraWQiOiJrLWdvbGRlbi0xIiwiaWQiOiIxMTExMTExMS0yMjIyLTMzMzMtNDQ0NC01NTU1NTU1NTU1NTUiLCJkb20iOiJtw7xuY2hlbi1nbWJoLmV4YW1wbGUiLCJ0aWVyIjoic2NhbGUiLCJiYW5kIjoic2NhbGUiLCJndyI6bnVsbCwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDB9.lvAsH4hNbeLb-GU9RvYZbvI0IoH_HMWc6Mx2Felw39rmFtZN-Su_dM8P3ShS0K-tYWJ8TFILAuH2dVz5ki1lAw"
 
 func TestGoldenVectorVerifiesAndYieldsExactClaims(t *testing.T) {
 	// ⚠ Verified through TrustedKeys — the SAME path production uses. A test-only key map here would let
 	// the shipped set drift from the one the vector proves.
-	res, err := Verify(TrustedKeys, goldenWire)
+	res, err := Verify(goldenKeys(), goldenWire)
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -97,7 +114,7 @@ func TestGoldenVectorRejectsTampering(t *testing.T) {
 		{"empty", "", ReasonMalformed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := Verify(TrustedKeys, tc.wire)
+			res, err := Verify(goldenKeys(), tc.wire)
 			if err != nil {
 				t.Fatalf("verify: %v", err)
 			}
@@ -118,7 +135,7 @@ func TestGoldenVectorRejectsTampering(t *testing.T) {
 // kid from the set then stops nothing.
 func TestUnknownKidIsRefusedNeverFallenBackFrom(t *testing.T) {
 	// The golden key under a DIFFERENT kid: the signature is valid, the kid is not trusted.
-	keys := map[string]ed25519.PublicKey{"some-other-kid": TrustedKeys[GoldenKid]}
+	keys := map[string]ed25519.PublicKey{"some-other-kid": goldenKeys()[GoldenKid]}
 
 	res, err := Verify(keys, goldenWire)
 	if err != nil {
@@ -134,7 +151,7 @@ func TestUnknownKidIsRefusedNeverFallenBackFrom(t *testing.T) {
 }
 
 func TestExpiryIsReportedNotEnforced(t *testing.T) {
-	res, _ := Verify(TrustedKeys, goldenWire)
+	res, _ := Verify(goldenKeys(), goldenWire)
 	// ⚠ The claims are readable regardless of the clock — expiry is a fact ABOUT A CLOCK, not about the
 	// signature, and S12.2 gates nothing on it.
 	if !res.OK {
