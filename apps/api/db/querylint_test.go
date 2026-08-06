@@ -28,6 +28,18 @@ var globalTables = map[string]bool{
 	"users":            true, // global — email-first login, org resolved after
 	"auth_tokens":      true, // global — user-scoped auth tokens, predate org context
 	"platform_secrets": true, // global — platform-wide sealed material (agent CA)
+	// ⭐ THE LINT ASKED THE RIGHT QUESTION AND THIS IS THE ANSWER, NOT A SILENCING.
+	//
+	// The licence is DEPLOYMENT-WIDE, and that is measured rather than preferred: `CountOrganizations` —
+	// the query the org ceiling checks — is `SELECT count(*) FROM organizations`, because "how many
+	// organizations exist" cannot be scoped to an organization. The key itself carries an eTLD+1 domain
+	// and NO organization identifier. Adding `org_id` here would encode a per-tenant licence the rest of
+	// the system cannot honour.
+	//
+	// ⚠ It is the same class as platform_secrets above, with one difference worth stating: this row is
+	// PLAIN, not sealed. The key is signed and self-verifying, so sealing buys nothing — and would couple
+	// licence recovery to the master key, making a sealer rotation silently downgrade a paying deployment.
+	"system_settings":  true, // global — deployment-wide settings; first tenant is the licence key
 	"cli_credentials":  true, // global — user-scoped CLI credentials span orgs (S5.1)
 	"cli_auth_codes":   true, // global — user-scoped one-time mint codes (S5.1)
 	"cli_device_codes": true, // global — pre-auth device-flow codes (S5.1)
