@@ -49,6 +49,7 @@ func SessionAuth(store *session.Store, q *sqlc.Queries) AuthFunc {
 			AuthMethod:         sess.AuthMethod, // rides the session's mint-time method (immutable)
 			Roles:              roles,
 			MustChangePassword: user.MustChangePassword,
+			CanCreateOrgs:      user.CanCreateOrgs,
 		}
 	}
 }
