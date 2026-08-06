@@ -40,3 +40,19 @@ func TestEnrolmentGateFollowsTheLadder(t *testing.T) {
 		t.Errorf("the refusal does not say the existing fleet is unaffected: %s", ae.Message)
 	}
 }
+
+// ⛔ THE SPENT-TOKEN SENTENCE, GUARDED — because it is the only thing standing between an operator and a
+// second, unrelated error.
+//
+// The band refusal fires after ConsumeJoinToken, so the token is gone. An operator who upgrades and retries
+// with it meets `invalid_join_token`, which describes a token problem rather than a licence one and sends
+// them looking in the wrong place entirely. The burn is registered, not fixed; this sentence is what makes
+// it survivable, so it is asserted rather than left to whoever next edits the wording.
+func TestBandRefusalWarnsTheTokenIsSpent(t *testing.T) {
+	msg := (&Service{}).ceilingRefusal(licence.TierTrial, 2, 2)
+	for _, want := range []string{"used up", "mint a new one", "keep working", "upgrade the licence"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the band refusal never says %q:\n%s", want, msg)
+		}
+	}
+}
