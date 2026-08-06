@@ -106,6 +106,19 @@ func (s *Service) checkMayCreateOrg(ctx context.Context, creator uuid.UUID) erro
 	if len(mine) > 0 {
 		return nil // an insider, admitted by someone already here
 	}
+	// ⚠ REGISTERED HERE, BESIDE THE CHANGE THAT ALTERED ITS MEANING: `/api/v1/auth/signup` HAS NO RATE
+	// LIMIT. The only throttle in the router is `rekeyOnly(newRekeyThrottle(...))`, scoped to the agent
+	// re-key path.
+	//
+	// ⛔ THE CODE DID NOT CHANGE. THE CONSEQUENCE DID. Signup was always unlimited — but it used to end in
+	// an organization, so it collided with the org ceiling and a flood stopped at one. Now it ends in a
+	// bare account, and NOTHING bounds it: unlimited rows in `users`, one verification email per attempt.
+	//
+	// > ## ⭐ **A PRE-EXISTING GAP BECAME A NEW EXPOSURE WITH NOBODY EDITING IT — the limit that had been
+	// > ## accidentally containing it was removed by a fix that was right for a different reason.**
+	//
+	// Not fixed here on purpose: a limiter bolted onto the end of a security change is the shape that
+	// gets tuned wrong. It needs its own pass, with the CLI-refusal item.
 	return apierr.Forbidden("invitation_required",
 		"This deployment is already set up. New organizations can only be created by someone who is "+
 			"already a member — ask an administrator to invite you, then sign in to accept.")
