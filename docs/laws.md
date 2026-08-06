@@ -5149,3 +5149,64 @@ being tested and not the choice being tested.**
 So when a guard protects a rule you are about to build something under: **build it, and check the guard
 notices.** A guard that stays silent through the addition it was written for is not passing — it is
 absent, and it will keep reporting that everything is fine.
+
+---
+
+## ⛔ A CROSS-RUNTIME BOUNDARY TESTED ON ONE SIDE ONLY IS UNTESTED — AND IT FAILS LOOKING LIKE A DEPLOYMENT PROBLEM
+
+**S12.4's first live issuance attempt. 144 tests passed. The key it produced could not be used.**
+
+The ceremony generated an Ed25519 signing key with Node's WebCrypto and exported it as a JWK. Node emits
+`alg: "Ed25519"`. **workerd — the runtime that actually signs — refuses it:**
+
+```
+DataError: JSON Web Key Algorithm parameter "alg" ("Ed25519") does not match requested Ed25519 curve.
+```
+
+It requires `"EdDSA"`, the JWA registered name (RFC 8037). **Every test ran on Node, where the key works.
+The runtime that rejects it was never tested against.**
+
+> ## ⛔ **A SUITE THAT RUNS ONLY ON THE PRODUCING SIDE OF A BOUNDARY PROVES THE PRODUCER AGREES WITH
+> ## ITSELF.**
+
+### ⚠ AND THE FAILURE MODE IS WHAT MADE IT EXPENSIVE
+
+**It presents as a deployment problem, not a code problem.** The operator pasted a secret and got a
+failure. Everything on the code side was green, so the search started at the paste, the shell, the prompt,
+the secret store — the entire surface where a human could plausibly have erred. The suspect list was
+ordered by *what a person might have done wrong*, and the answer was in a place nobody was looking:
+**the generator emitted something correct-looking that one of two runtimes accepts.**
+
+⚠ **Crypto is the sharpest case, because "the key is fine" is a claim both runtimes appear to support** —
+one imports it, one refuses it, and the JWK is byte-identical.
+
+### WHERE THESE BOUNDARIES ARE
+
+Any place where **one runtime produces an artefact another consumes**, and the artefact is described by a
+format rather than shared code:
+
+- **Two languages** — a Go verifier reading a TypeScript signer's output *(closed here by the twin golden
+  vector; that boundary was tested and this one was not, which is the whole comparison)*
+- **Two JavaScript runtimes** — Node tooling producing values a Worker consumes ← **this one**
+- **Build vs runtime** — a value baked at compile time read by a different engine
+- **A CLI vs the server** — an operator's local tool generating something the deployment must parse
+
+### WHAT TO DO
+
+⛔ **Test on the CONSUMING side, with the artefact the PRODUCING side actually emits.** Not a hand-authored
+fixture that looks like it — the first reproduction here used a hand-written JWK, **it passed**, and it
+proved nothing, because the fields Node adds (`alg`, `key_ops`, `ext`) were exactly what was missing.
+
+⭐ **And derive the fixture from the producer, not from a copy.** The test that closes this extracts the
+generator **out of the README** and runs it, so the documentation and the runtime cannot drift apart again.
+A copied fixture passes while the instructions rot — and the instructions are what the operator follows.
+
+### ⚠ THE WIDER RESULT FROM THAT WALK, WHICH IS THE REAL ARGUMENT FOR WALKING
+
+**Eight findings. None came from the suite.** The alg mismatch · a verification email landing in Junk with
+links disabled · a page promising a key that was actually queued for review · a secret travelling in a URL ·
+an internal status string shown to a human deciding · two names for one tier · a mail scanner issuing HEAD
+against a single-use link.
+
+**Every one required a person doing the whole thing once, on the real system.** A suite proves the parts
+agree with the assumptions they were written under; a walk is what tests the assumptions.
