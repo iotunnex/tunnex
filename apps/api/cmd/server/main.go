@@ -207,7 +207,15 @@ func main() {
 	//
 	// ⚠ Its zero value is Community, which is the fail-open default: a deployment with no key is complete
 	// and supported, not broken.
-	licenceMgr := &licence.Manager{}
+	// ⛔ READ-THROUGH, NOT LOAD-AT-BOOT. The manager was memory-only and an installed licence evaporated on
+	// restart. Persisting alone would only have converted that into "the licence exists on some replicas and
+	// not others" — N pods all SERVE (main.go's leadership note), and there is no cross-replica channel, so
+	// a boot-cached verdict means a gateway enrolment refused by one pod succeeds on the next.
+	//
+	// ⚠ The TTL is the bounded window in which two replicas may disagree, and it is floored inside WithStore
+	// because a zero — which is what an unset field is — would make this a database query per request.
+	licenceMgr := (&licence.Manager{}).WithStore(
+		apphttp.NewLicenceStore(pool), licence.DefaultRefreshInterval, logger)
 
 	nodeSvc := nodes.NewService(pool, agentCA, sealer).WithLicence(licenceMgr)
 	// S7.2: wire the Zero Trust policy source for the desired state (nil in the open

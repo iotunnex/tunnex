@@ -1726,12 +1726,19 @@ paths:
               schema: { $ref: "#/components/schemas/ZeroTrustMode" }
         default: { $ref: "#/components/responses/Error" }
 
-  /api/v1/organizations/{orgId}/license:
-    parameters:
-      - name: orgId
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
+  # ⛔ DEPLOYMENT-SCOPED, AND THE ORG-SCOPED URL IT REPLACED WAS AN ERROR — recorded plainly so the next
+  # reader does not mistake it for a deliberate design and reason from it.
+  #
+  # It was `/api/v1/organizations/{orgId}/license`. The org in that path was never passed to the licence
+  # manager: it was used for authorization and the audit row, and nothing else. The handler's own comment
+  # already said "installing a licence changes what the whole deployment may do".
+  #
+  # ⛔ AND PER-ORG WAS NEVER AVAILABLE, WHICH IS WHY THIS IS AN ERROR RATHER THAN A PREFERENCE. The data
+  # cannot hold it: `CountOrganizations` — the query behind the org ceiling — is
+  # `SELECT count(*) FROM organizations`, deployment-wide by definition, because "how many organizations
+  # exist" cannot be scoped to an organization. The key agrees: it carries an eTLD+1 DOMAIN and no
+  # organization identifier at all. The URL implied a shape the data cannot hold.
+  /api/v1/license:
     get:
       operationId: getLicense
       summary: What this deployment is entitled to
@@ -3127,6 +3134,27 @@ components:
           type: array
           items: { type: string }
           description: The named capabilities this tier grants.
+        # ⛔ THE STORE'S HEALTH IS SEPARATE FROM THE ENTITLEMENT, AND THE THREE STATES MUST STAY
+        # DISTINGUISHABLE. "No licence installed" is a HEALTHY state and must never render as a fault;
+        # "the store is unreachable" means the deployment is serving its last known verdict and has
+        # downgraded nobody; "a stored key was rejected" means Community is being served on purpose.
+        # Collapsing any two sends an operator to look for the wrong thing — the self_verify_failed shape.
+        store_stale:
+          type: boolean
+          description: >-
+            The licence store could not be read. The entitlement above is the LAST KNOWN one — nothing has
+            been downgraded, and it recovers on its own. NOT the same as having no licence.
+        store_rejected:
+          type: string
+          nullable: true
+          enum: [expired, malformed, unknown_kid, bad_signature, null]
+          description: >-
+            A key IS stored and does not verify. Community is being served deliberately, and this names
+            which failure it was so the remedy is obvious.
+        store_detail:
+          type: string
+          nullable: true
+          description: Operator-readable explanation of store_stale / store_rejected.
         expires_at:
           type: string
           format: date-time

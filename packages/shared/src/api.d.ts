@@ -1328,13 +1328,11 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/organizations/{orgId}/license": {
+    "/api/v1/license": {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                orgId: string;
-            };
+            path?: never;
             cookie?: never;
         };
         /**
@@ -2496,6 +2494,15 @@ export interface components {
             org_ceiling: number | null;
             /** @description The named capabilities this tier grants. */
             features: string[];
+            /** @description The licence store could not be read. The entitlement above is the LAST KNOWN one — nothing has been downgraded, and it recovers on its own. NOT the same as having no licence. */
+            store_stale?: boolean;
+            /**
+             * @description A key IS stored and does not verify. Community is being served deliberately, and this names which failure it was so the remedy is obvious.
+             * @enum {string|null}
+             */
+            store_rejected?: "expired" | "malformed" | "unknown_kid" | "bad_signature" | null;
+            /** @description Operator-readable explanation of store_stale / store_rejected. */
+            store_detail?: string | null;
             /** Format: date-time */
             expires_at?: string | null;
             /**
@@ -5286,9 +5293,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                orgId: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -5310,9 +5315,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                orgId: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody: {

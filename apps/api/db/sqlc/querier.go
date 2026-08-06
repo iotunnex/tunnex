@@ -465,6 +465,7 @@ type Querier interface {
 	GetSite(ctx context.Context, arg GetSiteParams) (Site, error)
 	// lint:cross-org — org-scoped via the join to sites.org_id.
 	GetSiteSubnetForOrg(ctx context.Context, arg GetSiteSubnetForOrgParams) (GetSiteSubnetForOrgRow, error)
+	GetSystemSetting(ctx context.Context, key string) (string, error)
 	// lint:cross-org — user-scoped credential.
 	GetTOTP(ctx context.Context, userID uuid.UUID) (UserTotp, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
@@ -1201,6 +1202,7 @@ type Querier interface {
 	// re-seeding restores a previously soft-deleted demo org to a clean live state.
 	UpsertOrganization(ctx context.Context, arg UpsertOrganizationParams) (Organization, error)
 	UpsertSSOConfig(ctx context.Context, arg UpsertSSOConfigParams) (SsoConfig, error)
+	UpsertSystemSetting(ctx context.Context, arg UpsertSystemSettingParams) error
 	// S7.5.5 MFA / TOTP queries. Auth-plane; enrollment OPEN, enforce enterprise (app layer).
 	// The user_totp / user_recovery_codes / mfa_challenges tables are USER-scoped credentials (like a
 	// user's password), NOT org tenant data — every query below is `-- lint:cross-org` by design.

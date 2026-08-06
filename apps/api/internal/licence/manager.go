@@ -2,6 +2,7 @@ package licence
 
 import (
 	"crypto/ed25519"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -26,6 +27,16 @@ type Manager struct {
 	// happens once, in Install.
 	claims *Claims
 	clock  Clock
+
+	// ── the durable half (S12.1 follow-up) ────────────────────────────────────────────────────────────
+	// ⛔ THE MANAGER WAS MEMORY-ONLY AND THAT WAS A LIVE DEFECT: an installed licence evaporated on the
+	// next restart, and the first symptom a customer saw was a gateway refusing to enrol.
+	store    Store
+	ttl      time.Duration
+	lastLoad time.Time
+	storeErr error  // the store could not be read — the last good verdict is being served
+	rejected string // a key IS stored and does not verify — Community is being served on purpose
+	logger   *slog.Logger
 }
 
 // State is where a deployment sits on the degradation ladder.
@@ -83,6 +94,14 @@ func (m *Manager) Evaluate(now time.Time) Status {
 	if m == nil {
 		return Status{State: StateUnlicensed, Tier: TierCommunity}
 	}
+	// ⚠ READ-THROUGH, TTL-BOUNDED — AND IT RUNS AFTER THE NIL GUARD, WHICH IS NOT A DETAIL. It was written
+	// above it and panicked every caller holding a nil manager: the refresh dereferences the receiver, so a
+	// safety guard placed after the thing it guards is not a guard at all.
+	//
+	// Every replica re-reads the store rather than caching at boot: without this, persistence would only
+	// convert "the licence dies on restart" into "the licence exists on some pods and not others", and a
+	// gateway enrolment refused by one replica would succeed on the next.
+	m.refresh(now)
 	obs := m.clock.Observe(now)
 
 	m.mu.RLock()
