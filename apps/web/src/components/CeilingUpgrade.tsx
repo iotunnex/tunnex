@@ -69,3 +69,45 @@ export function ceilingKind(
   if (code === "org_limit_reached") return "organization";
   return null;
 }
+
+/**
+ * ceilingSentence is the STANDING notice on the Gateways page — shown whenever `used >= ceiling`, with no
+ * refusal to hang it on.
+ *
+ * ⛔ THERE IS NO REFUSAL TO REACT TO, AND THAT IS THE WHOLE REASON THIS EXISTS. Gateways enrol by CLI or
+ * API: the agent redeems a join token on the customer's own server, so the 403 lands in a terminal
+ * hundreds of miles from anyone reading a screen. An operator about to add a gateway opens this page
+ * first — so this page is where they must learn there is no room, BEFORE they go and try.
+ *
+ * ⭐ AT-CEILING AND OVER-CEILING ARE DIFFERENT SENTENCES, AND SAYING THE WRONG ONE MISLEADS.
+ *
+ *   used === ceiling → "no room left". True, and the remedy is either a licence OR revoking one.
+ *   used  >  ceiling → "past your limit". Also true — and the difference is ACTIONABLE: at 6 against 1,
+ *                      revoking a gateway does NOT free a slot, because five would still be over. Telling
+ *                      that operator "you have no room left" invites them to revoke one and try again,
+ *                      which fails, and now they have destroyed a working gateway for nothing.
+ *
+ * ⚠ SO THE OVER-CEILING SENTENCE MUST SAY HOW FAR OVER, and must not offer revocation as a route. That is
+ * the state this deployment is in today (6 against 1) and it is the first one the founder will meet.
+ */
+export function ceilingSentence(
+  used: number,
+  ceiling: number,
+  tier: string,
+): string {
+  if (used > ceiling) {
+    const over = used - ceiling;
+    return (
+      `This deployment is on the ${tier} band, which allows ${ceiling} ` +
+      `${ceiling === 1 ? "gateway" : "gateways"}, and ${used} are enrolled — ${over} past the limit. ` +
+      `Nothing running is affected and no gateway will be stopped. ` +
+      // ⛔ THE CLAUSE THAT PREVENTS A DESTRUCTIVE MISTAKE. Without it the obvious move is to revoke one.
+      `Revoking one will not free a slot at this count; enrolling another needs a licence.`
+    );
+  }
+  return (
+    `This deployment is on the ${tier} band, which allows ${ceiling} ` +
+    `${ceiling === 1 ? "gateway" : "gateways"}, and ${used} ${used === 1 ? "is" : "are"} enrolled. ` +
+    `There is no room for another — install a licence, or revoke a gateway you no longer use.`
+  );
+}

@@ -13,6 +13,7 @@ import { LoadRetry } from "../components/LoadRetry";
 import { Badge, DataTable, EmptyState, Panel } from "../components/ui";
 import { badgeClass } from "../lib/healthview";
 import { relativeAge } from "../lib/format";
+import { CeilingUpgrade, ceilingSentence } from "../components/CeilingUpgrade";
 import {
   applyGatewayFilter,
   gatewayFilterCounts,
@@ -81,6 +82,11 @@ export default function GatewaysPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<GatewayFilter>("all");
 
+  const [lic, setLic] = useState<{
+    tier: string;
+    gateway_ceiling?: number | null;
+  } | null>(null);
+
   const reload = useCallback(async () => {
     setLoadError(null);
     // ⛔ THE ORG COMES FROM THE SEAM, NOT FROM INDEX ZERO (S12.5). This used to fetch the org list here and
@@ -106,6 +112,11 @@ export default function GatewaysPage() {
     // becomes a confident "you have none", on the screen whose job is telling you what is running.
     if (!nRes.ok) return setLoadError(nRes.error);
     setNodes(nRes.data);
+    // ⚠ DEPLOYMENT-SCOPED, so no orgId — the licence belongs to the box, not the tenant. A failed read
+    // leaves `lic` null and the notice simply does not render: an unknown ceiling must never be guessed at.
+    const lRes = await loadOne(() => api.GET("/api/v1/license"));
+    if (lRes.ok)
+      setLic(lRes.data as { tier: string; gateway_ceiling?: number | null });
     const sRes = (await loadOne(() =>
       api.GET("/api/v1/organizations/{orgId}/sites", {
         params: { path: { orgId: first.id } },
@@ -205,6 +216,23 @@ export default function GatewaysPage() {
           <p className="text-cell text-ink-tertiary">{org ? org.name : "…"}</p>
         </div>
       </div>
+
+      {/* ⛔ THE STANDING CEILING NOTICE. Shown whenever used >= ceiling, with NO refusal behind it.
+          Gateways enrol by CLI/API — the 403 lands in a terminal on the customer's own server — so an
+          operator about to add one must learn there is no room HERE, before they go and try. */}
+      {lic &&
+        nodes &&
+        lic.gateway_ceiling != null &&
+        nodes.length >= lic.gateway_ceiling && (
+          <CeilingUpgrade
+            kind="gateway"
+            message={ceilingSentence(
+              nodes.length,
+              lic.gateway_ceiling,
+              lic.tier,
+            )}
+          />
+        )}
 
       {loadError && <LoadRetry error={loadError} onRetry={reload} />}
       {!loadError && (org === null || nodes === null) && (
