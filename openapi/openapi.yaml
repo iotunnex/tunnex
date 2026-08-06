@@ -308,6 +308,32 @@ paths:
               schema: { $ref: "#/components/schemas/AuthUser" }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/auth/password:
+    post:
+      operationId: changePassword
+      summary: Change your own password
+      description: >-
+        ⛔ The ONLY way out of a forced password change, and therefore the one authenticated route that is
+        NOT blocked by one. The CP admin's bootstrap credential is printed to the logs, so it is treated as
+        compromised the moment it works — without this endpoint the forced change would be a lockout.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string }
+                new_password: { type: string, minLength: 12 }
+      responses:
+        "204":
+          description: Changed.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/auth/logout:
     post:
       operationId: logout

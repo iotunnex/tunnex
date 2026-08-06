@@ -294,3 +294,39 @@ func (s *Service) send(ctx context.Context, to, subject, body string) {
 func errInvalidCredentials() error {
 	return apierr.New(401, "invalid_credentials", "invalid email or password")
 }
+
+// ChangePassword replaces a user's own password and clears the forced-change flag.
+//
+// ⛔ IT CLEARS `must_change_password` IN THE SAME TRANSACTION THAT SETS THE HASH. Two statements could
+// leave an account with a new password and the wall still up — locked out by its own remedy.
+func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, current, next string) error {
+	if len(next) < password.MinPasswordLen {
+		return apierr.BadRequest("weak_password", password.ErrPasswordShort.Error())
+	}
+	user, err := s.q.GetUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	// ⚠ A live session is not proof of knowing the credential — a borrowed browser is enough.
+	ok := false
+	if user.PasswordHash != nil {
+		// ⚠ Verify(password, phc) — PASSWORD FIRST. Reversed, it compares a hash against a hash, fails
+		// every time, and locks the admin out of the only route that clears the forced change.
+		if _, e := password.Verify(current, *user.PasswordHash); e == nil {
+			ok = true
+		}
+	}
+	if !ok {
+		return apierr.BadRequest("invalid_credentials", "the current password is incorrect")
+	}
+	hash, err := password.Hash(next)
+	if err != nil {
+		return err
+	}
+	return s.withTx(ctx, func(q *sqlc.Queries) error {
+		if e := q.SetUserPassword(ctx, sqlc.SetUserPasswordParams{ID: userID, PasswordHash: &hash}); e != nil {
+			return e
+		}
+		return q.ClearMustChangePassword(ctx, userID)
+	})
+}

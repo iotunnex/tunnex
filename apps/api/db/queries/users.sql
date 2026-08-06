@@ -54,3 +54,18 @@ SELECT can_create_orgs FROM users WHERE id = $1 AND deleted_at IS NULL;
 -- meant to be gone, and a later undelete would restore it silently holding a capability nobody granted it.
 UPDATE users SET can_create_orgs = true, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL;
+
+-- name: CountUsers :one
+-- ⛔ INCLUDES SOFT-DELETED ROWS. The bootstrap condition is "has this deployment ever had a user", not
+-- "does it have one now" — otherwise deleting every account reopens admin minting, which is the same
+-- re-open CountOrganizationsEver exists to prevent.
+SELECT count(*) FROM users;
+
+-- name: CreateBootstrapAdmin :one
+INSERT INTO users (email, name, password_hash, email_verified_at, can_create_orgs, must_change_password)
+VALUES ($1, $2, $3, now(), true, true)
+RETURNING *;
+
+-- name: ClearMustChangePassword :exec
+UPDATE users SET must_change_password = false, updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL;

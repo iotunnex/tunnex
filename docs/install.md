@@ -74,3 +74,51 @@ through Tunnex. Use the **tray/menu-bar icon** to connect/disconnect without the
 Signing (Apple notarization + a Windows EV certificate) is a later milestone tied to public
 distribution. Until then these steps are the trade-off for an early build. A signed release
 will install with no warnings and enable automatic updates.
+
+## First sign-in — the bootstrap admin
+
+⛔ **There is no public signup.** A self-hosted control plane is owned by one company: everyone inside
+arrives by invitation, and an invitation has to be sent by somebody. That somebody is the CP admin, and the
+control plane creates it for you on first start.
+
+**Watch the startup logs.** On a deployment that has never had a user, the API mints one account and prints
+its credential — once:
+
+```
+WARN bootstrap_admin_created
+  email=admin@tunnex.local
+  password=<24 random bytes, base64url>
+  action="SIGN IN NOW AND CHANGE THIS PASSWORD — you will be forced to"
+```
+
+`docker compose logs api | grep bootstrap_admin_created`
+
+⚠ **It is stored only as an argon2id hash.** Never in `.env`, never in a file, never in the database in
+plaintext. That one log line is the only moment the plaintext exists.
+
+**First login forces a password change**, and it is a wall rather than a screen: until the password is
+changed the account may authenticate and do *nothing else* — `403 password_change_required` on every route
+except `POST /api/v1/auth/password`. The credential was printed into logs that get shipped, aggregated and
+searched, so it is treated as compromised from the moment it works.
+
+Then the CP admin creates the first organization and invites everyone else.
+
+### ⛔ If you lose that credential before signing in
+
+**There is no recovery. Reset the deployment:** `docker compose down -v && make up`.
+
+⚠ **Said plainly here so nobody discovers it at 2am.** It cannot be reprinted — only the hash is stored —
+and there is no second admin to reset it from, and no signup to create a replacement.
+
+⭐ **That is the deliberate trade.** The alternative — a password in `.env`, a file on disk, or a fixed
+default — is a credential that lives forever and is identical on every install. One that exists for a single
+log line and then only as a hash is one an attacker cannot find later.
+
+⚠ **Once you have signed in and changed it**, the account is an ordinary user: normal password reset applies.
+
+### Restarting is safe
+
+The condition is *"has this deployment ever had a user"*, counting soft-deleted rows. A restart — crash,
+redeploy, host reboot — mints nothing and prints nothing. ⛔ **A restart must not be a security event**: a
+second admin would be a privilege escalation with no actor behind it, and reprinting the first one's
+password would republish a live credential into log aggregation.

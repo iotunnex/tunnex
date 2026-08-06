@@ -23,7 +23,10 @@ var walkBodies = map[string]string{
 	// ⚠ A body is required so the 401 is about AUTHENTICATION, not about a missing field. Without one the
 	// spec validator answers 400 first and the walk cannot tell "you are not signed in" from "your JSON is
 	// wrong" — which is exactly the confusion the walk exists to rule out.
-	"installlicense":     `{"key":"tnxl_walk-probe"}`,
+	"installlicense": `{"key":"tnxl_walk-probe"}`,
+	// ⛔ The forced-password-change escape hatch. It is the ONE authenticated route not blocked by a
+	// forced change — without a body the validator 400s first and the walk cannot prove it still 401s.
+	"changepassword":     `{"current_password":"walk-probe-current","new_password":"walk-probe-new-password"}`,
 	"createorganization": `{"name":"Walk","slug":"walk-test"}`,
 	"updateorganization": `{"name":"Walk"}`,
 	"setssoconfig":       `{"client_id":"x","client_secret":"y","enabled":true}`,

@@ -463,16 +463,17 @@ type SystemSetting struct {
 }
 
 type User struct {
-	ID              uuid.UUID          `json:"id"`
-	Email           string             `json:"email"`
-	Name            string             `json:"name"`
-	PasswordHash    *string            `json:"password_hash"`
-	EmailVerifiedAt pgtype.Timestamptz `json:"email_verified_at"`
-	Status          string             `json:"status"`
-	CreatedAt       time.Time          `json:"created_at"`
-	UpdatedAt       time.Time          `json:"updated_at"`
-	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
-	CanCreateOrgs   bool               `json:"can_create_orgs"`
+	ID                 uuid.UUID          `json:"id"`
+	Email              string             `json:"email"`
+	Name               string             `json:"name"`
+	PasswordHash       *string            `json:"password_hash"`
+	EmailVerifiedAt    pgtype.Timestamptz `json:"email_verified_at"`
+	Status             string             `json:"status"`
+	CreatedAt          time.Time          `json:"created_at"`
+	UpdatedAt          time.Time          `json:"updated_at"`
+	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
+	CanCreateOrgs      bool               `json:"can_create_orgs"`
+	MustChangePassword bool               `json:"must_change_password"`
 }
 
 type UserGroup struct {

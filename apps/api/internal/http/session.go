@@ -42,12 +42,13 @@ func SessionAuth(store *session.Store, q *sqlc.Queries) AuthFunc {
 			roles[m.OrgID] = m.Role
 		}
 		return &authctx.Principal{
-			UserID:        user.ID,
-			SessionID:     sess.ID,
-			Email:         user.Email,
-			EmailVerified: user.EmailVerifiedAt.Valid,
-			AuthMethod:    sess.AuthMethod, // rides the session's mint-time method (immutable)
-			Roles:         roles,
+			UserID:             user.ID,
+			SessionID:          sess.ID,
+			Email:              user.Email,
+			EmailVerified:      user.EmailVerifiedAt.Valid,
+			AuthMethod:         sess.AuthMethod, // rides the session's mint-time method (immutable)
+			Roles:              roles,
+			MustChangePassword: user.MustChangePassword,
 		}
 	}
 }

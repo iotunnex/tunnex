@@ -68,11 +68,12 @@ func BearerAuth(q *sqlc.Queries) BearerAuthFunc {
 		}
 		_ = q.TouchCliCredentialUsed(r.Context(), cred.ID) // best-effort telemetry
 		return &authctx.Principal{
-			UserID:        user.ID,
-			Email:         user.Email,
-			EmailVerified: user.EmailVerifiedAt.Valid,
-			AuthMethod:    authctx.AuthBearer, // a CLI/automation credential — exempt from the MFA-enrollment gate (D5)
-			Roles:         roles,
+			UserID:             user.ID,
+			Email:              user.Email,
+			EmailVerified:      user.EmailVerifiedAt.Valid,
+			AuthMethod:         authctx.AuthBearer, // a CLI/automation credential — exempt from the MFA-enrollment gate (D5)
+			Roles:              roles,
+			MustChangePassword: user.MustChangePassword,
 		}, nil
 	}
 }
