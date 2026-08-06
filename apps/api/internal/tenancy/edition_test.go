@@ -12,17 +12,21 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
-	"github.com/tunnexio/tunnex/apps/api/internal/enterprise"
+	"github.com/tunnexio/tunnex/apps/api/internal/licence"
 )
 
-// TestOrgLimitByEdition proves the enterprise boundary behaves differently per
-// build: the open build (no tag) caps org creation at one with a typed
-// org_limit_reached error; the enterprise build (-tags enterprise) does not.
+// ⛔ REWRITTEN, NOT DELETED (S12.1). It used to assert the boundary was the BUILD: the open build capped
+// org creation at one, `-tags enterprise` did not. That boundary no longer exists — `enterprise.Unlimited`
+// is a compatibility constant that is always true, so under the old assertions the enterprise leg demanded
+// unlimited orgs and got the Community band.
 //
-// It runs inside a transaction that zeroes live orgs and is always rolled back,
-// so it is deterministic and never touches real data. Run in both modes via
-// `make test-editions`.
-func TestOrgLimitByEdition(t *testing.T) {
+// ⚠ THAT IS THE REAL FINDING, AND IT IS ABOUT WHEN IT SURFACED. The failure was created by slice 5 and
+// only appeared here, at the end, because the tagged leg runs ONLY under `make test-editions` — a package
+// test run never executes it. A guard that runs in one gate leg is invisible to every other check.
+//
+// The boundary is now the LICENCE, and this asserts it from both sides in one run rather than from two
+// builds. It runs inside a transaction that zeroes live orgs and is always rolled back.
+func TestOrgLimitByLicence(t *testing.T) {
 	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
@@ -54,29 +58,38 @@ func TestOrgLimitByEdition(t *testing.T) {
 		t.Fatalf("create creator: %v", err)
 	}
 
-	svc := &Service{q: sqlc.New(tx)}
+	// ── Community: one organization, then a typed refusal ────────────────────────────────────────────
+	unlicensed := &Service{q: sqlc.New(tx)}
 
-	if _, err := svc.CreateOrganization(ctx, creator, "Edition A", "edition-test-a"); err != nil {
-		t.Fatalf("first org must always succeed: %v", err)
+	if _, err := unlicensed.CreateOrganization(ctx, creator, "Licence A", "licence-test-a"); err != nil {
+		t.Fatalf("the first org must always succeed: %v", err)
 	}
 
-	_, err = svc.CreateOrganization(ctx, creator, "Edition B", "edition-test-b")
-
-	if enterprise.Unlimited {
-		if err != nil {
-			t.Fatalf("enterprise build: second org should succeed, got %v", err)
-		}
-		t.Logf("enterprise edition: multiple orgs allowed ✓")
-		return
-	}
-
-	// Open build: the second org must be rejected with the typed envelope error.
+	_, err = unlicensed.CreateOrganization(ctx, creator, "Licence B", "licence-test-b")
 	var apiErr *apierr.Error
 	if !errors.As(err, &apiErr) {
-		t.Fatalf("open build: expected *apierr.Error, got %v", err)
+		t.Fatalf("Community: expected *apierr.Error, got %v", err)
 	}
+	// ⛔ THE CODE IS LOAD-BEARING BEYOND THIS TEST: apps/web's CreateOrg funnel branches on
+	// `org_limit_reached` to swap the form for an invitation-only card.
 	if apiErr.Code != "org_limit_reached" || apiErr.Status != 403 {
-		t.Fatalf("open build: expected 403 org_limit_reached, got %d %s", apiErr.Status, apiErr.Code)
+		t.Fatalf("Community: expected 403 org_limit_reached, got %d %s", apiErr.Status, apiErr.Code)
 	}
-	t.Logf("open edition: second org rejected with %s ✓", apiErr.Code)
+
+	// ── A paid licence: the same call, the same data, allowed ────────────────────────────────────────
+	//
+	// ⭐ THE SAME TRANSACTION AND THE SAME ROW COUNT. Only the licence differs, so a pass here cannot be
+	// explained by anything except the entitlement being read.
+	licensed := (&Service{q: sqlc.New(tx)}).WithLicence(licence.NewTestManager("starter", time.Now().Add(time.Hour)))
+	if _, err := licensed.CreateOrganization(ctx, creator, "Licence C", "licence-test-c"); err != nil {
+		t.Fatalf("⛔ A PAID LICENCE WAS REFUSED A SECOND ORGANIZATION — the customer paid for multi_org "+
+			"and cannot use it: %v", err)
+	}
+
+	// ── And a LAPSED paid licence falls back to Community ────────────────────────────────────────────
+	lapsed := (&Service{q: sqlc.New(tx)}).WithLicence(licence.NewTestManager("starter", time.Now().Add(-100*24*time.Hour)))
+	if _, err := lapsed.CreateOrganization(ctx, creator, "Licence D", "licence-test-d"); err == nil {
+		t.Error("⛔ a licence lapsed past its full grace period still created organizations past the " +
+			"Community band")
+	}
 }
