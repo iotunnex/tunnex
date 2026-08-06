@@ -5368,3 +5368,49 @@ learns to bypass required checks**, which is strictly worse than the gap it clos
 2. **The July `e2e` red clusters** (2026-07-18/19/23/24/25/29, 17 runs). Never diagnosed. **Prerequisite for
    item 1** — and independently worth knowing, because a suite red for six days at a stretch was reporting
    something.
+
+## ⛔ A TEMPORARY MARKER NAMING A SUCCESSOR IS NOT A HANDOFF — IT IS A GAP WEARING A PLAN'S CLOTHES
+
+**S12.1 → the edition defect, measured.** `enterprise/edition.go` carried this, written by the slice that
+created the problem:
+
+```go
+// Name is what `/meta` reports as the edition.
+//
+// ⚠ TEMPORARY, AND IT IS THE UNLICENSED DEFAULT. With one binary the edition is a property of the
+// LICENCE, not the build, so this becomes a licence read in the LicenseManager slice. Until then it
+// reports the tier a deployment with no key is entitled to.
+const Name = "open"
+```
+
+**Everything in it is true.** It identifies the gap, explains why the gap exists, names the successor that
+must close it, and states the interim behaviour. It is a better comment than most.
+
+⛔ **The LicenseManager slice arrived, built a LicenseManager, and did not close it.** Nothing checked.
+`const Name = "open"` shipped to `main` as the only definition of the edition, so **every deployment
+reported itself as open under any licence** — and eleven web files gate on that value, so a customer with a
+valid Growth key got their capabilities from the API and upsell cards from the UI.
+
+> ## ⛔ **THE COMMENT READ AS A PLAN. IT WAS A GAP. NOTHING DISTINGUISHES THE TWO IN PROSE — AND THE
+> ## SUCCESSOR NEVER READS THE FILE IT IS SUPPOSED TO FIX.**
+
+⚠ **THAT LAST CLAUSE IS THE MECHANISM, AND IT IS OBVIOUS ONLY AFTERWARDS.** A deferral comment lives in the
+file that has the problem. The slice that must fix it is working somewhere else entirely — it opens
+`licence/manager.go`, not `enterprise/edition.go`. **The note is filed where the successor will not be.**
+
+### THE RULE
+
+> ## ⭐ **IF A SUCCESSOR MUST DO SOMETHING, IT BELONGS IN THAT SLICE'S DEFINITION OF DONE — NOT IN A
+> ## COMMENT THE SUCCESSOR NEVER OPENS.**
+
+A `TEMPORARY` marker is a fine *explanation* and a worthless *mechanism*. Pair it with something that
+fails: a decide-item in the successor's commit-one, a test the successor must delete to pass, a census that
+names the constant. **Anything that makes the successor's build red until it has looked.**
+
+⚠ **AND THE COST IS NOT THE DEFECT — IT IS THE DIAGNOSIS.** `make up-enterprise` still passed
+`TUNNEX_BUILD_TAGS=enterprise` and still printed `# -> enterprise`, so a review session spent its opening
+on stale images and compose drift. **A build target promising a state it can no longer produce is the same
+failure as the comment, one layer out: a description that outlived what it described.**
+
+⭐ **This is the dormant-machinery law's twin, and the inverse of it.** Dormant machinery is code that runs
+and does nothing. This is prose that does nothing and reads as if it will.

@@ -16,11 +16,31 @@ up: ## Start the full stack (postgres, redis, api, web, nginx, node-agent, mailp
 	@echo "Tunnex is starting → http://localhost   (Mailpit → http://localhost:8025)"
 
 .PHONY: up-enterprise
-up-enterprise: ## Start the full stack with the ENTERPRISE api image (Zero Trust: policy + device posture)
-	@test -f .env || cp .env.example .env
-	TUNNEX_BUILD_TAGS=enterprise $(COMPOSE) up -d --build
-	@echo "Tunnex (ENTERPRISE) starting → http://localhost"
-	@echo "Verify: curl -s localhost/api/v1/meta | grep -o '\"edition\":\"[a-z]*\"'   # -> enterprise"
+up-enterprise: ## ⛔ THERE IS NO ENTERPRISE BUILD ANY MORE — edition comes from a LICENCE KEY (S12.1)
+	@echo ""
+	@echo "⛔ THIS TARGET NO LONGER DOES WHAT ITS NAME SAYS, AND IT IS KEPT ONLY TO SAY SO."
+	@echo ""
+	@echo "   S12.1 collapsed the build-tag split. There is ONE binary. It passed"
+	@echo "   TUNNEX_BUILD_TAGS=enterprise, which now selects nothing, and promised"
+	@echo "   '# -> enterprise', which the binary could not produce."
+	@echo ""
+	@echo "   ⚠ THAT LIE COST A REVIEW SESSION: both stacks reported \"open\", and the"
+	@echo "   obvious suspects (stale image, wrong compose) were checked first because"
+	@echo "   this target said the build could differ. It cannot."
+	@echo ""
+	@echo "   EDITION IS NOW A PROPERTY OF THE INSTALLED LICENCE:"
+	@echo "     Community / no key  → /meta reports \"open\""
+	@echo "     any paid tier       → /meta reports \"enterprise\""
+	@echo ""
+	@echo "   To get an enterprise deployment:"
+	@echo "     1. make up"
+	@echo "     2. install a licence key — Settings → Licence, or"
+	@echo "        POST /api/v1/organizations/{orgId}/license  (owner only)"
+	@echo ""
+	@echo "   Verify from OUTSIDE, and ask the API rather than the badge:"
+	@echo "     curl -s localhost/api/v1/meta | grep -o '\"edition\":\"[a-z]*\"'"
+	@echo ""
+	@exit 1
 
 # ── ⛔ THE OPEN-EDITION REVIEW STACK (S14.12) ───────────────────────────────────────────────────────────
 #
