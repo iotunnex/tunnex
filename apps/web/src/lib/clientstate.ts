@@ -118,7 +118,8 @@ export function stateView(s: ClientState): StateView {
     case "failed":
       return {
         label: "Connection failed",
-        detail: "The tunnel could not be established. Retrying will re-request a config.",
+        detail:
+          "The tunnel could not be established. Retrying will re-request a config.",
         severity: "warn",
         action: "Connect",
         notify: false,
@@ -155,7 +156,8 @@ export function stateView(s: ClientState): StateView {
     case "pending_approval":
       return {
         label: "Awaiting admin approval",
-        detail: "This device is enrolled but not yet approved. Nothing to do here until it is.",
+        detail:
+          "This device is enrolled but not yet approved. Nothing to do here until it is.",
         severity: "warn",
         action: null,
         notify: false,

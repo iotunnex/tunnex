@@ -8,6 +8,7 @@ import {
   act,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { OrgProvider } from "../src/lib/useOrg";
 import { CommandPalette } from "../src/components/CommandPalette";
 import { NAV_DESTINATIONS } from "../src/components/AppShell";
 import { MotionProvider } from "../src/components/MotionProvider";
@@ -19,9 +20,11 @@ afterEach(cleanup);
 const open = () => {
   render(
     <MemoryRouter>
-      <MotionProvider value={true}>
-        <CommandPalette />
-      </MotionProvider>
+      <OrgProvider>
+        <MotionProvider value={true}>
+          <CommandPalette />
+        </MotionProvider>
+      </OrgProvider>
     </MemoryRouter>,
   );
   act(() => {
@@ -42,9 +45,11 @@ describe("the palette is a named dialog with a combobox and a listbox", () => {
   it("is CLOSED until asked for — it must not be in the DOM unprompted", () => {
     render(
       <MemoryRouter>
-        <MotionProvider value={true}>
-          <CommandPalette />
-        </MotionProvider>
+        <OrgProvider>
+          <MotionProvider value={true}>
+            <CommandPalette />
+          </MotionProvider>
+        </OrgProvider>
       </MemoryRouter>,
     );
     expect(

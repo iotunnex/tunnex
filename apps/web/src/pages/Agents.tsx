@@ -1,14 +1,37 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useOrg } from "../lib/useOrg";
 import { api, loadOne, type Loaded } from "../lib/api";
 import {
-  agentConnectCommand, AGENT_PREREQ, attributionNote, NO_AGENTS,
-  sortAgents, livenessLabel, agentLiveness, formatTraffic, type AgentRow,
+  agentConnectCommand,
+  AGENT_PREREQ,
+  attributionNote,
+  NO_AGENTS,
+  sortAgents,
+  livenessLabel,
+  agentLiveness,
+  formatTraffic,
+  type AgentRow,
 } from "../lib/agentview";
-import { Badge, Button, Card, DataTable, Field, Input, Select, StatusDot } from "../components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  DataTable,
+  Field,
+  Input,
+  Select,
+  StatusDot,
+} from "../components/ui";
 import { OneTimeSecretModal } from "../components/OneTimeSecret";
 
-type Node = { id: string; name: string; status: string; endpoint?: string | null; last_seen_at?: string };
+type Node = {
+  id: string;
+  name: string;
+  status: string;
+  endpoint?: string | null;
+  last_seen_at?: string;
+};
 
 /**
  * AI agents — S15.3. A top-level destination in NETWORK, beside Kubernetes.
@@ -24,6 +47,8 @@ type Node = { id: string; name: string; status: string; endpoint?: string | null
  * ABSENCE, never an error.
  */
 export default function Agents() {
+  // ⛔ THE ORG COMES FROM THE SEAM (S12.5).
+  const { org: currentOrg } = useOrg();
   const [orgId, setOrgId] = useState<string | null>(null);
   const [rows, setRows] = useState<Loaded<AgentRow[]> | null>(null);
   const [gateways, setGateways] = useState<Node[]>([]);
@@ -39,13 +64,15 @@ export default function Agents() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const o = await loadOne<Array<{ id: string }>>(() => api.GET("/api/v1/organizations"));
-      if (cancelled || !o.ok || o.data.length === 0) return;
-      const id = o.data[0].id;
+      // ⭐ The org-list fetch is gone (S12.5); the seam supplies it.
+      if (cancelled || !currentOrg) return;
+      const id = currentOrg.id;
       setOrgId(id);
 
       const n = await loadOne<Node[]>(() =>
-        api.GET("/api/v1/organizations/{orgId}/nodes", { params: { path: { orgId: id } } }),
+        api.GET("/api/v1/organizations/{orgId}/nodes", {
+          params: { path: { orgId: id } },
+        }),
       );
       if (!cancelled && n.ok) {
         // ⛔ A GATEWAY WITH NO ENDPOINT CANNOT SERVE A PEER. Issuing a config for one emits
@@ -80,7 +107,9 @@ export default function Agents() {
     return () => {
       cancelled = true;
     };
-  }, [reload]);
+    // ⚠ currentOrg IS A DEPENDENCY — without it the switcher moves and the page keeps showing the org it
+    // mounted with.
+  }, [reload, currentOrg]);
 
   async function enrol() {
     if (!orgId || !gw) return;
@@ -89,10 +118,18 @@ export default function Agents() {
     // ⛔ THE DEVICE PATH, WITH kind: "agent". Same enrolment a laptop uses — the server generates the
     // keypair and returns the config ONCE. What makes it an agent is the kind, which carries the cap
     // exemption and makes it nameable as a policy source.
-    const { data, error } = await api.POST("/api/v1/organizations/{orgId}/devices", {
-      params: { path: { orgId } },
-      body: { name: name.trim(), node_id: gw, kind: "agent", platform: "agent" },
-    });
+    const { data, error } = await api.POST(
+      "/api/v1/organizations/{orgId}/devices",
+      {
+        params: { path: { orgId } },
+        body: {
+          name: name.trim(),
+          node_id: gw,
+          kind: "agent",
+          platform: "agent",
+        },
+      },
+    );
     setBusy(false);
     if (error || !data) {
       setErr("Could not enrol the agent.");
@@ -102,7 +139,9 @@ export default function Agents() {
     if (!cfg) {
       // ⚠ LOUD, NOT SILENT. Without the config the operator has an agent that can never connect, and a
       // quiet success would leave them looking for a command that was never shown.
-      setErr("The agent was created but no configuration was returned — it cannot connect. Remove it and retry.");
+      setErr(
+        "The agent was created but no configuration was returned — it cannot connect. Remove it and retry.",
+      );
       setReload((n) => n + 1);
       return;
     }
@@ -116,9 +155,12 @@ export default function Agents() {
   return (
     <div className="flex flex-col gap-3.5">
       <div>
-        <h1 className="text-[22px] font-semibold text-ink-heading">AI agents</h1>
+        <h1 className="text-[22px] font-semibold text-ink-heading">
+          AI agents
+        </h1>
         <p className="text-cell text-ink-tertiary">
-          An agent connects to a gateway over the tunnel and reaches only what it is granted.
+          An agent connects to a gateway over the tunnel and reaches only what
+          it is granted.
         </p>
       </div>
 
@@ -128,7 +170,11 @@ export default function Agents() {
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-[12rem] flex-1">
             <Field label="Agent name">
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="mcp-agent-prod" />
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="mcp-agent-prod"
+              />
             </Field>
           </div>
           <div className="min-w-[12rem] flex-1">
@@ -145,7 +191,10 @@ export default function Agents() {
               </Select>
             </Field>
           </div>
-          <Button onClick={() => void enrol()} disabled={busy || !name.trim() || !gw}>
+          <Button
+            onClick={() => void enrol()}
+            disabled={busy || !name.trim() || !gw}
+          >
             {busy ? "Enrolling…" : "Enrol agent"}
           </Button>
         </div>
@@ -153,32 +202,41 @@ export default function Agents() {
             reason is a missing endpoint — not a missing gateway — and the operator needs to know which. */}
         {gateways.length === 0 && (
           <p className="mt-2 text-xs text-warn">
-            No gateway can accept a peer yet: a gateway needs a reachable public endpoint before an agent
-            can connect to it. Set one on the gateway, then enrol.
+            No gateway can accept a peer yet: a gateway needs a reachable public
+            endpoint before an agent can connect to it. Set one on the gateway,
+            then enrol.
           </p>
         )}
         {err && <p className="mt-2 text-xs text-danger">{err}</p>}
         <p className="mt-2 text-[11px] text-ink-secondary">
-          Enrolling records <strong>you</strong> as the person who authorised this agent, and gives you one
-          command to run on the agent's host. {AGENT_PREREQ}
+          Enrolling records <strong>you</strong> as the person who authorised
+          this agent, and gives you one command to run on the agent's host.{" "}
+          {AGENT_PREREQ}
         </p>
       </Card>
 
       <Card>
         <p className="text-xs text-slate-500">
           What each agent may reach is set by the grants on{" "}
-          <Link to="/access" className="text-slate-300 underline">Access Policies</Link> — choose{" "}
-          <span className="font-mono text-[11px]">AI agent</span> as the source.{" "}
-          <strong>An agent with no grant reaches nothing.</strong>
+          <Link to="/access" className="text-slate-300 underline">
+            Access Policies
+          </Link>{" "}
+          — choose <span className="font-mono text-[11px]">AI agent</span> as
+          the source. <strong>An agent with no grant reaches nothing.</strong>
         </p>
         {rows === null ? (
           <p className="mt-3 text-xs text-ink-secondary">Loading…</p>
         ) : !rows.ok ? (
-          <p data-state="load-failed" className="mt-3 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-xs text-danger">
+          <p
+            data-state="load-failed"
+            className="mt-3 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-xs text-danger"
+          >
             {rows.error} <strong>This is not the same as having none.</strong>
           </p>
         ) : rows.data.length === 0 ? (
-          <p data-state="no-agents" className="mt-3 text-xs text-ink-secondary">{NO_AGENTS}</p>
+          <p data-state="no-agents" className="mt-3 text-xs text-ink-secondary">
+            {NO_AGENTS}
+          </p>
         ) : (
           <div className="mt-3">
             <DataTable<AgentRow>
@@ -202,7 +260,15 @@ export default function Agents() {
                       <span className="inline-flex items-center gap-2">
                         {/* ⛔ THE DOT IS NEVER GREEN ON AN INFERENCE WE DO NOT HAVE. `unknown` and `never`
                             are muted/amber, not a red that claims a fault we cannot attribute. */}
-                        <StatusDot tone={live.tone === "ok" ? "on" : live.tone === "warn" ? "warn" : "off"} />
+                        <StatusDot
+                          tone={
+                            live.tone === "ok"
+                              ? "on"
+                              : live.tone === "warn"
+                                ? "warn"
+                                : "off"
+                          }
+                        />
                         <span className="text-white">{a.name}</span>
                       </span>
                     );
@@ -213,7 +279,9 @@ export default function Agents() {
                   header: "Address",
                   sortValue: (a) => a.address ?? "",
                   cell: (a) => (
-                    <span className={`font-mono text-xs ${a.address ? "text-slate-500" : "italic text-slate-600"}`}>
+                    <span
+                      className={`font-mono text-xs ${a.address ? "text-slate-500" : "italic text-slate-600"}`}
+                    >
                       {a.address ?? "no address"}
                     </span>
                   ),
@@ -222,7 +290,11 @@ export default function Agents() {
                   key: "gateway",
                   header: "Gateway",
                   sortValue: (a) => a.gateway_name,
-                  cell: (a) => <span className="text-xs text-slate-400">{a.gateway_name}</span>,
+                  cell: (a) => (
+                    <span className="text-xs text-slate-400">
+                      {a.gateway_name}
+                    </span>
+                  ),
                 },
                 {
                   key: "owner",
@@ -230,13 +302,18 @@ export default function Agents() {
                   // ⚠ THE UNATTRIBUTABLE STATE IS SEARCHABLE BY THE WORD THE BADGE USES, not only by an
                   // email that does not exist — otherwise the one row an operator most needs to find is the
                   // one row no search term reaches.
-                  sortValue: (a) => a.owner_email ?? "unattributable no owner recorded",
+                  sortValue: (a) =>
+                    a.owner_email ?? "unattributable no owner recorded",
                   cell: (a) => {
                     const note = attributionNote(a);
                     return a.owner_email ? (
-                      <span className="text-xs text-slate-400">{a.owner_email}</span>
+                      <span className="text-xs text-slate-400">
+                        {a.owner_email}
+                      </span>
                     ) : note ? (
-                      <span title={note.detail}><Badge tone="warn">{note.label}</Badge></span>
+                      <span title={note.detail}>
+                        <Badge tone="warn">{note.label}</Badge>
+                      </span>
                     ) : null;
                   },
                 },
@@ -250,7 +327,11 @@ export default function Agents() {
                     const live = livenessLabel(a);
                     // The liveness word carries its own explanation on hover — an operator seeing
                     // "liveness unknown" must be able to learn WHY without leaving the row.
-                    return <span title={live.detail}><Badge tone={live.tone}>{live.label}</Badge></span>;
+                    return (
+                      <span title={live.detail}>
+                        <Badge tone={live.tone}>{live.label}</Badge>
+                      </span>
+                    );
                   },
                 },
                 {
@@ -277,9 +358,10 @@ export default function Agents() {
           title="Connect your agent: run this on the agent's host"
           caption={
             <>
-              Run this on the machine that runs your AI agent. It writes the tunnel config and brings the
-              interface up. Shown <span className="font-semibold">exactly once</span> — it contains the
-              agent's private key. {AGENT_PREREQ}
+              Run this on the machine that runs your AI agent. It writes the
+              tunnel config and brings the interface up. Shown{" "}
+              <span className="font-semibold">exactly once</span> — it contains
+              the agent's private key. {AGENT_PREREQ}
             </>
           }
           secret={agentConnectCommand(conf)}

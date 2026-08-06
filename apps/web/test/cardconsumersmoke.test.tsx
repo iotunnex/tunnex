@@ -37,6 +37,7 @@ vi.mock("../src/lib/api", async () => {
   };
 });
 
+import { OrgProvider } from "../src/lib/useOrg";
 import { AuthLayout } from "../src/components/AuthLayout";
 import { MachineCredentials } from "../src/components/MachineCredentials";
 import { AuthProvider } from "../src/lib/auth";
@@ -44,7 +45,9 @@ import { AuthProvider } from "../src/lib/auth";
 const mount = (ui: React.ReactElement) =>
   render(
     <MemoryRouter>
-      <AuthProvider>{ui}</AuthProvider>
+      <OrgProvider>
+        <AuthProvider>{ui}</AuthProvider>
+      </OrgProvider>
     </MemoryRouter>,
   );
 
@@ -66,6 +69,4 @@ describe("the four Card consumers with no wiring test still mount and keep their
     mount(<MachineCredentials orgId="org-1" canManage={true} />);
     expect(document.body.textContent?.length).toBeGreaterThan(0);
   });
-
-
 });

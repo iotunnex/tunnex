@@ -125,12 +125,20 @@ vi.mock("../src/lib/api", async () => {
   };
 });
 
+import { OrgProvider } from "../src/lib/useOrg";
 import Users from "../src/pages/Users";
 import { AuthProvider } from "../src/lib/auth";
 
 // The REAL AuthProvider — stubbing puts the TEST's role gate under assertion, not the PRODUCT's.
 const withAuth = (ui: React.ReactElement) =>
-  render(<AuthProvider>{ui}</AuthProvider>);
+  // ⛔ THE ORG PROVIDER IS PART OF THE AUTHENTICATED SHELL (S12.5), so it is part of the harness that
+  // stands in for it. A page rendered without it throws — deliberately: `useOrg()` refuses to guess, and a
+  // test that quietly rendered without an org would be exercising a state production never reaches.
+  render(
+    <AuthProvider>
+      <OrgProvider>{ui}</OrgProvider>
+    </AuthProvider>,
+  );
 
 beforeEach(() => {
   membersFail = false;
@@ -266,8 +274,12 @@ describe("Users — the devices column and the false zero", () => {
     // u1 owns d1+d2, u2 owns d3 — DIFFERENT numbers, so a hardcoded constant fails.
     await waitFor(() => {
       const rows = within(table).getAllByRole("row");
-      const owner = rows.find((r) => r.textContent?.includes("owner@acme.test"))!;
-      const admin = rows.find((r) => r.textContent?.includes("admin@acme.test"))!;
+      const owner = rows.find((r) =>
+        r.textContent?.includes("owner@acme.test"),
+      )!;
+      const admin = rows.find((r) =>
+        r.textContent?.includes("admin@acme.test"),
+      )!;
       expect(within(owner).getByText("2")).toBeTruthy();
       expect(within(admin).getByText("1")).toBeTruthy();
     });
@@ -278,8 +290,22 @@ describe("Users — the devices column and the false zero", () => {
     // device. A client-side group-by over it prints `0` against every colleague — a POSITIVE CLAIM about
     // another person's fleet, drawn from a response that was never about them.
     roster = [
-      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, status: "active" },
-      { user_id: "u3", email: "member@acme.test", name: "Mel Member", role: "member", email_verified: true, status: "active" },
+      {
+        user_id: "u1",
+        email: "owner@acme.test",
+        name: "Olive Owner",
+        role: "owner",
+        email_verified: true,
+        status: "active",
+      },
+      {
+        user_id: "u3",
+        email: "member@acme.test",
+        name: "Mel Member",
+        role: "member",
+        email_verified: true,
+        status: "active",
+      },
     ];
     whoAmI = "u3";
     withAuth(<Users />);
@@ -311,7 +337,9 @@ describe("Users — the devices column and the false zero", () => {
       screen.getByRole("table", { name: "Members" }),
     );
     await waitFor(() =>
-      expect(within(table).getAllByText("could not load").length).toBeGreaterThan(0),
+      expect(
+        within(table).getAllByText("could not load").length,
+      ).toBeGreaterThan(0),
     );
     const ownerRow = within(table)
       .getAllByRole("row")
@@ -324,7 +352,9 @@ describe("Users — the four gates, and WHICH reason each caller is given", () =
   it("an ENTERPRISE owner sees the group count and NO gate note", async () => {
     withAuth(<Users />);
     await waitFor(() => screen.getByText("Access posture"));
-    await waitFor(() => expect(screen.getByText(/1 group in this organization/)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/1 group in this organization/)).toBeTruthy(),
+    );
     // Nothing is withheld from this caller, so no note may appear — a note that always renders explains
     // nothing.
     expect(screen.queryByText(/Enterprise feature/)).toBeNull();
@@ -343,9 +373,15 @@ describe("Users — the four gates, and WHICH reason each caller is given", () =
     const dl = document.querySelector("dl")!;
     // Terms pluralise with their own count ("1 owner" -> `owner`, 0 -> `members`), so match the stem — a
     // literal list would pin one roster's plurals and fail for an unrelated reason.
-    const terms = Array.from(dl.querySelectorAll("dt")).map((d) => d.textContent?.toLowerCase() ?? "");
+    const terms = Array.from(dl.querySelectorAll("dt")).map(
+      (d) => d.textContent?.toLowerCase() ?? "",
+    );
     expect(terms).toHaveLength(3);
-    expect(terms.map((t) => t.replace(/s$/, ""))).toEqual(["owner", "admin", "member"]);
+    expect(terms.map((t) => t.replace(/s$/, ""))).toEqual([
+      "owner",
+      "admin",
+      "member",
+    ]);
     expect(terms.some((t) => t.includes("group"))).toBe(false);
 
     // And it says what it stands in for, so a reader does not take it for the finished feature.
@@ -356,13 +392,29 @@ describe("Users — the four gates, and WHICH reason each caller is given", () =
     // "Role hierarchy across N members" claimed who can act while counting accounts on the roster. Grace is
     // deactivated and cannot sign in, so the roster count and the who-can-act count are different numbers.
     roster = [
-      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", status: "active", email_verified: true },
-      { user_id: "u9", email: "gone@acme.test", name: "Gone Away", role: "member", status: "deactivated", email_verified: true },
+      {
+        user_id: "u1",
+        email: "owner@acme.test",
+        name: "Olive Owner",
+        role: "owner",
+        status: "active",
+        email_verified: true,
+      },
+      {
+        user_id: "u9",
+        email: "gone@acme.test",
+        name: "Gone Away",
+        role: "member",
+        status: "deactivated",
+        email_verified: true,
+      },
     ];
     withAuth(<Users />);
     await waitFor(() =>
       expect(
-        screen.getByText(/2 accounts on the roster, 1 deactivated and unable to sign in/),
+        screen.getByText(
+          /2 accounts on the roster, 1 deactivated and unable to sign in/,
+        ),
       ).toBeTruthy(),
     );
     expect(screen.queryByText(/Role hierarchy across/)).toBeNull();
@@ -375,7 +427,9 @@ describe("Users — the four gates, and WHICH reason each caller is given", () =
     withAuth(<Users />);
     await waitFor(() => screen.getByText("Access posture"));
     await waitFor(() =>
-      expect(screen.getByText(/Groups are a Tunnex Enterprise feature/)).toBeTruthy(),
+      expect(
+        screen.getByText(/Groups are a Tunnex Enterprise feature/),
+      ).toBeTruthy(),
     );
     // An owner IS an admin, so the device-count clause must not appear.
     expect(screen.queryByText(/only shown to admins/)).toBeNull();
@@ -388,14 +442,30 @@ describe("Users — the four gates, and WHICH reason each caller is given", () =
     // this caller's real response is `forbidden`.
     edition = "open";
     roster = [
-      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, status: "active" },
-      { user_id: "u3", email: "member@acme.test", name: "Mel Member", role: "member", email_verified: true, status: "active" },
+      {
+        user_id: "u1",
+        email: "owner@acme.test",
+        name: "Olive Owner",
+        role: "owner",
+        email_verified: true,
+        status: "active",
+      },
+      {
+        user_id: "u3",
+        email: "member@acme.test",
+        name: "Mel Member",
+        role: "member",
+        email_verified: true,
+        status: "active",
+      },
     ];
     whoAmI = "u3";
     withAuth(<Users />);
     await waitFor(() => screen.getByText("Access posture"));
     await waitFor(() =>
-      expect(screen.getByText(/needs policy access, which your role/)).toBeTruthy(),
+      expect(
+        screen.getByText(/needs policy access, which your role/),
+      ).toBeTruthy(),
     );
     expect(screen.queryByText(/Tunnex Enterprise feature/)).toBeNull();
     // Both withheld things are named — the device-count reason is not swallowed by the group one.
@@ -407,8 +477,22 @@ describe("Users — the four gates, and WHICH reason each caller is given", () =
     // roster: every colleague, their role, and the role tallies.
     edition = "open";
     roster = [
-      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, status: "active" },
-      { user_id: "u3", email: "member@acme.test", name: "Mel Member", role: "member", email_verified: true, status: "active" },
+      {
+        user_id: "u1",
+        email: "owner@acme.test",
+        name: "Olive Owner",
+        role: "owner",
+        email_verified: true,
+        status: "active",
+      },
+      {
+        user_id: "u3",
+        email: "member@acme.test",
+        name: "Mel Member",
+        role: "member",
+        email_verified: true,
+        status: "active",
+      },
     ];
     whoAmI = "u3";
     withAuth(<Users />);
@@ -462,8 +546,22 @@ describe("Users — a member with no name", () => {
     // Found because a MOCK omitted `name` while every seeded fixture member had one. The fixture was LESS
     // representative than the double — the inverse of S14.10's trap, same lesson from the other side.
     roster = [
-      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, status: "active" },
-      { user_id: "u4", email: "nameless@acme.test", name: "", role: "member", email_verified: true, status: "active" },
+      {
+        user_id: "u1",
+        email: "owner@acme.test",
+        name: "Olive Owner",
+        role: "owner",
+        email_verified: true,
+        status: "active",
+      },
+      {
+        user_id: "u4",
+        email: "nameless@acme.test",
+        name: "",
+        role: "member",
+        email_verified: true,
+        status: "active",
+      },
     ];
     withAuth(<Users />);
     const table = await waitFor(() =>
@@ -488,10 +586,25 @@ describe("Users — an empty name AND a long email (the interaction)", () => {
     // Measured on the shipped cell: NO `truncate`, NO `overflow-hidden`, NO `whitespace-nowrap` on either span
     // or the <td>, so the text wraps rather than clipping. This test is what keeps that true — adding
     // `truncate` later would not fail it, but adding a second unconditional email span would.
-    const long = "nadia.okonkwo-contractor.external@a-very-long-subdomain.example-company.co.uk";
+    const long =
+      "nadia.okonkwo-contractor.external@a-very-long-subdomain.example-company.co.uk";
     roster = [
-      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", email_verified: true, status: "active" },
-      { user_id: "u5", email: long, name: "", role: "member", email_verified: true, status: "active" },
+      {
+        user_id: "u1",
+        email: "owner@acme.test",
+        name: "Olive Owner",
+        role: "owner",
+        email_verified: true,
+        status: "active",
+      },
+      {
+        user_id: "u5",
+        email: long,
+        name: "",
+        role: "member",
+        email_verified: true,
+        status: "active",
+      },
     ];
     withAuth(<Users />);
     const table = await waitFor(() =>
@@ -505,8 +618,14 @@ describe("Users — an empty name AND a long email (the interaction)", () => {
     const clipping: string[] = [];
     while (node && node.tagName !== "TR") {
       const c = node.className || "";
-      for (const bad of ["truncate", "overflow-hidden", "whitespace-nowrap", "text-ellipsis"])
-        if (typeof c === "string" && c.includes(bad)) clipping.push(`${node.tagName}.${bad}`);
+      for (const bad of [
+        "truncate",
+        "overflow-hidden",
+        "whitespace-nowrap",
+        "text-ellipsis",
+      ])
+        if (typeof c === "string" && c.includes(bad))
+          clipping.push(`${node.tagName}.${bad}`);
       node = node.parentElement;
     }
     expect(clipping).toEqual([]);
@@ -519,25 +638,47 @@ describe("Users — the ACTIONS column follows the same rule as Devices", () => 
     // same class the Devices column avoids. A COLUMN HEADER IS A CLAIM THAT THE COLUMN HAS CONTENT, so an
     // empty ACTIONS tells a member there are actions they cannot see when there are none for them at all.
     roster = [
-      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", status: "active", email_verified: true },
-      { user_id: "u3", email: "member@acme.test", name: "Mel Member", role: "member", status: "active", email_verified: true },
+      {
+        user_id: "u1",
+        email: "owner@acme.test",
+        name: "Olive Owner",
+        role: "owner",
+        status: "active",
+        email_verified: true,
+      },
+      {
+        user_id: "u3",
+        email: "member@acme.test",
+        name: "Mel Member",
+        role: "member",
+        status: "active",
+        email_verified: true,
+      },
     ];
     whoAmI = "u3";
     withAuth(<Users />);
-    const table = await waitFor(() => screen.getByRole("table", { name: "Members" }));
+    const table = await waitFor(() =>
+      screen.getByRole("table", { name: "Members" }),
+    );
     await waitFor(() => within(table).getByText("Olive Owner"));
 
-    const headers = within(table).getAllByRole("columnheader").map((h) => h.textContent);
+    const headers = within(table)
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent);
     expect(headers).toEqual(["Member", "State", "Role"]);
     // ⚠ The verbs moved from an Actions COLUMN to the selection bar, so the affordance to assert is the
     // checkbox. The RULE is untouched: a viewer who can act on nobody is offered nothing to act WITH.
     expect(within(table).queryByRole("checkbox")).toBeNull();
-    expect(within(table).queryByRole("columnheader", { name: "Devices" })).toBeNull();
+    expect(
+      within(table).queryByRole("columnheader", { name: "Devices" }),
+    ).toBeNull();
   });
 
   it("an ADMIN keeps the ACTIONS column — 'always absent' must not pass either", async () => {
     withAuth(<Users />); // default roster: u1 owner (me), u2 admin — I can act on u2
-    const table = await waitFor(() => screen.getByRole("table", { name: "Members" }));
+    const table = await waitFor(() =>
+      screen.getByRole("table", { name: "Members" }),
+    );
     await waitFor(() => within(table).getByText("Adam Admin"));
     expect(within(table).getAllByRole("checkbox").length).toBeGreaterThan(0);
   });
@@ -546,18 +687,36 @@ describe("Users — the ACTIONS column follows the same rule as Devices", () => 
     // An ADMIN on a roster of OWNERS can act on nobody — canManageMembership(admin, owner, …) is false — so a
     // role-based test would leave them an empty column, reintroducing the defect for a different caller.
     roster = [
-      { user_id: "u1", email: "owner@acme.test", name: "Olive Owner", role: "owner", status: "active", email_verified: true },
-      { user_id: "u2", email: "admin@acme.test", name: "Adam Admin", role: "admin", status: "active", email_verified: true },
+      {
+        user_id: "u1",
+        email: "owner@acme.test",
+        name: "Olive Owner",
+        role: "owner",
+        status: "active",
+        email_verified: true,
+      },
+      {
+        user_id: "u2",
+        email: "admin@acme.test",
+        name: "Adam Admin",
+        role: "admin",
+        status: "active",
+        email_verified: true,
+      },
     ];
     whoAmI = "u2"; // I am the admin; the only other row is an owner I cannot manage
     withAuth(<Users />);
-    const table = await waitFor(() => screen.getByRole("table", { name: "Members" }));
+    const table = await waitFor(() =>
+      screen.getByRole("table", { name: "Members" }),
+    );
     await waitFor(() => within(table).getByText("Olive Owner"));
     // ⚠ The verbs moved from an Actions COLUMN to the selection bar, so the affordance to assert is the
     // checkbox. The RULE is untouched: a viewer who can act on nobody is offered nothing to act WITH.
     expect(within(table).queryByRole("checkbox")).toBeNull();
     // But the Devices column STAYS — an admin holds member:manage, and that gate is unrelated.
-    expect(within(table).getByRole("columnheader", { name: "Devices" })).toBeTruthy();
+    expect(
+      within(table).getByRole("columnheader", { name: "Devices" }),
+    ).toBeTruthy();
   });
 });
 
@@ -585,7 +744,9 @@ describe("Users — exactly one filter control", () => {
     // different affordance that happens to be configured next door.
     withAuth(<Users />);
     await waitFor(() => screen.getByRole("table", { name: "Members" }));
-    expect(screen.getByRole("searchbox", { name: "Filter Members" })).toBeTruthy();
+    expect(
+      screen.getByRole("searchbox", { name: "Filter Members" }),
+    ).toBeTruthy();
     const roleHeader = screen.getByRole("columnheader", { name: "Role" });
     expect(within(roleHeader).queryByRole("button")).not.toBeNull();
   });

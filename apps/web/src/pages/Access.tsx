@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useOrg } from "../lib/useOrg";
 import {
   api,
   type GroupMember,
@@ -100,6 +101,7 @@ import {
 // reassuring empty state. (LoadRetry — the shared legible-retry affordance — lives in components/LoadRetry.)
 
 export default function Access() {
+  const { org: currentOrg, loading: orgLoading, failed: orgFailed } = useOrg();
   const { state } = useAuth();
   const myId = state.status === "authed" ? state.user.id : "";
   const emailVerified = state.status === "authed" && state.user.email_verified;
@@ -131,11 +133,17 @@ export default function Access() {
     const mRes = await loadOne(() => api.GET("/api/v1/meta"));
     if (!mRes.ok) return setLoadError(mRes.error); // [67]: surface loadOne's (human) message
     setMeta(mRes.data as Meta);
-    const oRes = await loadOne(() => api.GET("/api/v1/organizations"));
-    if (!oRes.ok) return setLoadError(oRes.error);
-    const first = (oRes.data as Org[])[0];
+    // ⛔ THE ORG COMES FROM THE SEAM, NOT FROM INDEX ZERO (S12.5).
+    // ⛔ LOADING IS NOT ABSENCE (S12.5). See the note in Dashboard.tsx — three states, not two: still
+    // loading (say nothing), the read failed (say THAT), genuinely no membership (say that).
+    if (orgLoading) return;
+    const first = currentOrg;
     if (!first)
-      return setFatal("You are not a member of any organization yet.");
+      return setFatal(
+        orgFailed
+          ? "Could not load your organizations."
+          : "You are not a member of any organization yet.",
+      );
     setOrg(first);
     const memRes = (await loadOne(() =>
       api.GET("/api/v1/organizations/{orgId}/members", {
@@ -149,7 +157,10 @@ export default function Access() {
       );
     setMyRole(resolved.role);
     setRoleResolved(true);
-  }, [myId]);
+    // ⚠ currentOrg IS A DEPENDENCY, AND THAT IS THE HALF THAT MAKES THE SWITCHER WORK. Without it the
+    // page keeps rendering the org it mounted with — the control moves, the data does not, and the user is
+    // looking at one tenant's screen labelled with another's name.
+  }, [currentOrg, myId]);
   useEffect(() => {
     reload();
   }, [reload]);
@@ -174,9 +185,13 @@ export default function Access() {
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
       <div style={{ display: "flex", alignItems: "flex-end", gap: "14px" }}>
         <div>
-          <div style={{ font: "700 22px 'Instrument Sans'", color: "#F5F5F5" }}>Access policies</div>
+          <div style={{ font: "700 22px 'Instrument Sans'", color: "#F5F5F5" }}>
+            Access policies
+          </div>
           <div style={{ font: "400 12px 'Instrument Sans'", color: "#6E6E6B" }}>
-            {org ? org.name : "…"} · <span style={{ color: "#858582" }}>control plane</span> <span style={{ color: "#A9A9A6" }}>● healthy</span>
+            {org ? org.name : "…"} ·{" "}
+            <span style={{ color: "#858582" }}>control plane</span>{" "}
+            <span style={{ color: "#A9A9A6" }}>● healthy</span>
           </div>
         </div>
         <div style={{ flex: 1 }}></div>
@@ -434,7 +449,9 @@ function RulesSection({
   // rule row, where the operator's attention already is. The fan-out is the DISTINCT SOURCE GROUPS of the
   // rules, not every group — the rules are what need judging.
   // `undefined` = not fetched yet, `null` = fetched and FAILED. Neither warns: "could not check" is not "empty".
-  const [srcGroupCounts, setSrcGroupCounts] = useState<Map<string, number | null>>(new Map());
+  const [srcGroupCounts, setSrcGroupCounts] = useState<
+    Map<string, number | null>
+  >(new Map());
 
   const load = useCallback(async () => {
     setErr(null); // [310]: never carry a stale partial-load/mutation error into a fresh load
@@ -651,7 +668,15 @@ function RulesSection({
               remainder is stated, never silently dropped, and the table below stays authoritative. */}
           {(() => {
             const rows = rules.map((r) => {
-              const rr = ruleRow(r, groups, resources, members, sites, loaded, services);
+              const rr = ruleRow(
+                r,
+                groups,
+                resources,
+                members,
+                sites,
+                loaded,
+                services,
+              );
               return {
                 id: r.id,
                 src: rr.src.label,
@@ -668,7 +693,10 @@ function RulesSection({
             const g = flowGraphState(rows.length, probe.shown.length);
             if (g.kind !== "draw")
               return (
-                <p className="mt-3 text-xs text-slate-500" data-testid="flow-withheld">
+                <p
+                  className="mt-3 text-xs text-slate-500"
+                  data-testid="flow-withheld"
+                >
                   {flowGraphNote(g)}
                 </p>
               );
@@ -676,23 +704,56 @@ function RulesSection({
             const si = (l: string) => srcs.findIndex((n) => n.label === l);
             const di = (l: string) => dsts.findIndex((n) => n.label === l);
             const cy = (i: number) => 54 + i * 68;
-            const node = (n: { label: string; kind: FlowKind }, i: number, isSrc: boolean) => {
+            const node = (
+              n: { label: string; kind: FlowKind },
+              i: number,
+              isSrc: boolean,
+            ) => {
               const cx = isSrc ? 95 : 505;
               return (
                 <g key={(isSrc ? "s" : "d") + n.label}>
-                  <rect x={cx - 76} y={cy(i) - 18} width="152" height="36" rx="10"
-                        fill="var(--tnx-surface-inset)" stroke="var(--tnx-divider)" strokeWidth="1.4" />
-                  <circle cx={cx - 60} cy={cy(i)} r="8"
-                          fill="var(--tnx-surface)" stroke="var(--tnx-divider)" />
-                  <text x={cx - 60} y={cy(i) + 3} textAnchor="middle"
-                        style={{ fontSize: "8px" }} className="fill-slate-400">
+                  <rect
+                    x={cx - 76}
+                    y={cy(i) - 18}
+                    width="152"
+                    height="36"
+                    rx="10"
+                    fill="var(--tnx-surface-inset)"
+                    stroke="var(--tnx-divider)"
+                    strokeWidth="1.4"
+                  />
+                  <circle
+                    cx={cx - 60}
+                    cy={cy(i)}
+                    r="8"
+                    fill="var(--tnx-surface)"
+                    stroke="var(--tnx-divider)"
+                  />
+                  <text
+                    x={cx - 60}
+                    y={cy(i) + 3}
+                    textAnchor="middle"
+                    style={{ fontSize: "8px" }}
+                    className="fill-slate-400"
+                  >
                     {flowGlyph(n.kind)}
                   </text>
-                  <text x={cx - 46} y={cy(i) - 2} style={{ fontSize: "10px" }} className="fill-slate-200">
-                    {n.label.length > 18 ? n.label.slice(0, 17) + "\u2026" : n.label}
+                  <text
+                    x={cx - 46}
+                    y={cy(i) - 2}
+                    style={{ fontSize: "10px" }}
+                    className="fill-slate-200"
+                  >
+                    {n.label.length > 18
+                      ? n.label.slice(0, 17) + "\u2026"
+                      : n.label}
                   </text>
-                  <text x={cx - 46} y={cy(i) + 9} style={{ fontSize: "7px", letterSpacing: ".08em" }}
-                        className="fill-slate-500">
+                  <text
+                    x={cx - 46}
+                    y={cy(i) + 9}
+                    style={{ fontSize: "7px", letterSpacing: ".08em" }}
+                    className="fill-slate-500"
+                  >
                     {flowTag(n.kind)}
                   </text>
                 </g>
@@ -713,28 +774,53 @@ function RulesSection({
                   aria-label={`Access flow: ${shown.length} of ${rows.length} rules drawn, ${srcs.length} sources to ${dsts.length} destinations`}
                 >
                   <defs>
-                    <pattern id="tnxPolDots" width="16" height="16" patternUnits="userSpaceOnUse">
-                      <circle cx="1.5" cy="1.5" r="1" fill="var(--tnx-divider)" />
+                    <pattern
+                      id="tnxPolDots"
+                      width="16"
+                      height="16"
+                      patternUnits="userSpaceOnUse"
+                    >
+                      <circle
+                        cx="1.5"
+                        cy="1.5"
+                        r="1"
+                        fill="var(--tnx-divider)"
+                      />
                     </pattern>
                   </defs>
-                  <rect x="0" y="0" width="600" height="312" rx="14" fill="url(#tnxPolDots)" />
+                  <rect
+                    x="0"
+                    y="0"
+                    width="600"
+                    height="312"
+                    rx="14"
+                    fill="url(#tnxPolDots)"
+                  />
                   <g className="tnx-flow-edges">
-                  {shown.map((r) => {
-                    const sy = cy(si(r.src)), dy = cy(di(r.dst));
-                    return (
-                      <path key={r.id} fill="none" strokeWidth="2"
-                            stroke={r.temp ? "var(--tnx-neutral)" : "var(--tnx-accent)"}
-                            strokeDasharray={r.temp ? "5 6" : undefined}
-                            d={`M170,${sy} C300,${sy} 300,${dy} 430,${dy}`} />
-                    );
-                  })}
+                    {shown.map((r) => {
+                      const sy = cy(si(r.src)),
+                        dy = cy(di(r.dst));
+                      return (
+                        <path
+                          key={r.id}
+                          fill="none"
+                          strokeWidth="2"
+                          stroke={
+                            r.temp ? "var(--tnx-neutral)" : "var(--tnx-accent)"
+                          }
+                          strokeDasharray={r.temp ? "5 6" : undefined}
+                          d={`M170,${sy} C300,${sy} 300,${dy} 430,${dy}`}
+                        />
+                      );
+                    })}
                   </g>
                   {srcs.map((n, i) => node(n, i, true))}
                   {dsts.map((n, i) => node(n, i, false))}
                 </svg>
                 <div className="mx-auto mt-1 flex max-w-[600px] items-center justify-between text-[10px] text-slate-500">
                   <span>
-                    <span className="text-slate-300">&#8212;&#8212;</span> allow&nbsp;&nbsp;
+                    <span className="text-slate-300">&#8212;&#8212;</span>{" "}
+                    allow&nbsp;&nbsp;
                     <span className="text-slate-300">- - -</span> temporary
                   </span>
                   <span>
@@ -760,9 +846,21 @@ function RulesSection({
               retry. Converting this list without this block would have replaced "Rules could not be loaded"
               with a blank area: the screen would say nothing at all about a read that failed, which is the
               reassuring-empty defect wearing its quietest possible face. */}
-          {rulesEmptyState({ rulesResult, modeResult, renderedCount: rules.length }).kind === "failed" && (
+          {rulesEmptyState({
+            rulesResult,
+            modeResult,
+            renderedCount: rules.length,
+          }).kind === "failed" && (
             <p className="mt-3 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-xs text-danger">
-              {rulesEmptyCopy(rulesEmptyState({ rulesResult, modeResult, renderedCount: rules.length })).text}
+              {
+                rulesEmptyCopy(
+                  rulesEmptyState({
+                    rulesResult,
+                    modeResult,
+                    renderedCount: rules.length,
+                  }),
+                ).text
+              }
             </p>
           )}
           <div className="mt-3">
@@ -772,17 +870,34 @@ function RulesSection({
               rowKey={(r) => r.id}
               // ⛔ THE PAGE OWNS THE EMPTY COPY, because it distinguishes states this component cannot see:
               // an ENFORCING org with zero rules is a lockout warning, not an emptiness.
-              failed={rulesEmptyState({ rulesResult, modeResult, renderedCount: rules.length }).kind === "failed"}
+              failed={
+                rulesEmptyState({
+                  rulesResult,
+                  modeResult,
+                  renderedCount: rules.length,
+                }).kind === "failed"
+              }
               empty={
                 <span
                   className={
-                    rulesEmptyState({ rulesResult, modeResult, renderedCount: rules.length }).kind ===
-                    "enforcing_empty"
+                    rulesEmptyState({
+                      rulesResult,
+                      modeResult,
+                      renderedCount: rules.length,
+                    }).kind === "enforcing_empty"
                       ? "text-xs font-semibold text-warn"
                       : "text-xs text-slate-500"
                   }
                 >
-                  {rulesEmptyCopy(rulesEmptyState({ rulesResult, modeResult, renderedCount: rules.length })).text}
+                  {
+                    rulesEmptyCopy(
+                      rulesEmptyState({
+                        rulesResult,
+                        modeResult,
+                        renderedCount: rules.length,
+                      }),
+                    ).text
+                  }
                 </span>
               }
               // ⛔ THE VERBS LIVE IN ONE BAR, NOT ON EVERY ROW. Fifteen rules meant forty-five buttons —
@@ -798,8 +913,17 @@ function RulesSection({
                         label: "Edit",
                         arity: "single",
                         unavailable: (r: PolicyRule) =>
-                          grantControls(ruleRow(r, groups, resources, members, sites, loaded, services))
-                            .withheld
+                          grantControls(
+                            ruleRow(
+                              r,
+                              groups,
+                              resources,
+                              members,
+                              sites,
+                              loaded,
+                              services,
+                            ),
+                          ).withheld
                             ? managedGrantWarning()
                             : canEditRuleInModal(r)
                               ? null
@@ -811,8 +935,17 @@ function RulesSection({
                         label: "Extend",
                         arity: "single",
                         unavailable: (r: PolicyRule) =>
-                          grantControls(ruleRow(r, groups, resources, members, sites, loaded, services))
-                            .withheld
+                          grantControls(
+                            ruleRow(
+                              r,
+                              groups,
+                              resources,
+                              members,
+                              sites,
+                              loaded,
+                              services,
+                            ),
+                          ).withheld
                             ? managedGrantWarning()
                             : grantExpiry(r, Date.now()).extendable
                               ? null
@@ -824,14 +957,25 @@ function RulesSection({
                         label: "Enable",
                         // F3: enable is ADDITIVE and therefore one click, in bulk as on a single row.
                         unavailable: (r: PolicyRule) =>
-                          grantControls(ruleRow(r, groups, resources, members, sites, loaded, services))
-                            .withheld
+                          grantControls(
+                            ruleRow(
+                              r,
+                              groups,
+                              resources,
+                              members,
+                              sites,
+                              loaded,
+                              services,
+                            ),
+                          ).withheld
                             ? managedGrantWarning()
                             : r.enabled
                               ? "Already enabled."
                               : null,
                         run: (rs: PolicyRule[]) => {
-                          void Promise.all(rs.map((r) => setEnabled(r.id, true)));
+                          void Promise.all(
+                            rs.map((r) => setEnabled(r.id, true)),
+                          );
                         },
                       },
                       {
@@ -841,8 +985,17 @@ function RulesSection({
                         // seconds, so it confirms — and it must still confirm when it is doing so to five
                         // rules at once, which is strictly more consequential than doing it to one.
                         unavailable: (r: PolicyRule) =>
-                          grantControls(ruleRow(r, groups, resources, members, sites, loaded, services))
-                            .withheld
+                          grantControls(
+                            ruleRow(
+                              r,
+                              groups,
+                              resources,
+                              members,
+                              sites,
+                              loaded,
+                              services,
+                            ),
+                          ).withheld
                             ? managedGrantWarning()
                             : r.enabled
                               ? null
@@ -854,8 +1007,17 @@ function RulesSection({
                         label: "Delete",
                         danger: true,
                         unavailable: (r: PolicyRule) =>
-                          grantControls(ruleRow(r, groups, resources, members, sites, loaded, services))
-                            .withheld
+                          grantControls(
+                            ruleRow(
+                              r,
+                              groups,
+                              resources,
+                              members,
+                              sites,
+                              loaded,
+                              services,
+                            ),
+                          ).withheld
                             ? managedGrantWarning()
                             : null,
                         run: (rs: PolicyRule[]) => setDeletingRules(rs),
@@ -868,25 +1030,71 @@ function RulesSection({
                   key: "src",
                   header: "Source",
                   sortValue: (r) =>
-                    ruleRow(r, groups, resources, members, sites, loaded, services).src.label,
+                    ruleRow(
+                      r,
+                      groups,
+                      resources,
+                      members,
+                      sites,
+                      loaded,
+                      services,
+                    ).src.label,
                   cell: (r) => {
-                    const row = ruleRow(r, groups, resources, members, sites, loaded, services);
-                    return <RefText label={row.src.label} broken={row.src.state !== "ok"} />;
+                    const row = ruleRow(
+                      r,
+                      groups,
+                      resources,
+                      members,
+                      sites,
+                      loaded,
+                      services,
+                    );
+                    return (
+                      <RefText
+                        label={row.src.label}
+                        broken={row.src.state !== "ok"}
+                      />
+                    );
                   },
                 },
                 {
                   key: "arrow",
                   header: "",
-                  cell: () => <span aria-hidden className="text-slate-600">→</span>,
+                  cell: () => (
+                    <span aria-hidden className="text-slate-600">
+                      →
+                    </span>
+                  ),
                 },
                 {
                   key: "dst",
                   header: "Destination",
                   sortValue: (r) =>
-                    ruleRow(r, groups, resources, members, sites, loaded, services).dst.label,
+                    ruleRow(
+                      r,
+                      groups,
+                      resources,
+                      members,
+                      sites,
+                      loaded,
+                      services,
+                    ).dst.label,
                   cell: (r) => {
-                    const row = ruleRow(r, groups, resources, members, sites, loaded, services);
-                    return <RefText label={row.dst.label} broken={row.dst.state !== "ok"} />;
+                    const row = ruleRow(
+                      r,
+                      groups,
+                      resources,
+                      members,
+                      sites,
+                      loaded,
+                      services,
+                    );
+                    return (
+                      <RefText
+                        label={row.dst.label}
+                        broken={row.dst.state !== "ok"}
+                      />
+                    );
                   },
                 },
                 {
@@ -910,12 +1118,30 @@ function RulesSection({
                   key: "type",
                   header: "Type",
                   sortValue: (r) => {
-                    const row = ruleRow(r, groups, resources, members, sites, loaded, services);
+                    const row = ruleRow(
+                      r,
+                      groups,
+                      resources,
+                      members,
+                      sites,
+                      loaded,
+                      services,
+                    );
                     if (row.managedByOperator) return "managed by gitops";
-                    return grantExpiry(r, Date.now()).state === "permanent" ? "standard" : "temporary";
+                    return grantExpiry(r, Date.now()).state === "permanent"
+                      ? "standard"
+                      : "temporary";
                   },
                   cell: (r) => {
-                    const row = ruleRow(r, groups, resources, members, sites, loaded, services);
+                    const row = ruleRow(
+                      r,
+                      groups,
+                      resources,
+                      members,
+                      sites,
+                      loaded,
+                      services,
+                    );
                     /* S10.2 D2 cond 1: a GitOps-managed grant is badged; its mutation controls are
                        withheld in the actions column. */
                     if (row.managedByOperator) return <ManagedBadge />;
@@ -940,10 +1166,22 @@ function RulesSection({
                   // needs to find — each one means a rule that reads ACTIVE and compiles to NOTHING — and a
                   // badge contributes no text, so without this they would be the least findable rows here.
                   sortValue: (r) => {
-                    const row = ruleRow(r, groups, resources, members, sites, loaded, services);
+                    const row = ruleRow(
+                      r,
+                      groups,
+                      resources,
+                      members,
+                      sites,
+                      loaded,
+                      services,
+                    );
                     const empty =
                       (r.src_kind ?? "group") === "group" && r.src_group_id
-                        ? srcGroupEmptyBadge(srcGroupEmptyWarn(srcGroupCounts.get(r.src_group_id)))
+                        ? srcGroupEmptyBadge(
+                            srcGroupEmptyWarn(
+                              srcGroupCounts.get(r.src_group_id),
+                            ),
+                          )
                         : null;
                     return [
                       row.cidrOutsideRanges ? "outside ranges" : "",
@@ -954,10 +1192,22 @@ function RulesSection({
                       .join(" ");
                   },
                   cell: (r) => {
-                    const row = ruleRow(r, groups, resources, members, sites, loaded, services);
+                    const row = ruleRow(
+                      r,
+                      groups,
+                      resources,
+                      members,
+                      sites,
+                      loaded,
+                      services,
+                    );
                     const emptyBadge =
                       (r.src_kind ?? "group") === "group" && r.src_group_id
-                        ? srcGroupEmptyBadge(srcGroupEmptyWarn(srcGroupCounts.get(r.src_group_id)))
+                        ? srcGroupEmptyBadge(
+                            srcGroupEmptyWarn(
+                              srcGroupCounts.get(r.src_group_id),
+                            ),
+                          )
                         : null;
                     return (
                       <span className="flex flex-wrap items-center gap-1">
@@ -991,7 +1241,9 @@ function RulesSection({
                             className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-warn"
                             title={
                               srcGroupEmptyExplain(
-                                srcGroupEmptyWarn(srcGroupCounts.get(r.src_group_id as string)),
+                                srcGroupEmptyWarn(
+                                  srcGroupCounts.get(r.src_group_id as string),
+                                ),
                               ) ?? undefined
                             }
                           >
@@ -1056,7 +1308,11 @@ function RulesSection({
             : null;
           return (
             <Modal
-              title={rs.length === 1 ? "Disable rule?" : `Disable ${rs.length} rules?`}
+              title={
+                rs.length === 1
+                  ? "Disable rule?"
+                  : `Disable ${rs.length} rules?`
+              }
               danger
               onDismiss={() => setDisablingRules([])}
               actions={
@@ -1085,12 +1341,23 @@ function RulesSection({
                 </p>
               ) : (
                 <div className="text-sm text-slate-300">
-                  <p>These allow rules stop applying within seconds. Access they grant is withdrawn.</p>
+                  <p>
+                    These allow rules stop applying within seconds. Access they
+                    grant is withdrawn.
+                  </p>
                   {/* ⛔ THE SET IS SHOWN, NOT COUNTED. "Disable 5 rules?" asks the operator to trust their
                       own memory of a selection they made across pages and filters. */}
                   <ul className="mt-2 max-h-48 space-y-0.5 overflow-y-auto text-xs text-slate-400">
                     {rs.map((r) => {
-                      const rr = ruleRow(r, groups, resources, members, sites, loaded, services);
+                      const rr = ruleRow(
+                        r,
+                        groups,
+                        resources,
+                        members,
+                        sites,
+                        loaded,
+                        services,
+                      );
                       return (
                         <li key={r.id}>
                           {rr.src.label} → {rr.dst.label}
@@ -1106,7 +1373,11 @@ function RulesSection({
 
       {deletingRules.length > 0 && (
         <Modal
-          title={deletingRules.length === 1 ? "Delete rule?" : `Delete ${deletingRules.length} rules?`}
+          title={
+            deletingRules.length === 1
+              ? "Delete rule?"
+              : `Delete ${deletingRules.length} rules?`
+          }
           danger
           onDismiss={() => setDeletingRules([])}
           actions={
@@ -1129,12 +1400,20 @@ function RulesSection({
         >
           <div className="text-sm text-slate-300">
             <p>
-              Deleting is permanent. Disabling keeps the rule and its history — prefer it if you may want
-              this access back.
+              Deleting is permanent. Disabling keeps the rule and its history —
+              prefer it if you may want this access back.
             </p>
             <ul className="mt-2 max-h-48 space-y-0.5 overflow-y-auto text-xs text-slate-400">
               {deletingRules.map((r) => {
-                const rr = ruleRow(r, groups, resources, members, sites, loaded, services);
+                const rr = ruleRow(
+                  r,
+                  groups,
+                  resources,
+                  members,
+                  sites,
+                  loaded,
+                  services,
+                );
                 return (
                   <li key={r.id}>
                     {rr.src.label} → {rr.dst.label}
@@ -1259,24 +1538,36 @@ function RuleFormModal({
   // ⛔ S15.3 — agents enrolled in this org, offered as a policy SOURCE. Without this the AI-agents screen
   // says an agent "reaches only what it is granted" and nothing could grant it anything: a capability the
   // product had and the operator could not reach.
-  const [agents, setAgents] = useState<Array<{ device_id: string; name: string; gateway_name: string }>>([]);
+  const [agents, setAgents] = useState<
+    Array<{ device_id: string; name: string; gateway_name: string }>
+  >([]);
   const [srcAgent, setSrcAgent] = useState("");
   // ⚠ Enterprise-only endpoint: a 403 is a SUCCESSFUL refusal, so the list simply stays empty and the
   // "AI agent" option is never offered. It must not surface as an error in a rule dialog.
   useEffect(() => {
     let cancelled = false;
     void api
-      .GET("/api/v1/organizations/{orgId}/agents", { params: { path: { orgId } } })
+      .GET("/api/v1/organizations/{orgId}/agents", {
+        params: { path: { orgId } },
+      })
       .then(({ data, error }) => {
         if (cancelled || error || !data) return;
-        setAgents(data as Array<{ device_id: string; name: string; gateway_name: string }>);
+        setAgents(
+          data as Array<{
+            device_id: string;
+            name: string;
+            gateway_name: string;
+          }>,
+        );
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [orgId]);
-  const [srcKind, setSrcKind] = useState<"group" | "user" | "site" | "cidr" | "agent">(
+  const [srcKind, setSrcKind] = useState<
+    "group" | "user" | "site" | "cidr" | "agent"
+  >(
     defaultSrcKind({
       editingKind:
         editing?.src_kind === "user"
@@ -1449,13 +1740,24 @@ function RuleFormModal({
           placeholder="Search groups, people, sites, agents… or type a CIDR"
           acceptCidr
           value={
-            srcKind === "group" ? src
-              : srcKind === "user" ? srcUser
-              : srcKind === "site" ? srcSite
-              : srcKind === "agent" ? srcAgent
-              : srcCidr
+            srcKind === "group"
+              ? src
+              : srcKind === "user"
+                ? srcUser
+                : srcKind === "site"
+                  ? srcSite
+                  : srcKind === "agent"
+                    ? srcAgent
+                    : srcCidr
           }
-          options={sourceOptions({ groups, members, sites, agents, dstKind, dstSite })}
+          options={sourceOptions({
+            groups,
+            members,
+            sites,
+            agents,
+            dstKind,
+            dstSite,
+          })}
           onSelect={(o) => {
             setSrcKind(o.kind as typeof srcKind);
             if (o.kind === "group") setSrc(o.value);
@@ -1469,12 +1771,22 @@ function RuleFormModal({
           label="Destination"
           placeholder="Search groups, resources, sites, services…"
           value={
-            dstKind === "group" ? dstGroup
-              : dstKind === "resource" ? dstResource
-              : dstKind === "site" ? dstSite
-              : dstK8sService
+            dstKind === "group"
+              ? dstGroup
+              : dstKind === "resource"
+                ? dstResource
+                : dstKind === "site"
+                  ? dstSite
+                  : dstK8sService
           }
-          options={destinationOptions({ groups, resources, sites, services, srcKind, srcSite })}
+          options={destinationOptions({
+            groups,
+            resources,
+            sites,
+            services,
+            srcKind,
+            srcSite,
+          })}
           onSelect={(o) => {
             setDstKind(o.kind as typeof dstKind);
             if (o.kind === "group") setDstGroup(o.value);
@@ -1493,19 +1805,54 @@ function RuleFormModal({
             form's job is that the operator cannot be SURPRISED by their own rule. */}
         {(() => {
           const srcLabel =
-            sourceOptions({ groups, members, sites, agents, dstKind, dstSite }).find(
+            sourceOptions({
+              groups,
+              members,
+              sites,
+              agents,
+              dstKind,
+              dstSite,
+            }).find(
               (o) =>
                 o.kind === srcKind &&
-                o.value === (srcKind === "group" ? src : srcKind === "user" ? srcUser : srcKind === "site" ? srcSite : srcKind === "agent" ? srcAgent : srcCidr),
+                o.value ===
+                  (srcKind === "group"
+                    ? src
+                    : srcKind === "user"
+                      ? srcUser
+                      : srcKind === "site"
+                        ? srcSite
+                        : srcKind === "agent"
+                          ? srcAgent
+                          : srcCidr),
             )?.label ?? (srcKind === "cidr" ? srcCidr : "");
           const dstLabel =
-            destinationOptions({ groups, resources, sites, services, srcKind, srcSite }).find(
+            destinationOptions({
+              groups,
+              resources,
+              sites,
+              services,
+              srcKind,
+              srcSite,
+            }).find(
               (o) =>
                 o.kind === dstKind &&
-                o.value === (dstKind === "group" ? dstGroup : dstKind === "resource" ? dstResource : dstKind === "site" ? dstSite : dstK8sService),
+                o.value ===
+                  (dstKind === "group"
+                    ? dstGroup
+                    : dstKind === "resource"
+                      ? dstResource
+                      : dstKind === "site"
+                        ? dstSite
+                        : dstK8sService),
             )?.label ?? "";
           if (!srcLabel || !dstLabel) return null;
-          const eff = ruleEffectSummary({ srcKind, srcLabel, dstKind, dstLabel });
+          const eff = ruleEffectSummary({
+            srcKind,
+            srcLabel,
+            dstKind,
+            dstLabel,
+          });
           const caution = ruleEffectCaution(srcKind, dstKind);
           return (
             <div
@@ -1515,7 +1862,9 @@ function RuleFormModal({
               {eff.text}
               {/* ⚠ THE EXTRA SENTENCE FOR THE ONE SHAPE THAT IS USUALLY A MISTAKE — attached to it alone,
                   because a caution on every rule is a caution nobody reads. */}
-              {caution && <span className="mt-1 block text-ink-secondary">{caution}</span>}
+              {caution && (
+                <span className="mt-1 block text-ink-secondary">{caution}</span>
+              )}
             </div>
           );
         })()}
@@ -1558,10 +1907,16 @@ function GroupsResourcesSection({
   //   expansion hides the exact state src_group_empty exists to warn about.
   // undefined = not yet fetched (render nothing), null = fetched and FAILED (say so), number = the answer.
   // ⛔ SAME CASCADE AS A GROUP (dst_resource_id ON DELETE CASCADE), so the same typed guard.
-  const [confirmRes, setConfirmRes] = useState<{ id: string; name: string } | null>(null);
-  const [memberCounts, setMemberCounts] = useState<Map<string, number | null>>(new Map());
+  const [confirmRes, setConfirmRes] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [memberCounts, setMemberCounts] = useState<Map<string, number | null>>(
+    new Map(),
+  );
   const noteCount = useCallback(
-    (gid: string, n: number | null) => setMemberCounts((m) => new Map(m).set(gid, n)),
+    (gid: string, n: number | null) =>
+      setMemberCounts((m) => new Map(m).set(gid, n)),
     [],
   );
   const [resources, setResources] = useState<Resource[]>([]);
@@ -1794,85 +2149,81 @@ function GroupsResourcesSection({
         ))}
       </div>
       <div className="mt-3">
-            {tab === "groups" && canManage && (
-              <div className="mt-2 flex gap-2">
-                <Input
-                  placeholder="Group name"
-                  value={newGroup}
-                  onChange={(e) => setNewGroup(e.target.value)}
-                />
-                <Button onClick={addGroup}>Add</Button>
-              </div>
-            )}
-            {tab === "resources" && canManage && (
-              <div className="mt-2 space-y-2">
-                <Input
-                  placeholder="Name"
-                  value={newRes.name}
-                  onChange={(e) =>
-                    setNewRes({ ...newRes, name: e.target.value })
-                  }
-                />
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="CIDR e.g. 10.0.5.0/24"
-                    value={newRes.cidr}
-                    onChange={(e) =>
-                      setNewRes({ ...newRes, cidr: e.target.value })
-                    }
-                  />
-                  <Select
-                    value={newRes.protocol}
-                    onChange={(e) =>
-                      setNewRes({
-                        ...newRes,
-                        protocol: e.target.value as "any" | "tcp" | "udp",
-                      })
-                    }
-                  >
-                    <option value="any">any</option>
-                    <option value="tcp">tcp</option>
-                    <option value="udp">udp</option>
-                  </Select>
-                </div>
-                {/* Feature 1: OPTIONAL port scope. Leave blank = all ports for the protocol; a low alone =
+        {tab === "groups" && canManage && (
+          <div className="mt-2 flex gap-2">
+            <Input
+              placeholder="Group name"
+              value={newGroup}
+              onChange={(e) => setNewGroup(e.target.value)}
+            />
+            <Button onClick={addGroup}>Add</Button>
+          </div>
+        )}
+        {tab === "resources" && canManage && (
+          <div className="mt-2 space-y-2">
+            <Input
+              placeholder="Name"
+              value={newRes.name}
+              onChange={(e) => setNewRes({ ...newRes, name: e.target.value })}
+            />
+            <div className="flex gap-2">
+              <Input
+                placeholder="CIDR e.g. 10.0.5.0/24"
+                value={newRes.cidr}
+                onChange={(e) => setNewRes({ ...newRes, cidr: e.target.value })}
+              />
+              <Select
+                value={newRes.protocol}
+                onChange={(e) =>
+                  setNewRes({
+                    ...newRes,
+                    protocol: e.target.value as "any" | "tcp" | "udp",
+                  })
+                }
+              >
+                <option value="any">any</option>
+                <option value="tcp">tcp</option>
+                <option value="udp">udp</option>
+              </Select>
+            </div>
+            {/* Feature 1: OPTIONAL port scope. Leave blank = all ports for the protocol; a low alone =
                     a single port; low+high = a range. Server is authoritative (createResource validates). */}
-                <div className="flex gap-2">
-                  <Input
-                    type="number"
-                    min={1}
-                    max={65535}
-                    placeholder="Port (optional)"
-                    value={newRes.portLow}
-                    onChange={(e) =>
-                      setNewRes({ ...newRes, portLow: e.target.value })
-                    }
-                  />
-                  <Input
-                    type="number"
-                    min={1}
-                    max={65535}
-                    placeholder="to (range, optional)"
-                    value={newRes.portHigh}
-                    onChange={(e) =>
-                      setNewRes({ ...newRes, portHigh: e.target.value })
-                    }
-                  />
-                  <Button
-                    onClick={addResource}
-                    disabled={!resPortsValid(newRes.portLow, newRes.portHigh)}
-                  >
-                    Add
-                  </Button>
-                </div>
-                {!resPortsValid(newRes.portLow, newRes.portHigh) && (
-                  <p className="text-xs text-amber-400">
-                    Ports must be 1–65535; leave both blank for all ports, or
-                    set a low ≤ high.
-                  </p>
-                )}
-              </div>
+            <div className="flex gap-2">
+              <Input
+                type="number"
+                min={1}
+                max={65535}
+                placeholder="Port (optional)"
+                value={newRes.portLow}
+                onChange={(e) =>
+                  setNewRes({ ...newRes, portLow: e.target.value })
+                }
+              />
+              <Input
+                type="number"
+                min={1}
+                max={65535}
+                placeholder="to (range, optional)"
+                value={newRes.portHigh}
+                onChange={(e) =>
+                  setNewRes({ ...newRes, portHigh: e.target.value })
+                }
+              />
+              <Button
+                onClick={addResource}
+                disabled={!resPortsValid(newRes.portLow, newRes.portHigh)}
+              >
+                Add
+              </Button>
+            </div>
+            {!resPortsValid(newRes.portLow, newRes.portHigh) && (
+              <p className="text-xs text-amber-400">
+                Ports must be 1–65535; leave both blank for all ports, or set a
+                low ≤ high.
+              </p>
             )}
+          </div>
+        )}
       </div>
       <div className="mt-3 space-y-4">
         {/* ⛔ GROUPS AS A TABLE. Name / members / type / created are the same five facts for every group, and
@@ -1966,7 +2317,9 @@ function GroupsResourcesSection({
                           type="button"
                           onClick={toggle}
                           aria-expanded={expanded}
-                          title={expanded ? "Hide members" : "View and add members"}
+                          title={
+                            expanded ? "Hide members" : "View and add members"
+                          }
                           className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs hover:border-white/25 hover:bg-white/10"
                         >
                           <svg
@@ -1982,9 +2335,13 @@ function GroupsResourcesSection({
                           {count === undefined ? (
                             <span className="text-slate-500">view members</span>
                           ) : count === null ? (
-                            <span className="text-warn">members could not be loaded</span>
+                            <span className="text-warn">
+                              members could not be loaded
+                            </span>
                           ) : count === 0 ? (
-                            <span className="font-semibold text-warn">0 members</span>
+                            <span className="font-semibold text-warn">
+                              0 members
+                            </span>
                           ) : (
                             <span className="text-slate-400">
                               {count === 1 ? "1 member" : `${count} members`}
@@ -2000,10 +2357,13 @@ function GroupsResourcesSection({
                   {
                     key: "type",
                     header: "Type",
-                    sortValue: (g) => (isDirectoryManaged(g) ? "directory group" : "user group"),
+                    sortValue: (g) =>
+                      isDirectoryManaged(g) ? "directory group" : "user group",
                     cell: (g) => (
                       <span className="text-xs text-slate-500">
-                        {isDirectoryManaged(g) ? "Directory group" : "User group"}
+                        {isDirectoryManaged(g)
+                          ? "Directory group"
+                          : "User group"}
                       </span>
                     ),
                   },
@@ -2076,13 +2436,21 @@ function GroupsResourcesSection({
                     key: "cidr",
                     header: "CIDR",
                     sortValue: (r) => r.cidr,
-                    cell: (r) => <span className="font-mono text-xs text-slate-500">{r.cidr}</span>,
+                    cell: (r) => (
+                      <span className="font-mono text-xs text-slate-500">
+                        {r.cidr}
+                      </span>
+                    ),
                   },
                   {
                     key: "protocol",
                     header: "Protocol",
                     sortValue: (r) => r.protocol,
-                    cell: (r) => <span className="font-mono text-xs text-slate-500">{r.protocol}</span>,
+                    cell: (r) => (
+                      <span className="font-mono text-xs text-slate-500">
+                        {r.protocol}
+                      </span>
+                    ),
                   },
                   {
                     key: "ports",
@@ -2264,7 +2632,9 @@ function DeviceApprovalSection({
               header: "Address",
               sortValue: (d) => d.assigned_ip ?? "",
               cell: (d) => (
-                <span className="font-mono text-xs text-slate-500">{d.assigned_ip}</span>
+                <span className="font-mono text-xs text-slate-500">
+                  {d.assigned_ip}
+                </span>
               ),
             },
             {
@@ -2272,7 +2642,9 @@ function DeviceApprovalSection({
               header: "Waiting",
               sortValue: (d) => Date.parse(d.created_at),
               cell: (d) => (
-                <span className="text-xs text-slate-500">{relativeAge(d.created_at)}</span>
+                <span className="text-xs text-slate-500">
+                  {relativeAge(d.created_at)}
+                </span>
               ),
             },
           ]}
@@ -2532,7 +2904,10 @@ function PostureChecksSection({
 // (ON DELETE CASCADE on src_group_id / dst_group_id / dst_resource_id) and the SAME silence (a 204 with no
 // body), so they get the same guard rather than two that can drift apart.
 function CascadeDeleteModal({
-  kind, name, onCancel, onConfirm,
+  kind,
+  name,
+  onCancel,
+  onConfirm,
 }: {
   kind: "group" | "resource";
   name: string;
@@ -2597,7 +2972,12 @@ function CascadeDeleteModal({
  * rather than leaving two places that both think they know whether the members have been loaded.
  */
 function GroupMembersPanel({
-  orgId, group, members, canManage, onCount, onMembershipChange,
+  orgId,
+  group,
+  members,
+  canManage,
+  onCount,
+  onMembershipChange,
 }: {
   orgId: string;
   group: UserGroup;
@@ -2651,18 +3031,26 @@ function GroupMembersPanel({
       <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wide text-ink-tertiary">
         Members of {group.name}
       </p>
-      {(
+      {
         <div>
-          {loaded === null && <p className="text-xs text-slate-500">Loading members…</p>}
-          {loaded && !loaded.ok && <LoadRetry error={loaded.error} onRetry={fetchMembers} />}
+          {loaded === null && (
+            <p className="text-xs text-slate-500">Loading members…</p>
+          )}
+          {loaded && !loaded.ok && (
+            <LoadRetry error={loaded.error} onRetry={fetchMembers} />
+          )}
           {loaded?.ok && rows.length === 0 && (
             <p className="text-xs text-slate-500">
-              No members. Rules using this group as a source match no device and grant nothing.
+              No members. Rules using this group as a source match no device and
+              grant nothing.
             </p>
           )}
           {loaded?.ok &&
             rows.map((m) => (
-              <div key={m.user_id} className="flex items-center justify-between py-0.5 text-xs">
+              <div
+                key={m.user_id}
+                className="flex items-center justify-between py-0.5 text-xs"
+              >
                 <span className="text-slate-300">{m.name || m.email}</span>
                 {canEditMembers && (
                   <Button
@@ -2672,7 +3060,15 @@ function GroupMembersPanel({
                       mutateMembership(() =>
                         api.DELETE(
                           "/api/v1/organizations/{orgId}/groups/{groupId}/members/{userId}",
-                          { params: { path: { orgId, groupId: group.id, userId: m.user_id } } },
+                          {
+                            params: {
+                              path: {
+                                orgId,
+                                groupId: group.id,
+                                userId: m.user_id,
+                              },
+                            },
+                          },
                         ),
                       )
                     }
@@ -2683,7 +3079,9 @@ function GroupMembersPanel({
               </div>
             ))}
           {directoryManaged && loaded?.ok && (
-            <p className="mt-2 text-xs text-slate-500">{DIRECTORY_MANAGED_NOTE}</p>
+            <p className="mt-2 text-xs text-slate-500">
+              {DIRECTORY_MANAGED_NOTE}
+            </p>
           )}
           {canEditMembers && loaded?.ok && addable.length > 0 && (
             <div className="mt-2 flex gap-2">
@@ -2697,10 +3095,13 @@ function GroupMembersPanel({
                   if (!userId) return;
                   e.target.value = "";
                   void mutateMembership(() =>
-                    api.POST("/api/v1/organizations/{orgId}/groups/{groupId}/members", {
-                      params: { path: { orgId, groupId: group.id } },
-                      body: { user_id: userId },
-                    }),
+                    api.POST(
+                      "/api/v1/organizations/{orgId}/groups/{groupId}/members",
+                      {
+                        params: { path: { orgId, groupId: group.id } },
+                        body: { user_id: userId },
+                      },
+                    ),
                   );
                 }}
               >
@@ -2714,11 +3115,10 @@ function GroupMembersPanel({
             </div>
           )}
         </div>
-      )}
+      }
     </div>
   );
 }
-
 
 /**
  * Rename a group.
@@ -2745,12 +3145,16 @@ function RenameGroupModal({
   async function save() {
     setBusy(true);
     setErr(null);
-    const { error } = await api.PATCH("/api/v1/organizations/{orgId}/groups/{groupId}", {
-      params: { path: { orgId, groupId: group.id } },
-      body: { name: name.trim() },
-    });
+    const { error } = await api.PATCH(
+      "/api/v1/organizations/{orgId}/groups/{groupId}",
+      {
+        params: { path: { orgId, groupId: group.id } },
+        body: { name: name.trim() },
+      },
+    );
     setBusy(false);
-    if (error) return setErr(apiErrorMessage(error, "Could not rename the group."));
+    if (error)
+      return setErr(apiErrorMessage(error, "Could not rename the group."));
     onDone();
   }
 
@@ -2763,7 +3167,10 @@ function RenameGroupModal({
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={busy || !name.trim() || name.trim() === group.name} onClick={() => void save()}>
+          <Button
+            disabled={busy || !name.trim() || name.trim() === group.name}
+            onClick={() => void save()}
+          >
             {busy ? "Saving…" : "Save"}
           </Button>
         </>
@@ -2773,7 +3180,8 @@ function RenameGroupModal({
         <Input value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
       <p className="mt-2 text-xs text-ink-secondary">
-        Rules that use this group keep working — they reference it by identity, not by name.
+        Rules that use this group keep working — they reference it by identity,
+        not by name.
       </p>
       <ErrorText>{err}</ErrorText>
     </Modal>
@@ -2812,20 +3220,24 @@ function EditResourceModal({
   async function save() {
     setBusy(true);
     setErr(null);
-    const { error } = await api.PATCH("/api/v1/organizations/{orgId}/resources/{resourceId}", {
-      params: { path: { orgId, resourceId: resource.id } },
-      body: {
-        name: f.name.trim(),
-        cidr: f.cidr.trim(),
-        protocol: f.protocol,
-        // Blank means "all ports" — sent as null rather than 0, which would be a port nobody asked for.
-        port_low: f.port_low.trim() ? Number(f.port_low) : null,
-        port_high: f.port_high.trim() ? Number(f.port_high) : null,
-        label: f.label.trim() ? f.label.trim() : null,
+    const { error } = await api.PATCH(
+      "/api/v1/organizations/{orgId}/resources/{resourceId}",
+      {
+        params: { path: { orgId, resourceId: resource.id } },
+        body: {
+          name: f.name.trim(),
+          cidr: f.cidr.trim(),
+          protocol: f.protocol,
+          // Blank means "all ports" — sent as null rather than 0, which would be a port nobody asked for.
+          port_low: f.port_low.trim() ? Number(f.port_low) : null,
+          port_high: f.port_high.trim() ? Number(f.port_high) : null,
+          label: f.label.trim() ? f.label.trim() : null,
+        },
       },
-    });
+    );
     setBusy(false);
-    if (error) return setErr(apiErrorMessage(error, "Could not update the resource."));
+    if (error)
+      return setErr(apiErrorMessage(error, "Could not update the resource."));
     onDone();
   }
 
@@ -2838,7 +3250,10 @@ function EditResourceModal({
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={busy || !f.name.trim() || !f.cidr.trim()} onClick={() => void save()}>
+          <Button
+            disabled={busy || !f.name.trim() || !f.cidr.trim()}
+            onClick={() => void save()}
+          >
             {busy ? "Saving…" : "Save"}
           </Button>
         </>
@@ -2846,16 +3261,27 @@ function EditResourceModal({
     >
       <div className="space-y-3">
         <Field label="Name">
-          <Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+          <Input
+            value={f.name}
+            onChange={(e) => setF({ ...f, name: e.target.value })}
+          />
         </Field>
         <Field label="CIDR">
-          <Input value={f.cidr} onChange={(e) => setF({ ...f, cidr: e.target.value })} />
+          <Input
+            value={f.cidr}
+            onChange={(e) => setF({ ...f, cidr: e.target.value })}
+          />
         </Field>
         <div className="flex gap-2">
           <Field label="Protocol">
             <Select
               value={f.protocol}
-              onChange={(e) => setF({ ...f, protocol: e.target.value as "any" | "tcp" | "udp" })}
+              onChange={(e) =>
+                setF({
+                  ...f,
+                  protocol: e.target.value as "any" | "tcp" | "udp",
+                })
+              }
             >
               <option value="any">any</option>
               <option value="tcp">tcp</option>
@@ -2863,19 +3289,29 @@ function EditResourceModal({
             </Select>
           </Field>
           <Field label="Port low (blank = all)">
-            <Input value={f.port_low} onChange={(e) => setF({ ...f, port_low: e.target.value })} />
+            <Input
+              value={f.port_low}
+              onChange={(e) => setF({ ...f, port_low: e.target.value })}
+            />
           </Field>
           <Field label="Port high">
-            <Input value={f.port_high} onChange={(e) => setF({ ...f, port_high: e.target.value })} />
+            <Input
+              value={f.port_high}
+              onChange={(e) => setF({ ...f, port_high: e.target.value })}
+            />
           </Field>
         </div>
         <Field label="Label (optional note)">
-          <Input value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
+          <Input
+            value={f.label}
+            onChange={(e) => setF({ ...f, label: e.target.value })}
+          />
         </Field>
         {/* ⛔ THE INVISIBLE BLAST RADIUS, STATED. */}
         <p className="text-xs text-warn">
-          Changing the CIDR, protocol or ports changes what every rule using this resource permits. The
-          rules themselves will not look any different.
+          Changing the CIDR, protocol or ports changes what every rule using
+          this resource permits. The rules themselves will not look any
+          different.
         </p>
       </div>
       <ErrorText>{err}</ErrorText>

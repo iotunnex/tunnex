@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
-import { fireEvent,
+import {
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -151,6 +152,7 @@ vi.mock("../src/lib/api", async () => {
   };
 });
 
+import { OrgProvider } from "../src/lib/useOrg";
 import Devices, { lastSeen } from "../src/pages/Devices";
 
 beforeEach(() => {
@@ -182,7 +184,9 @@ describe("Devices — wiring", () => {
   it("a REVOKED device carries no posture badge and no re-export instruction; an active one carries both", async () => {
     render(
       <MemoryRouter>
-        <Devices />
+        <OrgProvider>
+          <Devices />
+        </OrgProvider>
       </MemoryRouter>,
     );
     await waitFor(() =>
@@ -216,7 +220,9 @@ describe("Devices — wiring", () => {
   it("both devices are listed — suppression hides BADGES, never the row itself", async () => {
     render(
       <MemoryRouter>
-        <Devices />
+        <OrgProvider>
+          <Devices />
+        </OrgProvider>
       </MemoryRouter>,
     );
     const table = await waitFor(() =>
@@ -235,15 +241,21 @@ describe("Devices — wiring", () => {
     expect(within(table).getAllByRole("row")).toHaveLength(9);
     // The address, pending status, and posture blocked label are asserted ON THEIR OWN DEVICE'S ROW.
     expect(within(rowFor("old-laptop")).getByText("10.99.0.9")).toBeTruthy();
-    expect(within(rowFor("unapproved-phone")).getByText("pending")).toBeTruthy();
-    expect(within(rowFor("blocked-device")).getByText("posture blocked")).toBeTruthy();
+    expect(
+      within(rowFor("unapproved-phone")).getByText("pending"),
+    ).toBeTruthy();
+    expect(
+      within(rowFor("blocked-device")).getByText("posture blocked"),
+    ).toBeTruthy();
   });
 
   it("the table names its columns — a cell with no header is a value nobody can identify", async () => {
     expect(lastSeen(undefined, false)).toBe("liveness not reported");
     render(
       <MemoryRouter>
-        <Devices />
+        <OrgProvider>
+          <Devices />
+        </OrgProvider>
       </MemoryRouter>,
     );
     await waitFor(() =>
@@ -267,7 +279,9 @@ describe("Devices — failure path", () => {
     devicesFail = true;
     render(
       <MemoryRouter>
-        <Devices />
+        <OrgProvider>
+          <Devices />
+        </OrgProvider>
       </MemoryRouter>,
     );
 
@@ -281,7 +295,9 @@ describe("Devices — failure path", () => {
     DEVICES.length = 0; // an org with no devices — a FACT, not a failure
     render(
       <MemoryRouter>
-        <Devices />
+        <OrgProvider>
+          <Devices />
+        </OrgProvider>
       </MemoryRouter>,
     );
     await waitFor(() =>
@@ -329,36 +345,72 @@ describe("Devices — a pending device can be acted on HERE", () => {
   };
 
   it("⛔ APPROVE IS OFFERED ON A PENDING DEVICE — the verb that had no call site on this screen", async () => {
-    seed([{ id: "d-p", name: "unapproved-phone", status: "pending", assigned_ip: "10.99.0.15" }]);
+    seed([
+      {
+        id: "d-p",
+        name: "unapproved-phone",
+        status: "pending",
+        assigned_ip: "10.99.0.15",
+      },
+    ]);
     render(
       <MemoryRouter>
-        <Devices />
+        <OrgProvider>
+          <Devices />
+        </OrgProvider>
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByRole("table", { name: "Devices" })).toBeTruthy());
-    fireEvent.click(await screen.findByRole("checkbox", { name: /^Select unapproved-phone/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("table", { name: "Devices" })).toBeTruthy(),
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: /^Select unapproved-phone/ }),
+    );
 
-    expect(screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled")).toBe(false);
-    expect(screen.getByRole("button", { name: "Reject" }).hasAttribute("disabled")).toBe(false);
+    expect(
+      screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled"),
+    ).toBe(false);
+    expect(
+      screen.getByRole("button", { name: "Reject" }).hasAttribute("disabled"),
+    ).toBe(false);
 
     // ⛔ AND REVOKE IS *NOT* OFFERED FOR IT, with the reason. A pending device is REJECTED, not revoked —
     // two different decisions — and revoking one would be a no-op the server reports as success.
     const revoke = screen.getByRole("button", { name: "Revoke" });
     expect(revoke.hasAttribute("disabled")).toBe(true);
-    expect(revoke.getAttribute("title")).toMatch(/pending device cannot be revoked/);
+    expect(revoke.getAttribute("title")).toMatch(
+      /pending device cannot be revoked/,
+    );
   });
 
   it("⚠ …AND THE CONVERSE, so 'always enabled' cannot pass: an ACTIVE device revokes and cannot be approved", async () => {
-    seed([{ id: "d-a", name: "live-laptop", status: "active", assigned_ip: "10.99.0.20" }]);
+    seed([
+      {
+        id: "d-a",
+        name: "live-laptop",
+        status: "active",
+        assigned_ip: "10.99.0.20",
+      },
+    ]);
     render(
       <MemoryRouter>
-        <Devices />
+        <OrgProvider>
+          <Devices />
+        </OrgProvider>
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByRole("table", { name: "Devices" })).toBeTruthy());
-    fireEvent.click(await screen.findByRole("checkbox", { name: /^Select live-laptop/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("table", { name: "Devices" })).toBeTruthy(),
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: /^Select live-laptop/ }),
+    );
 
-    expect(screen.getByRole("button", { name: "Revoke" }).hasAttribute("disabled")).toBe(false);
-    expect(screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "Revoke" }).hasAttribute("disabled"),
+    ).toBe(false);
+    expect(
+      screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled"),
+    ).toBe(true);
   });
 });

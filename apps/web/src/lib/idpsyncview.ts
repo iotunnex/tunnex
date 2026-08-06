@@ -28,7 +28,8 @@ import { can } from "./rbac";
  * rendered-and-refusing — a control that only ever produces a 403 is a worse answer than no
  * control (S14.11/S14.12: permission BEFORE edition, and never imply an action you cannot take).
  */
-export type IdpGate = { kind: "hidden" } | { kind: "upsell" } | { kind: "ready" };
+export type IdpGate =
+  { kind: "hidden" } | { kind: "upsell" } | { kind: "ready" };
 
 export function idpGate(i: {
   role: Role | null;
@@ -92,7 +93,8 @@ export function idpConfigState(i: {
   health: IdpHealth | null;
 }): IdpConfigState {
   if (i.errorCode === "provider_not_supported") return { kind: "unsupported" };
-  if (i.errorCode === "idp_sync_not_configured") return { kind: "unconfigured" };
+  if (i.errorCode === "idp_sync_not_configured")
+    return { kind: "unconfigured" };
   if (i.failed || !i.health) return { kind: "unknown" };
   return { kind: "configured", health: i.health };
 }
@@ -102,7 +104,9 @@ export const UNSUPPORTED_NOTE =
   "Directory sync currently supports Microsoft Entra only. Google Workspace is not available yet.";
 
 export function syncTier(h: IdpHealth): SyncTier {
-  return h.sync_health === "ok" || h.sync_health === "degraded" || h.sync_health === "escalated"
+  return h.sync_health === "ok" ||
+    h.sync_health === "degraded" ||
+    h.sync_health === "escalated"
     ? h.sync_health
     : // A tier the client does not know is NOT quietly rendered as healthy. `escalated` is the
       // safe direction: it is the one that asks a human to look.
@@ -118,7 +122,11 @@ export function syncTier(h: IdpHealth): SyncTier {
  * that is wrong from birth still escalates. The tier is DERIVED at read time, never a stored
  * dead-green field.
  */
-export function tierCopy(t: SyncTier): { label: string; text: string; loud: boolean } {
+export function tierCopy(t: SyncTier): {
+  label: string;
+  text: string;
+  loud: boolean;
+} {
   switch (t) {
     case "ok":
       return {
@@ -201,7 +209,10 @@ export const UNMAP_CONSEQUENCES = [
 
 /** The confirm is armed only by typing the group's own name — a delete-shaped verb. */
 export function unmapConfirmSatisfied(typed: string, name: string): boolean {
-  return typed.trim().toLowerCase() === name.trim().toLowerCase() && name.trim() !== "";
+  return (
+    typed.trim().toLowerCase() === name.trim().toLowerCase() &&
+    name.trim() !== ""
+  );
 }
 
 /**

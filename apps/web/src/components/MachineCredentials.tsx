@@ -71,7 +71,8 @@ export function MachineCredentials({
       { params: { path: { orgId, credentialId } }, body: { user_id: userId } },
     );
     setBusy(false);
-    if (error) return setErr(apiErrorMessage(error, "Could not assign an owner."));
+    if (error)
+      return setErr(apiErrorMessage(error, "Could not assign an owner."));
     setOwner((o) => ({ ...o, [credentialId]: "" }));
     void load();
   }
@@ -163,12 +164,13 @@ export function MachineCredentials({
           className="mt-3 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-xs text-danger"
         >
           Could not load machine credentials — {endSentence(creds.error)}{" "}
-          <strong>This is not the same as having none.</strong> Retry before concluding anything about
-          ownership.
+          <strong>This is not the same as having none.</strong> Retry before
+          concluding anything about ownership.
         </p>
       ) : creds.data.length === 0 ? (
         <p data-state="none" className="mt-3 text-xs text-ink-secondary">
-          No machine credentials exist in this organization — there is nothing to assign.
+          No machine credentials exist in this organization — there is nothing
+          to assign.
         </p>
       ) : (
         <>
@@ -187,8 +189,12 @@ export function MachineCredentials({
               > It is the exact mirror of the refusal banner: that one names what is failing, this one
               > names what is NOT. Neither says anything about whether the fleet is well. */}
           {creds.data.every((c) => c.owner_user_id) && (
-            <p data-state="all-owned" className="mt-3 rounded-md border border-ok/40 bg-ok/5 px-3 py-2 text-xs text-ok">
-              Every machine credential has an owner — none is being refused for want of one.
+            <p
+              data-state="all-owned"
+              className="mt-3 rounded-md border border-ok/40 bg-ok/5 px-3 py-2 text-xs text-ok"
+            >
+              Every machine credential has an owner — none is being refused for
+              want of one.
             </p>
           )}
           {/* ⛔ UNASSIGNED IS AN OUTAGE, NOT UNTIDINESS — AND THE FIRST VERSION OF THIS SCREEN SAID SO
@@ -211,8 +217,8 @@ export function MachineCredentials({
                   ? "1 machine credential is being refused right now."
                   : `${refusedCount(creds.data)} machine credentials are being refused right now.`}
               </strong>{" "}
-              A credential with no owner cannot authenticate — any operator using one is already
-              failing. Assign an owner to restore it.
+              A credential with no owner cannot authenticate — any operator
+              using one is already failing. Assign an owner to restore it.
             </p>
           )}
           {/* ⛔ A TABLE, BECAUSE THIS IS TABULAR AND IT PAGES. Credential / owner / created / last seen /
@@ -238,7 +244,9 @@ export function MachineCredentials({
                 cell: (c) => (
                   <span className="flex flex-col">
                     <span className="text-slate-200">{c.name}</span>
-                    <span className="font-mono text-[10px] text-slate-500">{c.fingerprint}</span>
+                    <span className="font-mono text-[10px] text-slate-500">
+                      {c.fingerprint}
+                    </span>
                   </span>
                 ),
               },
@@ -268,7 +276,11 @@ export function MachineCredentials({
                 key: "created",
                 header: "Created",
                 sortValue: (c) => Date.parse(c.created_at),
-                cell: (c) => <span className="text-xs text-slate-500">{relativeAge(c.created_at)}</span>,
+                cell: (c) => (
+                  <span className="text-xs text-slate-500">
+                    {relativeAge(c.created_at)}
+                  </span>
+                ),
               },
               {
                 key: "seen",
@@ -277,10 +289,13 @@ export function MachineCredentials({
                 // AUTHENTICATED AT and nothing more. A credential idle for a day may be an hourly GitOps
                 // reconcile or abandoned, and this column cannot tell them apart. No in-use badge, no
                 // active/idle, no threshold: the UI must not re-invent what the spec refused.
-                sortValue: (c) => (c.last_used_at ? Date.parse(c.last_used_at) : 0),
+                sortValue: (c) =>
+                  c.last_used_at ? Date.parse(c.last_used_at) : 0,
                 cell: (c) => (
                   <span className="text-xs text-slate-500">
-                    {c.last_used_at ? relativeAge(c.last_used_at) : "never seen"}
+                    {c.last_used_at
+                      ? relativeAge(c.last_used_at)
+                      : "never seen"}
                   </span>
                 ),
               },
@@ -299,7 +314,9 @@ export function MachineCredentials({
                         <select
                           id={`owner-${c.id}`}
                           value={owner[c.id] ?? ""}
-                          onChange={(e) => setOwner((o) => ({ ...o, [c.id]: e.target.value }))}
+                          onChange={(e) =>
+                            setOwner((o) => ({ ...o, [c.id]: e.target.value }))
+                          }
                           // ⚠ CAPPED. An unconstrained <select> in a table cell takes whatever width is left, which pushed
                           // Assign/Revoke off to the far edge and made the row impossible to scan back across.
                           className="max-w-[14rem] rounded border border-line bg-surface-inset px-2 py-1 text-xs"
@@ -328,7 +345,11 @@ export function MachineCredentials({
                       </>
                     )}
                     {canManage && (
-                      <Button size="sm" variant="ghost" onClick={() => revoke(c.id)}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => revoke(c.id)}
+                      >
                         Revoke
                       </Button>
                     )}
@@ -341,8 +362,9 @@ export function MachineCredentials({
               belongs under the list: why there is nothing to pre-select. */}
           {canManage && creds.data.some((c) => !c.owner_user_id) && (
             <p className="mt-2 text-[11px] text-ink-secondary">
-              Tunnex does not record who minted a credential, so it cannot suggest an owner — choose the
-              person accountable for what this credential does.
+              Tunnex does not record who minted a credential, so it cannot
+              suggest an owner — choose the person accountable for what this
+              credential does.
             </p>
           )}
         </>

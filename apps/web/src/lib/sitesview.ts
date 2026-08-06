@@ -271,7 +271,6 @@ export function assembleTopology(
   }));
 }
 
-
 // ── the mesh (S14.5) ─────────────────────────────────────────────────────────────────
 //
 // ⛔ ONE NODE PER SITE, NOT PER REGION — the four-way test's case 2.
@@ -318,9 +317,7 @@ export function meshFrom(
       // The handoff's hub sub-line is `HA set gen 7 · pri +1` — the SET's identity, not the node's role.
       // We serve that generation, so it goes here rather than the constant "transit hub" I had invented.
       sub:
-        hubGeneration != null
-          ? `HA set gen ${hubGeneration}`
-          : "· transit hub",
+        hubGeneration != null ? `HA set gen ${hubGeneration}` : "· transit hub",
     });
   }
   for (const c of cards) {

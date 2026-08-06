@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useOrg } from "../lib/useOrg";
 import {
   api,
   apiErrorMessage,
@@ -67,6 +68,7 @@ interface Raw {
 }
 
 export default function Sites() {
+  const { org: currentOrg, loading: orgLoading, failed: orgFailed } = useOrg();
   const { state } = useAuth();
   const myId = state.status === "authed" ? state.user.id : "";
   const emailVerified = state.status === "authed" && state.user.email_verified;
@@ -84,11 +86,19 @@ export default function Sites() {
     const mRes = await loadOne(() => api.GET("/api/v1/meta"));
     if (!mRes.ok) return setLoadError(mRes.error);
     setMeta(mRes.data as Meta);
-    const oRes = await loadOne(() => api.GET("/api/v1/organizations"));
-    if (!oRes.ok) return setLoadError(oRes.error);
-    const first = (oRes.data as Org[])[0];
+    // ⛔ THE ORG COMES FROM THE SEAM, NOT FROM INDEX ZERO (S12.5). This used to fetch the org list here and
+    // take `[0]`, which meant a user in two organizations could reach only one of them and the switcher in
+    // the header would have had nothing to switch.
+    // ⛔ LOADING IS NOT ABSENCE (S12.5). See the note in Dashboard.tsx — three states, not two: still
+    // loading (say nothing), the read failed (say THAT), genuinely no membership (say that).
+    if (orgLoading) return;
+    const first = currentOrg;
     if (!first)
-      return setLoadError("You are not a member of any organization yet.");
+      return setLoadError(
+        orgFailed
+          ? "Could not load your organizations."
+          : "You are not a member of any organization yet.",
+      );
     setOrg(first);
     const memRes = (await loadOne(() =>
       api.GET("/api/v1/organizations/{orgId}/members", {
@@ -158,7 +168,10 @@ export default function Sites() {
         sRes.data.map((site, i) => ({ site, res: fwdResults[i] })),
       ),
     });
-  }, [myId]);
+    // ⚠ currentOrg IS A DEPENDENCY, AND THAT IS THE HALF THAT MAKES THE SWITCHER WORK. Without it the
+    // page keeps rendering the org it mounted with — the control moves, the data does not, and the user is
+    // looking at one tenant's screen labelled with another's name.
+  }, [currentOrg, myId]);
   useEffect(() => {
     reload();
   }, [reload]);
@@ -221,7 +234,9 @@ export default function Sites() {
       {view === "load_retry" && (
         <LoadRetry error={loadError ?? "Couldn't load."} onRetry={reload} />
       )}
-      {view === "loading" && <p className="text-cell text-ink-faint">Loading…</p>}
+      {view === "loading" && (
+        <p className="text-cell text-ink-faint">Loading…</p>
+      )}
 
       {view === "body" && raw != null && org != null && (
         <>
@@ -258,9 +273,9 @@ export default function Sites() {
                   empty="Route a LAN to draw your first site here."
                 />
                 <p className="text-micro text-ink-faint">
-                  Link state is derived from the WireGuard handshake. A down site
-                  bridge is never shown as healthy. The moving line means the
-                  handshake is current, not that traffic is flowing.
+                  Link state is derived from the WireGuard handshake. A down
+                  site bridge is never shown as healthy. The moving line means
+                  the handshake is current, not that traffic is flowing.
                 </p>
               </Panel>
 
@@ -410,10 +425,10 @@ function DNSForwardsPanel({
       )}
 
       <p className="text-micro text-ink-faint">
-        A resolver must sit inside one of the site&rsquo;s approved subnets
-        (409 dns_resolver_not_in_site_subnet). One zone maps to one resolver
-        org-wide (409 dns_domain_conflict). Removing a zone withdraws it from
-        every gateway on the next reconcile.
+        A resolver must sit inside one of the site&rsquo;s approved subnets (409
+        dns_resolver_not_in_site_subnet). One zone maps to one resolver org-wide
+        (409 dns_domain_conflict). Removing a zone withdraws it from every
+        gateway on the next reconcile.
       </p>
     </Panel>
   );
@@ -572,8 +587,8 @@ function RouteLANModal({
     >
       <p className="text-sm text-slate-400">
         Route a behind-gateway LAN to your devices. This registers a site on the
-        gateway, advertises the range, and approves it. The range then pushes
-        to split-tunnel devices.
+        gateway, advertises the range, and approves it. The range then pushes to
+        split-tunnel devices.
       </p>
       <Field label="Gateway">
         <Select value={nodeId} onChange={(e) => setNodeId(e.target.value)}>
@@ -1081,8 +1096,8 @@ function SiteCardView({
               add the SAME route for the org's
               <span className="font-mono"> device pool CIDR</span> (Settings
               shows it, e.g. <span className="font-mono">10.99.0.0/24</span>) →
-              this gateway. Behind-host replies to a connected device need a
-              way back, exactly like a remote site's CIDR.
+              this gateway. Behind-host replies to a connected device need a way
+              back, exactly like a remote site's CIDR.
             </p>
             {/* WF-B (EPIC-8 smooth walk): behind-host HA needs a CLOUD-side route failover. The overlay
                 fails over (a standby is promoted) but the VPC route to the gateway ENI is STATIC — the

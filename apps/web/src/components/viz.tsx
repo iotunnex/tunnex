@@ -607,8 +607,7 @@ export function NodeLink({
           // (40, 28, 22, 12, 6) so its rings differ visibly. Ours is GATEWAYS PER SITE — 0 or 1 today — so
           // the rings are nearly uniform. The encoding is the design's; the flatness is our network's, and
           // faking a spread would be drawing a distribution we do not have.
-          const count =
-            typeof n.value === "number" ? Math.max(0, n.value) : 0;
+          const count = typeof n.value === "number" ? Math.max(0, n.value) : 0;
           const r = isHub ? 34 : 16 + Math.sqrt(count) * 3.2;
           const dim = selectedId && !isSel ? 0.3 : 1;
           const state = n.tone ?? n.note ?? "no link";
@@ -635,7 +634,9 @@ export function NodeLink({
                   ? `${n.label}${n.sub ? ` ${n.sub}` : ""} — ${state}`
                   : undefined
               }
-              className={interactive ? "cursor-pointer outline-none" : undefined}
+              className={
+                interactive ? "cursor-pointer outline-none" : undefined
+              }
               onClick={
                 interactive ? () => onSelect(isSel ? null : n.id) : undefined
               }
@@ -667,8 +668,12 @@ export function NodeLink({
                 cx={p.x}
                 cy={p.y}
                 r={r}
-                fill={isHub ? "#1F1F1F" : n.tone ? NODE_FILL[n.tone] : "#171717"}
-                stroke={isHub ? "#C9C9C4" : n.tone ? NODE_RING[n.tone] : "#3A3A3A"}
+                fill={
+                  isHub ? "#1F1F1F" : n.tone ? NODE_FILL[n.tone] : "#171717"
+                }
+                stroke={
+                  isHub ? "#C9C9C4" : n.tone ? NODE_RING[n.tone] : "#3A3A3A"
+                }
                 strokeWidth="1.6"
               />
               {/* The status dot at upper-right, coloured by the node's own worst link. Carried in the list
@@ -1193,10 +1198,23 @@ export function AddressSpaceMap({
       role="img"
       aria-label={`${block.label} address space: ${allocationLabel(map)}, ${utilisationLabel(map)} routed`}
     >
-      <text x={GRID.x0} y={30} className="font-mono" fill="var(--tnx-neutral)" fontSize={8.5} fontWeight={700}>
+      <text
+        x={GRID.x0}
+        y={30}
+        className="font-mono"
+        fill="var(--tnx-neutral)"
+        fontSize={8.5}
+        fontWeight={700}
+      >
         {block.label}
       </text>
-      <text x={GRID.x0 + 66} y={30} className="font-mono" fill="var(--tnx-text-faint)" fontSize={7.5}>
+      <text
+        x={GRID.x0 + 66}
+        y={30}
+        className="font-mono"
+        fill="var(--tnx-text-faint)"
+        fontSize={7.5}
+      >
         {`each cell = one /${block.cellPrefix} · ${block.cells} blocks`}
       </text>
 
@@ -1234,12 +1252,26 @@ export function AddressSpaceMap({
       ))}
 
       {lit.map((cell, i) => (
-        <LitCell key={cell.index} cell={cell} block={block} animate={animate} order={i} m={m} />
+        <LitCell
+          key={cell.index}
+          cell={cell}
+          block={block}
+          animate={animate}
+          order={i}
+          m={m}
+        />
       ))}
 
       {showList && (
         <>
-          <line x1={356} y1={26} x2={356} y2={height - 14} stroke="var(--tnx-divider)" strokeWidth={1} />
+          <line
+            x1={356}
+            y1={26}
+            x2={356}
+            y2={height - 14}
+            stroke="var(--tnx-divider)"
+            strokeWidth={1}
+          />
           {lit.map((cell, i) => {
             const y = 60 + i * ROW_PITCH;
             const c = centre(cell.index);
@@ -1270,17 +1302,44 @@ export function AddressSpaceMap({
                     />
                   )}
                 </path>
-                <circle cx={c.x} cy={c.y} r={1.6} fill="var(--tnx-text-heading)" opacity={0.9} />
-                <rect x={panelL} y={y - 14} width={3} height={28} rx={1.5} fill={tone} />
-                <text x={listX} y={y - 2} className="font-mono" fill="var(--tnx-text-heading)" fontSize={11.5} fontWeight={700}>
+                <circle
+                  cx={c.x}
+                  cy={c.y}
+                  r={1.6}
+                  fill="var(--tnx-text-heading)"
+                  opacity={0.9}
+                />
+                <rect
+                  x={panelL}
+                  y={y - 14}
+                  width={3}
+                  height={28}
+                  rx={1.5}
+                  fill={tone}
+                />
+                <text
+                  x={listX}
+                  y={y - 2}
+                  className="font-mono"
+                  fill="var(--tnx-text-heading)"
+                  fontSize={11.5}
+                  fontWeight={700}
+                >
                   {primary.cidr}
                 </text>
                 {/* ⛔ WHO OWNS IT. The first build printed "fills its /16" here — a restatement of the
                     geometry the reader can already see, in the one slot that could have carried the fact
                     they came for. */}
-                <text x={listX} y={y + 11} fill="var(--tnx-neutral)" fontSize={9.5}>
+                <text
+                  x={listX}
+                  y={y + 11}
+                  fill="var(--tnx-neutral)"
+                  fontSize={9.5}
+                >
                   {primary.label}
-                  {cell.state === "partial" ? ` · part of one /${block.cellPrefix}` : ""}
+                  {cell.state === "partial"
+                    ? ` · part of one /${block.cellPrefix}`
+                    : ""}
                   {extra > 0 ? ` · +${extra} more here` : ""}
                 </text>
                 <rect
@@ -1313,19 +1372,59 @@ export function AddressSpaceMap({
 
       {/* Utilisation lives under the CALL-OUT LIST, as the handoff has it — the right column is the reading
           column, and putting it under the grid left a dead gutter and split the eye's path in two. */}
-      <text x={listX} y={utY - 8} className="font-mono" fill="var(--tnx-neutral)" fontSize={8} fontWeight={600}>
+      <text
+        x={listX}
+        y={utY - 8}
+        className="font-mono"
+        fill="var(--tnx-neutral)"
+        fontSize={8}
+        fontWeight={600}
+      >
         ADDRESS SPACE ROUTED
       </text>
-      <rect x={listX} y={utY} width={barW} height={6} rx={3} fill="var(--tnx-surface-inset)" />
-      <rect x={listX} y={utY} width={animate ? 0 : filled} height={6} rx={3} fill="var(--tnx-ok)">
+      <rect
+        x={listX}
+        y={utY}
+        width={barW}
+        height={6}
+        rx={3}
+        fill="var(--tnx-surface-inset)"
+      />
+      <rect
+        x={listX}
+        y={utY}
+        width={animate ? 0 : filled}
+        height={6}
+        rx={3}
+        fill="var(--tnx-ok)"
+      >
         {animate && (
-          <animate attributeName="width" from="0" to={filled} dur="1s" begin="0.85s" fill="freeze" />
+          <animate
+            attributeName="width"
+            from="0"
+            to={filled}
+            dur="1s"
+            begin="0.85s"
+            fill="freeze"
+          />
         )}
       </rect>
-      <text x={listX + barW + 10} y={utY + 6} className="font-mono" fill="var(--tnx-text-body)" fontSize={8.5}>
+      <text
+        x={listX + barW + 10}
+        y={utY + 6}
+        className="font-mono"
+        fill="var(--tnx-text-body)"
+        fontSize={8.5}
+      >
         {utilisationLabel(map)}
       </text>
-      <text x={listX} y={utY + 21} className="font-mono" fill="var(--tnx-text-faint)" fontSize={8}>
+      <text
+        x={listX}
+        y={utY + 21}
+        className="font-mono"
+        fill="var(--tnx-text-faint)"
+        fontSize={8}
+      >
         {allocationLabel(map)}
       </text>
     </svg>

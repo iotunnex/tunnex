@@ -62,6 +62,7 @@ vi.mock("../src/lib/api", async () => {
   };
 });
 
+import { OrgProvider } from "../src/lib/useOrg";
 import { Gateways } from "../src/components/Gateways";
 import { GatewayRow } from "../src/pages/Sites";
 import Devices from "../src/pages/Devices";
@@ -188,7 +189,9 @@ describe("sibling consistency — revoked rows carry NO health/instruction badge
     // it was committed; recorded here because the near-miss is the lesson.
     render(
       <MemoryRouter>
-        <Devices />
+        <OrgProvider>
+          <Devices />
+        </OrgProvider>
       </MemoryRouter>,
     );
     await screen.findByText("dev-revoked");

@@ -72,13 +72,21 @@ vi.mock("../src/lib/api", async () => {
   };
 });
 
+import { OrgProvider } from "../src/lib/useOrg";
 import Sites from "../src/pages/Sites";
 import { AuthProvider } from "../src/lib/auth";
 import { crossesMultiSiteThreshold } from "../src/lib/sitesview";
 
 // The REAL AuthProvider — stubbing the context puts the TEST's role gate under assertion, not the PRODUCT's.
 const withAuth = (ui: React.ReactElement) =>
-  render(<AuthProvider>{ui}</AuthProvider>);
+  // ⛔ THE ORG PROVIDER IS PART OF THE AUTHENTICATED SHELL (S12.5), so it is part of the harness that
+  // stands in for it. A page rendered without it throws — deliberately: `useOrg()` refuses to guess, and a
+  // test that quietly rendered without an org would be exercising a state production never reaches.
+  render(
+    <AuthProvider>
+      <OrgProvider>{ui}</OrgProvider>
+    </AuthProvider>,
+  );
 
 beforeEach(() => {
   sitesFail = false;
@@ -101,7 +109,9 @@ describe("Sites — wiring: a routed range must not lie about REACHABILITY (dest
     // that happens to appear.
     const [pendingEl, approvedEl] = await waitFor(
       () => [
-        screen.getByRole("listitem", { name: /Pending approval, not yet routed/ }),
+        screen.getByRole("listitem", {
+          name: /Pending approval, not yet routed/,
+        }),
         screen.getByRole("listitem", { name: /Approved, routed/ }),
       ],
       { timeout: 5000 },
@@ -146,7 +156,9 @@ describe("Sites — wiring: a routed range must not lie about REACHABILITY (dest
     const [approvedEl, pendingEl] = await waitFor(
       () => [
         screen.getByRole("listitem", { name: /Approved, routed/ }),
-        screen.getByRole("listitem", { name: /Pending approval, not yet routed/ }),
+        screen.getByRole("listitem", {
+          name: /Pending approval, not yet routed/,
+        }),
       ],
       { timeout: 5000 },
     );

@@ -168,4 +168,3 @@ export function postureSplit(devices: Device[]): PostureSplit {
     percent: reported === 0 ? null : Math.round((compliant / reported) * 100),
   };
 }
-

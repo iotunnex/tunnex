@@ -31,7 +31,10 @@ export interface HealthBadge {
 type PolicyDegradedKind = NonNullable<Node["policy_degraded_kind"]>;
 
 /** Every kind except `healthy` — the ones that must have a badge. */
-export type NonHealthyPolicyDegradedKind = Exclude<PolicyDegradedKind, "healthy">;
+export type NonHealthyPolicyDegradedKind = Exclude<
+  PolicyDegradedKind,
+  "healthy"
+>;
 
 const DEGRADED_BADGE: Record<NonHealthyPolicyDegradedKind, HealthBadge> = {
   // `converging` is a normal push settling — a subtle "syncing", not a loud alarm.

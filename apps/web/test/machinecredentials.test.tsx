@@ -71,7 +71,9 @@ describe("⛔ the three empty states are distinguishable", () => {
     stubGet({ [LIST]: "REJECT", [MEMBERS]: [] });
     render(<MachineCredentials orgId={ORG} canManage />);
     await waitFor(() =>
-      expect(document.querySelector('[data-state="load-failed"]')).not.toBeNull(),
+      expect(
+        document.querySelector('[data-state="load-failed"]'),
+      ).not.toBeNull(),
     );
     // The failure must NOT be readable as absence, and must say so in words.
     expect(screen.queryByText(/no machine credentials exist/i)).toBeNull();
@@ -92,14 +94,18 @@ describe("⛔ the three empty states are distinguishable", () => {
     });
     const { container } = render(<MachineCredentials orgId={ORG} canManage />);
     await waitFor(() =>
-      expect(container.querySelector('[data-state="all-owned"]')).not.toBeNull(),
+      expect(
+        container.querySelector('[data-state="all-owned"]'),
+      ).not.toBeNull(),
     );
     // ⚠ ORDER IS THE ASSERTION. A qualifier under a list is read after the list is already believed.
     const banner = container.querySelector('[data-state="all-owned"]')!;
     // ⚠ The panel is a DataTable now, not a <ul>. The claim is unchanged — the refusal banner sits ABOVE
     // the rows — only the element carrying "the rows" is different.
     const list = container.querySelector("table")!;
-    expect(banner.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      banner.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
 
     // ⛔ IT IS A CLAIM ABOUT OWNERSHIP, NOT ABOUT HEALTH. It knows one predicate — nothing is refused
     // for want of an owner. It cannot know the fleet is well: a credential may be revoked, dead at the
@@ -107,7 +113,12 @@ describe("⛔ the three empty states are distinguishable", () => {
     // this organization", which reads as "everything is fine" AND is false on its own terms — step 4,
     // the NOT NULL contract, has not run.
     expect(banner.textContent).toMatch(/none is being refused/i);
-    for (const overclaim of [/migration is complete/i, /everything/i, /all (good|well|fine)/i, /healthy/i]) {
+    for (const overclaim of [
+      /migration is complete/i,
+      /everything/i,
+      /all (good|well|fine)/i,
+      /healthy/i,
+    ]) {
       expect(banner.textContent).not.toMatch(overclaim);
     }
   });
@@ -118,7 +129,9 @@ describe("⛔ the three empty states are distinguishable", () => {
       [MEMBERS]: [],
     });
     const { container } = render(<MachineCredentials orgId={ORG} canManage />);
-    await waitFor(() => expect(container.querySelectorAll("tbody tr").length).toBe(2));
+    await waitFor(() =>
+      expect(container.querySelectorAll("tbody tr").length).toBe(2),
+    );
     expect(container.querySelector('[data-state="all-owned"]')).toBeNull();
   });
 });
@@ -126,17 +139,33 @@ describe("⛔ the three empty states are distinguishable", () => {
 describe("the row tells the truth about what it knows", () => {
   it("⛔ BOTH states of ownership — owned carries no picker, unowned does", async () => {
     stubGet({
-      [LIST]: [cred({ id: "c1", owner_user_id: "u1", name: "owned-one" }), cred({ id: "c2", name: "orphan" })],
-      [MEMBERS]: [{ user_id: "u1", email: "a@example.com", role: "owner", status: "active" }],
+      [LIST]: [
+        cred({ id: "c1", owner_user_id: "u1", name: "owned-one" }),
+        cred({ id: "c2", name: "orphan" }),
+      ],
+      [MEMBERS]: [
+        {
+          user_id: "u1",
+          email: "a@example.com",
+          role: "owner",
+          status: "active",
+        },
+      ],
     });
     const { container } = render(<MachineCredentials orgId={ORG} canManage />);
-    await waitFor(() => expect(container.querySelectorAll("tbody tr").length).toBe(2));
+    await waitFor(() =>
+      expect(container.querySelectorAll("tbody tr").length).toBe(2),
+    );
     // Asserting only the unowned row would make this a test about a constant.
     expect(container.querySelector('tr[data-owned="yes"]')).not.toBeNull();
     expect(container.querySelector('tr[data-owned="no"]')).not.toBeNull();
     // The picker exists for the unassigned one only.
-    expect(screen.getByRole("combobox", { name: /owner for orphan/i })).toBeTruthy();
-    expect(screen.queryByRole("combobox", { name: /owner for owned-one/i })).toBeNull();
+    expect(
+      screen.getByRole("combobox", { name: /owner for orphan/i }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("combobox", { name: /owner for owned-one/i }),
+    ).toBeNull();
   });
 
   // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -146,7 +175,14 @@ describe("the row tells the truth about what it knows", () => {
   it("⛔ AN ASSIGNED ROW SHOWS ITS OWNER — the whole point of the screen, previously invisible", async () => {
     stubGet({
       [LIST]: [cred({ id: "c1", owner_user_id: "u1", name: "backup-agent" })],
-      [MEMBERS]: [{ user_id: "u1", email: "owner@demo.tunnex.local", role: "owner", status: "active" }],
+      [MEMBERS]: [
+        {
+          user_id: "u1",
+          email: "owner@demo.tunnex.local",
+          role: "owner",
+          status: "active",
+        },
+      ],
     });
     const { container } = render(<MachineCredentials orgId={ORG} canManage />);
     const row = await waitFor(() => {
@@ -164,7 +200,14 @@ describe("the row tells the truth about what it knows", () => {
     // roster — and that is precisely the row an accountability screen exists for. The server resolves
     // owner_email from `users`, which survives both leaving and deactivation.
     stubGet({
-      [LIST]: [cred({ id: "c1", owner_user_id: "u1", name: "ghost", owner_email: "departed@demo.tunnex.local" })],
+      [LIST]: [
+        cred({
+          id: "c1",
+          owner_user_id: "u1",
+          name: "ghost",
+          owner_email: "departed@demo.tunnex.local",
+        }),
+      ],
       [MEMBERS]: [],
     });
     const { container } = render(<MachineCredentials orgId={ORG} canManage />);
@@ -186,7 +229,14 @@ describe("the row tells the truth about what it knows", () => {
         cred({ id: "c2", name: "gitops-staging" }),
         cred({ id: "c3", owner_user_id: "u1", name: "ci-runner" }),
       ],
-      [MEMBERS]: [{ user_id: "u1", email: "owner@demo.tunnex.local", role: "owner", status: "active" }],
+      [MEMBERS]: [
+        {
+          user_id: "u1",
+          email: "owner@demo.tunnex.local",
+          role: "owner",
+          status: "active",
+        },
+      ],
     });
     const { container } = render(<MachineCredentials orgId={ORG} canManage />);
     const banner = await waitFor(() => {
@@ -195,11 +245,15 @@ describe("the row tells the truth about what it knows", () => {
       return p as HTMLElement;
     });
     // The COUNT is of refused rows, not of all rows — 2 of the 3.
-    expect(banner.textContent).toContain("2 machine credentials are being refused");
+    expect(banner.textContent).toContain(
+      "2 machine credentials are being refused",
+    );
     expect(banner.textContent).toMatch(/cannot authenticate/i);
     // ⚠ The badge itself must carry the consequence. "unassigned" alone reads as metadata, and an
     // operator whose GitOps runner is dead would learn it from the runner rather than from this screen.
-    const badge = container.querySelector('[data-badge="refused"]') as HTMLElement;
+    const badge = container.querySelector(
+      '[data-badge="refused"]',
+    ) as HTMLElement;
     expect(badge.textContent).toMatch(/refused/i);
     expect(badge.textContent).not.toMatch(/^\s*unassigned\s*$/i);
   });
@@ -207,11 +261,23 @@ describe("the row tells the truth about what it knows", () => {
   it("the refused banner is absent when every credential is owned", async () => {
     // Without this, the banner could be a constant and the test above would still pass.
     stubGet({
-      [LIST]: [cred({ id: "c1", owner_user_id: "u1" }), cred({ id: "c2", owner_user_id: "u1" })],
-      [MEMBERS]: [{ user_id: "u1", email: "owner@demo.tunnex.local", role: "owner", status: "active" }],
+      [LIST]: [
+        cred({ id: "c1", owner_user_id: "u1" }),
+        cred({ id: "c2", owner_user_id: "u1" }),
+      ],
+      [MEMBERS]: [
+        {
+          user_id: "u1",
+          email: "owner@demo.tunnex.local",
+          role: "owner",
+          status: "active",
+        },
+      ],
     });
     const { container } = render(<MachineCredentials orgId={ORG} canManage />);
-    await waitFor(() => expect(container.querySelectorAll("tbody tr").length).toBe(2));
+    await waitFor(() =>
+      expect(container.querySelectorAll("tbody tr").length).toBe(2),
+    );
     expect(container.querySelector('[data-state="some-refused"]')).toBeNull();
     expect(container.querySelector('[data-badge="refused"]')).toBeNull();
   });
@@ -220,12 +286,26 @@ describe("the row tells the truth about what it knows", () => {
     stubGet({
       [LIST]: [cred({ id: "c2", name: "orphan" })],
       [MEMBERS]: [
-        { user_id: "u1", email: "verified@demo.tunnex.local", role: "admin", status: "active", email_verified: true },
-        { user_id: "u2", email: "unverified@demo.tunnex.local", role: "admin", status: "active", email_verified: false },
+        {
+          user_id: "u1",
+          email: "verified@demo.tunnex.local",
+          role: "admin",
+          status: "active",
+          email_verified: true,
+        },
+        {
+          user_id: "u2",
+          email: "unverified@demo.tunnex.local",
+          role: "admin",
+          status: "active",
+          email_verified: false,
+        },
       ],
     });
     render(<MachineCredentials orgId={ORG} canManage />);
-    const sel = (await screen.findByRole("combobox", { name: /owner for orphan/i })) as HTMLSelectElement;
+    const sel = (await screen.findByRole("combobox", {
+      name: /owner for orphan/i,
+    })) as HTMLSelectElement;
     const offered = Array.from(sel.options).map((o) => o.textContent);
     // ⚠ BOTH DIRECTIONS. A filter that offered nobody would pass the exclusion half and is not a filter.
     expect(offered).toContain("verified@demo.tunnex.local");
@@ -235,7 +315,14 @@ describe("the row tells the truth about what it knows", () => {
   it("⛔ NO SUGGESTED OWNER — the picker starts empty and the copy says the system does not know", async () => {
     stubGet({
       [LIST]: [cred({ id: "c2", name: "orphan" })],
-      [MEMBERS]: [{ user_id: "u1", email: "a@example.com", role: "owner", status: "active" }],
+      [MEMBERS]: [
+        {
+          user_id: "u1",
+          email: "a@example.com",
+          role: "owner",
+          status: "active",
+        },
+      ],
     });
     render(<MachineCredentials orgId={ORG} canManage />);
     const sel = (await screen.findByRole("combobox", {
@@ -243,18 +330,31 @@ describe("the row tells the truth about what it knows", () => {
     })) as HTMLSelectElement;
     // A pre-selected owner would be a client-invented value where a server fact belongs.
     expect(sel.value).toBe("");
-    expect(screen.getByText(/does not record who minted a credential/i)).toBeTruthy();
+    expect(
+      screen.getByText(/does not record who minted a credential/i),
+    ).toBeTruthy();
   });
 
   it("⛔ last_used_at renders as LAST SEEN and never as a liveness verdict", async () => {
     stubGet({
-      [LIST]: [cred({ id: "c1", owner_user_id: "u1", last_used_at: new Date().toISOString() })],
+      [LIST]: [
+        cred({
+          id: "c1",
+          owner_user_id: "u1",
+          last_used_at: new Date().toISOString(),
+        }),
+      ],
       [MEMBERS]: [],
     });
     render(<MachineCredentials orgId={ORG} canManage />);
     await waitFor(() => expect(screen.getByText(/last seen/i)).toBeTruthy());
     // It is LAST AUTHENTICATED AT. A credential idle for a day may be an hourly reconcile or abandoned.
-    for (const banned of [/\bin use\b/i, /\bactive\b/i, /\bidle\b/i, /\bonline\b/i]) {
+    for (const banned of [
+      /\bin use\b/i,
+      /\bactive\b/i,
+      /\bidle\b/i,
+      /\bonline\b/i,
+    ]) {
       expect(screen.queryByText(banned)).toBeNull();
     }
   });

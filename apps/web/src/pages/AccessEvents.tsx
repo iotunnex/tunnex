@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useOrg } from "../lib/useOrg";
 import { api, apiErrorMessage, type Org } from "../lib/api";
 import { relativeAge } from "../lib/format";
 import { Button, Card, DataTable, ErrorText } from "../components/ui";
@@ -28,6 +29,8 @@ const PAGE = 100;
  * codebase — a census of what exists cannot find what was never built.
  */
 export default function AccessEvents() {
+  // ⛔ THE ORG COMES FROM THE SEAM (S12.5).
+  const { org: currentOrg } = useOrg();
   const [org, setOrg] = useState<Org | null>(null);
   const [edition, setEdition] = useState<Edition>("unknown");
   const [rows, setRows] = useState<AccessEvent[] | null>(null);
@@ -40,19 +43,16 @@ export default function AccessEvents() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [{ data: meta }, { data: orgs, error: orgErr }] = await Promise.all([
-        api.GET("/api/v1/meta"),
-        api.GET("/api/v1/organizations"),
-      ]);
+      const { data: meta } = await api.GET("/api/v1/meta");
       if (cancelled) return;
       setEdition(meta?.edition === "enterprise" ? "enterprise" : "open");
-      if (orgErr) return setError(apiErrorMessage(orgErr, "Could not load your organizations."));
-      setOrg(orgs?.[0] ?? null);
+      // ⭐ The org-list fetch is gone (S12.5) — OrgProvider reads it once for the shell.
+      setOrg(currentOrg);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [currentOrg]);
 
   const load = useCallback(
     async (reset: boolean) => {
@@ -74,7 +74,8 @@ export default function AccessEvents() {
         },
       );
       setBusy(false);
-      if (err) return setError(apiErrorMessage(err, "Could not load access events."));
+      if (err)
+        return setError(apiErrorMessage(err, "Could not load access events."));
       const page = (data as AccessEvent[] | undefined) ?? [];
       setRows(reset ? page : [...(rows ?? []), ...page]);
       // The API documents that a short page IS the last page — so stop asking.
@@ -131,7 +132,11 @@ export default function AccessEvents() {
             Denies only
           </label>
           {rn && (
-            <span className={"text-xs " + (rn.loud ? "text-danger" : "text-slate-500")}>
+            <span
+              className={
+                "text-xs " + (rn.loud ? "text-danger" : "text-slate-500")
+              }
+            >
               {rn.text}
             </span>
           )}
@@ -194,7 +199,9 @@ export default function AccessEvents() {
               header: "Source",
               sortValue: (e) => sourceFor(e),
               cell: (e) => (
-                <span className="font-mono text-xs text-slate-300">{sourceFor(e)}</span>
+                <span className="font-mono text-xs text-slate-300">
+                  {sourceFor(e)}
+                </span>
               ),
             },
             {

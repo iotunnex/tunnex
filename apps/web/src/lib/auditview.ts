@@ -98,7 +98,8 @@ export const UNATTRIBUTED_NOTE =
 export function systemActors(rows: AuditRow[]): string[] {
   const seen = new Set<string>();
   for (const r of rows) {
-    if (r.actor_system && r.actor_system.trim() !== "") seen.add(r.actor_system.trim());
+    if (r.actor_system && r.actor_system.trim() !== "")
+      seen.add(r.actor_system.trim());
   }
   return [...seen].sort();
 }

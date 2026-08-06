@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useOrg } from "../lib/useOrg";
 import { QRCodeSVG } from "qrcode.react";
 import { PRODUCT_NAME } from "../brand";
 import {
@@ -57,6 +58,9 @@ export function lastSeen(at?: string, hasWgKey = true): string {
 }
 
 export default function Devices() {
+  // ⛔ THE ORG COMES FROM THE SEAM (S12.5) — the page no longer picks index zero out of a list it
+  // fetched itself, which is what made a second organization unreachable.
+  const { org: currentOrg, loading: orgLoading, failed: orgFailed } = useOrg();
   const [org, setOrg] = useState<Org | null>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -122,9 +126,10 @@ export default function Devices() {
     let cancelled = false;
     (async () => {
       try {
-        const { data: orgs, error: orgErr } = await api.GET(
-          "/api/v1/organizations",
-        );
+        // ⭐ THE ORG-LIST FETCH IS GONE FROM THIS PAGE (S12.5). It existed only to be indexed at zero.
+        // OrgProvider reads the list once for the whole shell; a page that re-fetched it would not merely
+        // waste a request, it would pick an org the switcher has no way to change.
+        const orgErr = null;
         if (cancelled) return;
         if (orgErr) {
           setError(
@@ -132,9 +137,22 @@ export default function Devices() {
           );
           return;
         }
-        const first = orgs?.[0];
+        // ⛔ LOADING IS NOT ABSENCE (S12.5). The provider resolves the org list asynchronously, so this
+        // effect runs once with currentOrg === null before the answer exists. Treating that as "you have no
+        // organization" renders a confident, false statement — and because the second pass only sets the
+        // data, the stale error stayed on screen BESIDE the correct org name.
+        //
+        // ⚠ THREE STATES, NOT TWO: still loading (say nothing), the read failed (say THAT), genuinely no
+        // membership (say that). Collapsing the first into the third is how a slow network becomes an
+        // accusation that the user does not belong here.
+        if (orgLoading) return;
+        const first = currentOrg;
         if (!first) {
-          setError("You are not a member of any organization yet.");
+          setError(
+            orgFailed
+              ? "Could not load your organizations."
+              : "You are not a member of any organization yet.",
+          );
           return;
         }
         setOrg(first);
@@ -158,7 +176,15 @@ export default function Devices() {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // ⛔ currentOrg IS A DEPENDENCY, AND ITS ABSENCE WAS A REAL BUG THE TESTS CAUGHT (S12.5).
+    //
+    // The provider resolves the org list ASYNCHRONOUSLY, so on this effect's first run `currentOrg` is still
+    // null. With `[]` deps the effect never ran again: the page rendered "You are not a member of any
+    // organization yet" — a confident, wrong statement — and stayed there forever, for every user.
+    //
+    // ⚠ THE SAME DEPENDENCY ALSO MAKES THE SWITCHER WORK. One line, two properties: without it the page
+    // either never loads at all, or loads once and then lies about which tenant it is showing.
+  }, [currentOrg]);
 
   async function create(e: FormEvent) {
     e.preventDefault();
@@ -227,7 +253,6 @@ export default function Devices() {
     setSecret(data.config ?? null); // shown once — the private key is never re-served
     await loadDevices(org.id);
   }
-
 
   async function revoke(id: string) {
     if (!org) return;
@@ -333,7 +358,9 @@ export default function Devices() {
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
       <div style={{ display: "flex", alignItems: "flex-end", gap: "14px" }}>
         <div>
-          <h1 style={{ font: "700 22px 'Instrument Sans'", color: "#F5F5F5" }}>Devices</h1>
+          <h1 style={{ font: "700 22px 'Instrument Sans'", color: "#F5F5F5" }}>
+            Devices
+          </h1>
           <div style={{ font: "400 12px 'Instrument Sans'", color: "#6E6E6B" }}>
             {org ? org.name : "…"}
           </div>
@@ -343,12 +370,17 @@ export default function Devices() {
             four-control card sitting between the page title and the roster — the roster is what this screen
             is FOR, and it began below a form most visits do not use. A trigger costs one click on the rare
             visit and gives the list the top of the page on every other one. */}
-        <Button onClick={() => { setCreateError(null); setCreating(true); }}>Add device</Button>
+        <Button
+          onClick={() => {
+            setCreateError(null);
+            setCreating(true);
+          }}
+        >
+          Add device
+        </Button>
       </div>
 
       <ErrorText>{error}</ErrorText>
-
-
 
       {creating && (
         <Modal
@@ -375,83 +407,88 @@ export default function Devices() {
                   (requiresGatewayChoice(nodes) && nodeId === "")
                 }
               >
-                {busy ? "Creating…" : kind === "openvpn" ? "Export OpenVPN profile" : "Create device"}
+                {busy
+                  ? "Creating…"
+                  : kind === "openvpn"
+                    ? "Export OpenVPN profile"
+                    : "Create device"}
               </Button>
             </>
           }
         >
-      <form id="add-device-form" onSubmit={create}>
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="min-w-[12rem] flex-1">
-              <Field label="New device name">
-                <Input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  placeholder="my-laptop"
-                />
-              </Field>
-            </div>
-            {/* The transport selector is present ONLY when the org has opted into OpenVPN
+          <form id="add-device-form" onSubmit={create}>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-[12rem] flex-1">
+                <Field label="New device name">
+                  <Input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                    placeholder="my-laptop"
+                  />
+                </Field>
+              </div>
+              {/* The transport selector is present ONLY when the org has opted into OpenVPN
                 (D-S9.5-OPTIN(a): absent, not a disabled affordance). Otherwise WireGuard is implicit. */}
-            {ovpnEnabled && (
-              <Field label="Type">
-                <select
-                  value={kind}
-                  onChange={(e) => setKind(e.target.value as ExportKind)}
-                  className="rounded-md border border-white/10 bg-ink-950 px-2 py-1.5 text-sm text-slate-200"
-                >
-                  <option value="wireguard">WireGuard</option>
-                  <option value="openvpn">OpenVPN</option>
-                </select>
-              </Field>
-            )}
-            {/* WF-OVPN-3: full tunnel is a per-device choice for BOTH transports. For WireGuard it shapes
+              {ovpnEnabled && (
+                <Field label="Type">
+                  <select
+                    value={kind}
+                    onChange={(e) => setKind(e.target.value as ExportKind)}
+                    className="rounded-md border border-white/10 bg-ink-950 px-2 py-1.5 text-sm text-slate-200"
+                  >
+                    <option value="wireguard">WireGuard</option>
+                    <option value="openvpn">OpenVPN</option>
+                  </select>
+                </Field>
+              )}
+              {/* WF-OVPN-3: full tunnel is a per-device choice for BOTH transports. For WireGuard it shapes
                 the exported config's AllowedIPs; for OpenVPN the server pushes redirect-gateway per client.
                 Either way the gateway must be able to source-NAT egress (gateway_no_egress refuses otherwise). */}
-            <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input
-                type="checkbox"
-                checked={fullTunnel}
-                onChange={(e) => setFullTunnel(e.target.checked)}
-              />
-              Full tunnel
-            </label>
-          </div>
-          {/* ⛔ S14.21b: ASK, DO NOT GUESS. The old rule was "the first active gateway in created_at
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={fullTunnel}
+                  onChange={(e) => setFullTunnel(e.target.checked)}
+                />
+                Full tunnel
+              </label>
+            </div>
+            {/* ⛔ S14.21b: ASK, DO NOT GUESS. The old rule was "the first active gateway in created_at
               order", which on a real fleet homed a laptop onto an in-cluster Kubernetes gateway
               because it happened to be enrolled first. Nothing in the payload distinguishes a gateway
               that can serve a laptop from one that cannot — so the product stops pretending it can. */}
-          {requiresGatewayChoice(nodes) && (
-            <Field label="Gateway">
-              <select
-                id="device-gateway"
-                value={nodeId}
-                onChange={(e) => setNodeId(e.target.value)}
-                className="w-full rounded-md border border-line bg-surface-inset px-3 py-2 text-sm text-ink-body"
-              >
-                <option value="">Choose a gateway…</option>
-                {selectableNodes(nodes).map((n) => (
-                  <option key={n.id} value={n.id}>
-                    {n.name}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-ink-secondary">
-                This device connects through the gateway you pick. There is no safe default when
-                several are enrolled — the config is issued once and cannot be re-issued.
-              </p>
-            </Field>
-          )}
+            {requiresGatewayChoice(nodes) && (
+              <Field label="Gateway">
+                <select
+                  id="device-gateway"
+                  value={nodeId}
+                  onChange={(e) => setNodeId(e.target.value)}
+                  className="w-full rounded-md border border-line bg-surface-inset px-3 py-2 text-sm text-ink-body"
+                >
+                  <option value="">Choose a gateway…</option>
+                  {selectableNodes(nodes).map((n) => (
+                    <option key={n.id} value={n.id}>
+                      {n.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-ink-secondary">
+                  This device connects through the gateway you pick. There is no
+                  safe default when several are enrolled — the config is issued
+                  once and cannot be re-issued.
+                </p>
+              </Field>
+            )}
 
-          {/* Counts SELECTABLE gateways, not all rows: a fleet whose only gateway is revoked showed no
+            {/* Counts SELECTABLE gateways, not all rows: a fleet whose only gateway is revoked showed no
               warning at all and offered an enabled button. */}
-          {selectableNodes(nodes).length === 0 && (
-            <p className="mt-3 text-xs text-amber-400">
-              No gateway node is enrolled yet - enroll one to create devices.
-            </p>
-          )}
-      </form>
+            {selectableNodes(nodes).length === 0 && (
+              <p className="mt-3 text-xs text-amber-400">
+                No gateway node is enrolled yet - enroll one to create devices.
+              </p>
+            )}
+          </form>
           {/* ⛔ IN THE DIALOG, WHERE THE ACTION WAS TAKEN. This is the exact message the founder saw
               rendered on the page BEHIND the modal — "this gateway can't route full-tunnel internet traffic
               yet; use split tunnel" — a refusal the operator could not read without dismissing the thing
@@ -562,9 +599,13 @@ export default function Devices() {
               key: "approve",
               label: "Approve",
               unavailable: (d) =>
-                d.status === "pending" ? null : "Only a device awaiting approval can be approved.",
+                d.status === "pending"
+                  ? null
+                  : "Only a device awaiting approval can be approved.",
               run: (ds) => {
-                void runBatch(() => Promise.all(ds.map((d) => decide(d.id, "approve"))));
+                void runBatch(() =>
+                  Promise.all(ds.map((d) => decide(d.id, "approve"))),
+                );
               },
             },
             {
@@ -572,9 +613,13 @@ export default function Devices() {
               label: "Reject",
               danger: true,
               unavailable: (d) =>
-                d.status === "pending" ? null : "Only a device awaiting approval can be rejected.",
+                d.status === "pending"
+                  ? null
+                  : "Only a device awaiting approval can be rejected.",
               run: (ds) => {
-                void runBatch(() => Promise.all(ds.map((d) => decide(d.id, "reject"))));
+                void runBatch(() =>
+                  Promise.all(ds.map((d) => decide(d.id, "reject"))),
+                );
               },
             },
             {
@@ -584,7 +629,9 @@ export default function Devices() {
               // ⚠ Revoking a REVOKED device is a no-op the server would report as success — worse than
               // absent. Pending is rejected, not revoked; the two words are different decisions.
               unavailable: (d) =>
-                d.status === "active" ? null : `A ${d.status} device cannot be revoked.`,
+                d.status === "active"
+                  ? null
+                  : `A ${d.status} device cannot be revoked.`,
               run: (ds) => {
                 void runBatch(() => Promise.all(ds.map((d) => revoke(d.id))));
               },
@@ -702,9 +749,7 @@ export default function Devices() {
                 const pb = postureBadge(d);
                 return (
                   <>
-                    {pb && (
-                      <Badge tone={pb.tone}>{pb.label}</Badge>
-                    )}
+                    {pb && <Badge tone={pb.tone}>{pb.label}</Badge>}
                     {/* S9.1 Part-2: a static profile whose baked site routes no longer match the org's current
                         ranges — the never-silently-broken law, made visible. */}
                     {d.needs_reexport && (

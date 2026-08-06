@@ -76,7 +76,12 @@ export function EntityPicker({
     // carrying a separate control that is empty 95% of the time.
     if (acceptCidr && isCidr(query.trim())) {
       return [
-        { value: query.trim(), kind: "cidr", tag: "CIDR", label: query.trim() } as PickerOption,
+        {
+          value: query.trim(),
+          kind: "cidr",
+          tag: "CIDR",
+          label: query.trim(),
+        } as PickerOption,
         ...base,
       ];
     }
@@ -94,7 +99,7 @@ export function EntityPicker({
         aria-expanded={open}
         aria-controls={`list-${label}`}
         autoComplete="off"
-        value={open ? query : (selected ? `${selected.label}` : "")}
+        value={open ? query : selected ? `${selected.label}` : ""}
         placeholder={placeholder ?? "Search…"}
         onFocus={() => {
           setOpen(true);
@@ -151,7 +156,8 @@ export function EntityPicker({
           {shown.length === 0 && (
             <li className="px-3 py-2 text-xs text-ink-secondary">
               Nothing matches “{query}”.
-              {acceptCidr && " Type a CIDR (e.g. 10.0.5.0/24) to use a literal address."}
+              {acceptCidr &&
+                " Type a CIDR (e.g. 10.0.5.0/24) to use a literal address."}
             </li>
           )}
           {/* ⛔ GROUPED BY SECTION, IN ORDER. Nine flat options teach nothing; a heading that reads
@@ -159,7 +165,11 @@ export function EntityPicker({
               moment the choice is made. The index used for keyboard focus is the FLAT one, so grouping
               changes what the eye sees without changing what the arrow keys do. */}
           {shown.map((o, idx) => (
-            <li key={`${o.kind}:${o.value}`} role="option" aria-selected={o.value === value}>
+            <li
+              key={`${o.kind}:${o.value}`}
+              role="option"
+              aria-selected={o.value === value}
+            >
               {o.section && o.section !== shown[idx - 1]?.section && (
                 <div
                   role="presentation"
@@ -194,12 +204,16 @@ export function EntityPicker({
                 </span>
                 <span className="min-w-0 flex-1 truncate">{o.label}</span>
                 {o.detail && (
-                  <span className="shrink-0 truncate text-xs text-ink-secondary">{o.detail}</span>
+                  <span className="shrink-0 truncate text-xs text-ink-secondary">
+                    {o.detail}
+                  </span>
                 )}
                 {/* ⛔ THE REASON IS SHOWN IN THE ROW, not only on hover. A disabled option whose
                     explanation requires a mouse is no explanation on a touch screen or to a reader. */}
                 {o.unavailable && (
-                  <span className="ml-auto shrink-0 text-[10px] text-warn">{o.unavailable}</span>
+                  <span className="ml-auto shrink-0 text-[10px] text-warn">
+                    {o.unavailable}
+                  </span>
                 )}
               </button>
             </li>

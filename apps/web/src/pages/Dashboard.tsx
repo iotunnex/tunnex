@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useOrg } from "../lib/useOrg";
 import { Icon, type IconName } from "../components/Icon";
 import { GLASS } from "../components/ui";
 import { isEnterprise, type Edition } from "../lib/edition";
@@ -34,7 +35,11 @@ import {
   Loading,
   Panel,
 } from "../components/ui";
-import { attributionBadge, gatewayHealthRow, policyHealthBadge } from "../lib/healthview";
+import {
+  attributionBadge,
+  gatewayHealthRow,
+  policyHealthBadge,
+} from "../lib/healthview";
 import { agentSummary, type AgentRow } from "../lib/agentview";
 import {
   isFreshOrg,
@@ -48,6 +53,9 @@ import {
 } from "../lib/overviewview";
 
 export default function Dashboard() {
+  // ⛔ THE ORG COMES FROM THE SEAM (S12.5) — the page no longer picks index zero out of a list it
+  // fetched itself, which is what made a second organization unreachable.
+  const { org: currentOrg, loading: orgLoading, failed: orgFailed } = useOrg();
   const [orgName, setOrgName] = useState("");
   const [data, setData] = useState<OrgOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,8 +79,12 @@ export default function Dashboard() {
   // The motion preference is read ONCE at the app edge and passed down; no component asks matchMedia itself.
   const reducedMotion = useMotionPreference();
   // `null` = not resolved yet; `{ok:false}` = the read FAILED. Neither is "there are none" — the card says which.
-  const [k8sClustersRes, setK8sClustersRes] = useState<Loaded<K8sCluster[]> | null>(null);
-  const [k8sServicesRes, setK8sServicesRes] = useState<Loaded<K8sService[]> | null>(null);
+  const [k8sClustersRes, setK8sClustersRes] = useState<Loaded<
+    K8sCluster[]
+  > | null>(null);
+  const [k8sServicesRes, setK8sServicesRes] = useState<Loaded<
+    K8sService[]
+  > | null>(null);
   const [ztRes, setZtRes] = useState<Loaded<ZeroTrustMode> | null>(null);
   // THE ONE GATING SEAM. `/meta`'s edition is the same value that decides whether every other enterprise
   // surface exists — read here, never re-derived from an error.
@@ -82,17 +94,31 @@ export default function Dashboard() {
     let cancelled = false;
     (async () => {
       try {
-        const { data: orgs, error: orgErr } = await api.GET(
-          "/api/v1/organizations",
-        );
+        // ⭐ THE ORG-LIST FETCH IS GONE FROM THIS PAGE (S12.5). It existed only to be indexed at zero.
+        // OrgProvider reads the list once for the whole shell; a page that re-fetched it would not merely
+        // waste a request, it would pick an org the switcher has no way to change.
+        const orgErr = null;
         if (cancelled) return;
         if (orgErr)
           return setError(
             apiErrorMessage(orgErr, "Could not load your organizations."),
           );
-        const org = orgs?.[0];
+        // ⛔ LOADING IS NOT ABSENCE (S12.5). The provider resolves the org list asynchronously, so this
+        // effect runs once with currentOrg === null before the answer exists. Treating that as "you have no
+        // organization" renders a confident, false statement — and because the second pass only sets the
+        // data, the stale error stayed on screen BESIDE the correct org name.
+        //
+        // ⚠ THREE STATES, NOT TWO: still loading (say nothing), the read failed (say THAT), genuinely no
+        // membership (say that). Collapsing the first into the third is how a slow network becomes an
+        // accusation that the user does not belong here.
+        if (orgLoading) return;
+        const org = currentOrg;
         if (!org)
-          return setError("You are not a member of any organization yet.");
+          return setError(
+            orgFailed
+              ? "Could not load your organizations."
+              : "You are not a member of any organization yet.",
+          );
         setOrgName(org.name);
         const { data: ov, error: ovErr } = await api.GET(
           "/api/v1/organizations/{orgId}/overview",
@@ -154,7 +180,9 @@ export default function Dashboard() {
         // endpoint correctly answers edition_required; the card must then be ABSENT, not "unavailable".
         // Folding a correct refusal into a failure is the defect this repo has already paid for.
         void api
-          .GET("/api/v1/organizations/{orgId}/agents", { params: { path: { orgId: org.id } } })
+          .GET("/api/v1/organizations/{orgId}/agents", {
+            params: { path: { orgId: org.id } },
+          })
           .then(({ data, error }) => {
             if (cancelled || error || !data) return; // 403 lands here and stays silent, by design
             setAgentsRes({ ok: true, data: data as AgentRow[] });
@@ -179,12 +207,16 @@ export default function Dashboard() {
           api.GET("/api/v1/organizations/{orgId}/k8s/clusters", {
             params: { path: { orgId: org.id } },
           }),
-        ).then((r) => !cancelled && setK8sClustersRes(r as Loaded<K8sCluster[]>));
+        ).then(
+          (r) => !cancelled && setK8sClustersRes(r as Loaded<K8sCluster[]>),
+        );
         void loadOne(() =>
           api.GET("/api/v1/organizations/{orgId}/k8s/services", {
             params: { path: { orgId: org.id } },
           }),
-        ).then((r) => !cancelled && setK8sServicesRes(r as Loaded<K8sService[]>));
+        ).then(
+          (r) => !cancelled && setK8sServicesRes(r as Loaded<K8sService[]>),
+        );
       } catch {
         if (!cancelled) setError("Could not reach the API.");
       }
@@ -192,11 +224,19 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  // ⛔ THE `refresh` COUNTER WENT WITH THE DESKTOP EFFECT. Its only writer was WF-2's revocation
-  // subscription; with that gone it was a state variable that could never change, and a dependency
-  // array naming a constant is a dependency array that says nothing. Removed rather than left as a
-  // permanent 0 — an inert knob reads as a live one to the next person.
-  }, []);
+    // ⛔ THE `refresh` COUNTER WENT WITH THE DESKTOP EFFECT. Its only writer was WF-2's revocation
+    // subscription; with that gone it was a state variable that could never change, and a dependency
+    // array naming a constant is a dependency array that says nothing. Removed rather than left as a
+    // permanent 0 — an inert knob reads as a live one to the next person.
+    // ⛔ currentOrg IS A DEPENDENCY, AND ITS ABSENCE WAS A REAL BUG THE TESTS CAUGHT (S12.5).
+    //
+    // The provider resolves the org list ASYNCHRONOUSLY, so on this effect's first run `currentOrg` is still
+    // null. With `[]` deps the effect never ran again: the page rendered "You are not a member of any
+    // organization yet" — a confident, wrong statement — and stayed there forever, for every user.
+    //
+    // ⚠ THE SAME DEPENDENCY ALSO MAKES THE SWITCHER WORK. One line, two properties: without it the page
+    // either never loads at all, or loads once and then lies about which tenant it is showing.
+  }, [currentOrg]);
 
   // ⛔ WF-2's DESKTOP REFETCH IS GONE (S14.20 step 4). It re-pulled the overview when the client's
   // RevocationMonitor saw this device revoked — a subscription that only existed because the client
@@ -205,7 +245,6 @@ export default function Dashboard() {
   // ⚠ WF-2's CLAIM IS NOT ABANDONED, it moved: the client shows revocation on its OWN surface
   // (`revoked` is a first-class state with a loud banner and a notification). What is gone is a
   // browser dashboard reacting to a tunnel it cannot see.
-
 
   return (
     // ⛔ THE PAGE ROOT CARRIES THE RHYTHM. This was a bare `<div>`, and every section inside it stacked with
@@ -273,7 +312,8 @@ export default function Dashboard() {
             // open by construction — `policy_degraded` remains readable — so this line is a decision, not
             // a guarantee.
             const degraded = nodesRes?.ok
-              ? nodesRes.data.filter((n) => policyHealthBadge(n) !== null).length
+              ? nodesRes.data.filter((n) => policyHealthBadge(n) !== null)
+                  .length
               : null;
             const pendingInvites = null; // no endpoint for pending invites — the slot stays empty, not invented
             const siteSub = sitesRes?.ok
@@ -292,7 +332,9 @@ export default function Dashboard() {
             // rather than being lost with the card that used to carry it.
             // ⚠ Still named ONLY when non-zero (agentSummary's rule) — a permanent "0 unattributable"
             // trains the reader to stop seeing the line that matters when it is not zero.
-            const agentSum = agentsRes?.ok ? agentSummary(agentsRes.data) : null;
+            const agentSum = agentsRes?.ok
+              ? agentSummary(agentsRes.data)
+              : null;
             const agentSub = agentSum
               ? (agentSum.note ?? "enrolled in this organization")
               : null;
@@ -332,9 +374,7 @@ export default function Dashboard() {
                     held to the generated set. */}
                 <div
                   className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:[grid-template-columns:repeat(var(--stat-cols),minmax(0,1fr))]"
-                  style={
-                    { "--stat-cols": STAT_CARDS } as React.CSSProperties
-                  }
+                  style={{ "--stat-cols": STAT_CARDS } as React.CSSProperties}
                 >
                   <Stat
                     label="Members"
@@ -504,8 +544,12 @@ export default function Dashboard() {
                             // and reporting an accountability one. Both, or neither.
                             const a = attributionBadge(n);
                             return {
-                              id: n.id, name: n.name, label: v.label, tone: v.tone,
-                              attribution: a ? a.label : null, attributionDetail: a ? a.detail : null,
+                              id: n.id,
+                              name: n.name,
+                              label: v.label,
+                              tone: v.tone,
+                              attribution: a ? a.label : null,
+                              attributionDetail: a ? a.detail : null,
                             };
                           }),
                         ).map((g) => (
@@ -519,7 +563,9 @@ export default function Dashboard() {
                                     only tone+children, and widening a shared primitive to carry one
                                     caller's tooltip is how a design system stops being one. */}
                                 {g.attribution && (
-                                  <span title={g.attributionDetail ?? undefined}>
+                                  <span
+                                    title={g.attributionDetail ?? undefined}
+                                  >
                                     <Badge tone="warn">{g.attribution}</Badge>
                                   </span>
                                 )}
@@ -545,12 +591,14 @@ export default function Dashboard() {
                       <Loading />
                     ) : !k8sClustersRes.ok ? (
                       <p className="text-cell text-warn">
-                        Could not read clusters. This card only; the rest of the page is unaffected.
+                        Could not read clusters. This card only; the rest of the
+                        page is unaffected.
                       </p>
                     ) : k8sClustersRes.data.length === 0 ? (
                       <EmptyState>
-                        No clusters registered. Registering one reserves a VIP range and a DNS zone, and then
-                        in-cluster Services can be reached by name over the tunnel.
+                        No clusters registered. Registering one reserves a VIP
+                        range and a DNS zone, and then in-cluster Services can
+                        be reached by name over the tunnel.
                       </EmptyState>
                     ) : (
                       <>
@@ -583,8 +631,9 @@ export default function Dashboard() {
                           // arm. A ring drawn from a failed read would be a shape asserting a proportion.
                           <p className="text-cell text-warn">
                             {k8sClustersRes.data.length} cluster
-                            {k8sClustersRes.data.length === 1 ? "" : "s"} registered.
-                            The Service count could not be read, so no proportion is drawn.
+                            {k8sClustersRes.data.length === 1 ? "" : "s"}{" "}
+                            registered. The Service count could not be read, so
+                            no proportion is drawn.
                           </p>
                         )}
                         <Link
@@ -690,13 +739,21 @@ export default function Dashboard() {
                                 const node = nodesRes?.ok
                                   ? nodesRes.data.find((n) => n.id === m.nodeId)
                                   : undefined;
-                                const memberName = node?.name ?? m.nodeId.slice(0, 8);
-                                const memberRole = m.demoted ? "demoted" : m.role;
-                                const memberStatus = !m.reporting ? "not reporting" : `hs ${m.handshakeAge}`;
+                                const memberName =
+                                  node?.name ?? m.nodeId.slice(0, 8);
+                                const memberRole = m.demoted
+                                  ? "demoted"
+                                  : m.role;
+                                const memberStatus = !m.reporting
+                                  ? "not reporting"
+                                  : `hs ${m.handshakeAge}`;
                                 const memberLabel = `${memberName} (${memberRole}): ${memberStatus}`;
 
                                 return (
-                                  <ListItem key={m.nodeId} aria-label={memberLabel}>
+                                  <ListItem
+                                    key={m.nodeId}
+                                    aria-label={memberLabel}
+                                  >
                                     <span className="flex items-center justify-between gap-2">
                                       <span className="truncate font-mono text-mono text-ink-primary">
                                         {memberName}
@@ -755,7 +812,9 @@ export default function Dashboard() {
                           const m = meshFrom(
                             assembleTopology(sitesRes.data, {}, nodesRes.data),
                             nodesRes.data,
-                            hubSetRes?.ok ? hubSetRes.data?.generation : undefined,
+                            hubSetRes?.ok
+                              ? hubSetRes.data?.generation
+                              : undefined,
                             false,
                           );
                           return { nodes: m.nodes, links: m.links };
@@ -764,7 +823,6 @@ export default function Dashboard() {
                       />
                     )}
                   </Panel>
-
                 </div>
               </div>
             );

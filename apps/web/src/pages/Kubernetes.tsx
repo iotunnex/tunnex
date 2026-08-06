@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useOrg } from "../lib/useOrg";
 import {
   api,
   apiErrorMessage,
   loadOne,
   type Loaded,
   type Member,
-  type Org,
   type Role,
   type Site,
   type K8sCluster,
@@ -59,6 +59,7 @@ interface Raw {
 }
 
 export default function Kubernetes() {
+  const { org: currentOrg, loading: orgLoading, failed: orgFailed } = useOrg();
   const { state } = useAuth();
   const myId = state.status === "authed" ? state.user.id : "";
   const emailVerified = state.status === "authed" && state.user.email_verified;
@@ -71,11 +72,19 @@ export default function Kubernetes() {
   const reload = useCallback(async () => {
     setLoadError(null);
     setRaw(null);
-    const oRes = await loadOne(() => api.GET("/api/v1/organizations"));
-    if (!oRes.ok) return setLoadError(oRes.error);
-    const first = (oRes.data as Org[])[0];
+    // ⛔ THE ORG COMES FROM THE SEAM, NOT FROM INDEX ZERO (S12.5). This used to fetch the org list here and
+    // take `[0]`, which meant a user in two organizations could reach only one of them and the switcher in
+    // the header would have had nothing to switch.
+    // ⛔ LOADING IS NOT ABSENCE (S12.5). See the note in Dashboard.tsx — three states, not two: still
+    // loading (say nothing), the read failed (say THAT), genuinely no membership (say that).
+    if (orgLoading) return;
+    const first = currentOrg;
     if (!first)
-      return setLoadError("You are not a member of any organization yet.");
+      return setLoadError(
+        orgFailed
+          ? "Could not load your organizations."
+          : "You are not a member of any organization yet.",
+      );
     setOrgId(first.id);
     const memRes = (await loadOne(() =>
       api.GET("/api/v1/organizations/{orgId}/members", {
@@ -120,7 +129,10 @@ export default function Kubernetes() {
       // NULL, not 0 — "we could not look" is a different fact from "there are none", and the tile says which.
       machineCreds: mcRes.ok ? mcRes.data.length : null,
     });
-  }, [myId]);
+    // ⚠ currentOrg IS A DEPENDENCY, AND THAT IS THE HALF THAT MAKES THE SWITCHER WORK. Without it the
+    // page keeps rendering the org it mounted with — the control moves, the data does not, and the user is
+    // looking at one tenant's screen labelled with another's name.
+  }, [currentOrg, myId]);
   useEffect(() => {
     reload();
   }, [reload]);
@@ -166,7 +178,9 @@ export default function Kubernetes() {
       { params: { path: { orgId: orgId ?? "", serviceId } } },
     );
     if (error)
-      return setRowErr(apiErrorMessage(error, "Could not unexpose the Service."));
+      return setRowErr(
+        apiErrorMessage(error, "Could not unexpose the Service."),
+      );
     reload();
   }
 
@@ -264,7 +278,8 @@ export default function Kubernetes() {
       // a wrapper div keeps one alignment mechanism in the table, not two.
       numeric: true,
       cell: (c: ClusterCard) =>
-        !gate.canManage ? null : objectControls(c.managedByOperator).withheld ? (
+        !gate.canManage ? null : objectControls(c.managedByOperator)
+            .withheld ? (
           // The destructive control is WITHHELD, not faked: a dashboard edit would be reconciled away.
           //
           // ⛔ THE ACCESSIBLE NAME CARRIES THE FULL GUIDANCE, and it is load-bearing rather than decoration:
@@ -282,7 +297,11 @@ export default function Kubernetes() {
             <Button size="sm" variant="ghost" onClick={() => setExposeFor(c)}>
               Expose Service
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setDeregisterFor(c)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setDeregisterFor(c)}
+            >
               Deregister
             </Button>
           </span>
@@ -335,7 +354,8 @@ export default function Kubernetes() {
       header: "",
       numeric: true,
       cell: (r: SvcRow) =>
-        !gate.canManage ? null : objectControls(r.managedByOperator).withheld ? (
+        !gate.canManage ? null : objectControls(r.managedByOperator)
+            .withheld ? (
           <span
             className="text-micro text-ink-faint"
             aria-label={managedEditWarning("Service")}
@@ -466,12 +486,14 @@ export default function Kubernetes() {
                   ))}
                 </div>
                 <p className="mt-2 text-micro text-ink-tertiary">
-                  <strong className="text-ink-body">Not a ClusterIP DNAT.</strong>{" "}
+                  <strong className="text-ink-body">
+                    Not a ClusterIP DNAT.
+                  </strong>{" "}
                   netfilter applies one destination NAT per prerouting pass, so
-                  kube-proxy&rsquo;s ClusterIP rule would be a no-op after ours and
-                  the packet would die addressed to the ClusterIP. The gateway
-                  targets a ready pod directly, fed by an EndpointSlice watch, and
-                  fails closed on every fault.
+                  kube-proxy&rsquo;s ClusterIP rule would be a no-op after ours
+                  and the packet would die addressed to the ClusterIP. The
+                  gateway targets a ready pod directly, fed by an EndpointSlice
+                  watch, and fails closed on every fault.
                 </p>
                 <p className="text-micro text-ink-faint">
                   <strong className="text-ink-body">
@@ -488,11 +510,11 @@ export default function Kubernetes() {
               <Panel title="Installing the operator">
                 {/* ⛔ NAMED AS COPY, NOT A CAPABILITY. This screen installs nothing. */}
                 <p className="text-micro text-ink-tertiary">
-                  Reference only. Run these yourself; this screen does not install
-                  anything.
+                  Reference only. Run these yourself; this screen does not
+                  install anything.
                 </p>
                 <pre className="overflow-x-auto rounded-input border border-line bg-surface-inset p-2.5 text-micro text-ink-body">
-{`helm install gw tunnex/tunnex-gateway \\
+                  {`helm install gw tunnex/tunnex-gateway \\
   --set joinToken.secretRef=tunnex-join
 helm install op tunnex/operator \\
   --set machineToken.secretRef=tunnex-machine`}
@@ -500,33 +522,41 @@ helm install op tunnex/operator \\
                 <p className="text-micro text-ink-faint">
                   Both secrets are one-time ceremonies you create, never chart
                   values. The gateway pod runs with a read-only role on services
-                  and endpointslices: it cannot read Secrets, write, or escalate.
+                  and endpointslices: it cannot read Secrets, write, or
+                  escalate.
                 </p>
               </Panel>
 
               <Panel title="Not shown, and why">
                 <ul className="flex flex-col gap-1.5 text-micro text-ink-tertiary">
                   <li>
-                    <strong className="text-ink-body">The GitOps CR panel.</strong>{" "}
-                    The operator and its CRs are built and shipping; what does not
-                    exist is any API reporting their status here. Reconcile time,
-                    per-kind ready counts, refused grants and the operator&rsquo;s
-                    version are not served, so every value on that panel would be
-                    invented. <strong className="text-ink-body">
+                    <strong className="text-ink-body">
+                      The GitOps CR panel.
+                    </strong>{" "}
+                    The operator and its CRs are built and shipping; what does
+                    not exist is any API reporting their status here. Reconcile
+                    time, per-kind ready counts, refused grants and the
+                    operator&rsquo;s version are not served, so every value on
+                    that panel would be invented.{" "}
+                    <strong className="text-ink-body">
                       What IS served is ownership
                     </strong>{" "}
                     — which is why the withheld control above is real.
                   </li>
                   <li>
-                    <strong className="text-ink-body">A per-Service ready state.</strong>{" "}
-                    The agent does watch endpoints, so readiness is observed; it is
-                    not reported per Service. The node-level view is on Gateways.
+                    <strong className="text-ink-body">
+                      A per-Service ready state.
+                    </strong>{" "}
+                    The agent does watch endpoints, so readiness is observed; it
+                    is not reported per Service. The node-level view is on
+                    Gateways.
                   </li>
                   <li>
-                    <strong className="text-ink-body">A state column.</strong> The
-                    API returns live Services only, so the column would carry one
-                    value forever. A grant pointing at a removed Service is
-                    flagged on <strong className="text-ink-body">Access Policies</strong>,
+                    <strong className="text-ink-body">A state column.</strong>{" "}
+                    The API returns live Services only, so the column would
+                    carry one value forever. A grant pointing at a removed
+                    Service is flagged on{" "}
+                    <strong className="text-ink-body">Access Policies</strong>,
                     which is where that fact is served.
                   </li>
                 </ul>
@@ -536,14 +566,23 @@ helm install op tunnex/operator \\
 
           <Panel title="Refusals this surface reports verbatim">
             <p className="text-micro text-ink-faint">
-              Disjointness is an org-wide fact, so the control plane owns it, not
-              a cluster.
+              Disjointness is an org-wide fact, so the control plane owns it,
+              not a cluster.
             </p>
             <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {[
-                ["409 vip_range_overlap", "A cluster's VIP range must be disjoint from the device pool, every site subnet, and other clusters' ranges."],
-                ["409 vip_range_exhausted", "No address left to allocate. Unexposing frees a VIP for immediate reuse."],
-                ["409 service_exists", "That namespace and name pair is already exposed: one stable identity per Service."],
+                [
+                  "409 vip_range_overlap",
+                  "A cluster's VIP range must be disjoint from the device pool, every site subnet, and other clusters' ranges.",
+                ],
+                [
+                  "409 vip_range_exhausted",
+                  "No address left to allocate. Unexposing frees a VIP for immediate reuse.",
+                ],
+                [
+                  "409 service_exists",
+                  "That namespace and name pair is already exposed: one stable identity per Service.",
+                ],
               ].map(([code, why]) => (
                 <div key={code}>
                   <dt className="font-mono text-micro text-ink-body">{code}</dt>

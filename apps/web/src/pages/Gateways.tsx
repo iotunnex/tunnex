@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useOrg } from "../lib/useOrg";
 import {
   api,
   loadOne,
@@ -71,6 +72,7 @@ function FilterChip({
 }
 
 export default function GatewaysPage() {
+  const { org: currentOrg, loading: orgLoading, failed: orgFailed } = useOrg();
   const [org, setOrg] = useState<Org | null>(null);
   const [nodes, setNodes] = useState<Node[] | null>(null);
   // Site NAMES for the gateway sub-line. NON-FATAL: a failed sites read leaves the sub-line absent rather
@@ -81,11 +83,19 @@ export default function GatewaysPage() {
 
   const reload = useCallback(async () => {
     setLoadError(null);
-    const oRes = await loadOne(() => api.GET("/api/v1/organizations"));
-    if (!oRes.ok) return setLoadError(oRes.error);
-    const first = (oRes.data as Org[])[0];
+    // ⛔ THE ORG COMES FROM THE SEAM, NOT FROM INDEX ZERO (S12.5). This used to fetch the org list here and
+    // take `[0]`, which meant a user in two organizations could reach only one of them and the switcher in
+    // the header would have had nothing to switch.
+    // ⛔ LOADING IS NOT ABSENCE (S12.5). See the note in Dashboard.tsx — three states, not two: still
+    // loading (say nothing), the read failed (say THAT), genuinely no membership (say that).
+    if (orgLoading) return;
+    const first = currentOrg;
     if (!first)
-      return setLoadError("You are not a member of any organization yet.");
+      return setLoadError(
+        orgFailed
+          ? "Could not load your organizations."
+          : "You are not a member of any organization yet.",
+      );
     setOrg(first);
     const nRes = (await loadOne(() =>
       api.GET("/api/v1/organizations/{orgId}/nodes", {
@@ -102,20 +112,18 @@ export default function GatewaysPage() {
       }),
     )) as Loaded<Site[]>;
     if (sRes.ok) {
-      setSiteNames(
-        Object.fromEntries(sRes.data.map((x) => [x.id, x.name])),
-      );
+      setSiteNames(Object.fromEntries(sRes.data.map((x) => [x.id, x.name])));
     }
-  }, []);
+    // ⚠ currentOrg IS A DEPENDENCY, AND THAT IS THE HALF THAT MAKES THE SWITCHER WORK. Without it the
+    // page keeps rendering the org it mounted with — the control moves, the data does not, and the user is
+    // looking at one tenant's screen labelled with another's name.
+  }, [currentOrg, orgLoading, orgFailed]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
-  const counts = useMemo(
-    () => gatewayFilterCounts(nodes ?? []),
-    [nodes],
-  );
+  const counts = useMemo(() => gatewayFilterCounts(nodes ?? []), [nodes]);
   const groups = useMemo(
     () => applyGatewayFilter(groupGateways(nodes ?? [], siteNames), filter),
     [nodes, filter, siteNames],
@@ -127,7 +135,8 @@ export default function GatewaysPage() {
       header: "Gateway",
       // ⚠ THE SITE NAME IS SEARCHABLE THOUGH IT IS A SUB-LINE, and "HUB" is searchable though it is a badge.
       // A term an operator can SEE on the row must be a term that finds the row.
-      sortValue: (r: GatewayRow) => `${r.name} ${r.siteName ?? ""}${r.isHub ? " hub" : ""}`,
+      sortValue: (r: GatewayRow) =>
+        `${r.name} ${r.siteName ?? ""}${r.isHub ? " hub" : ""}`,
       cell: (r: GatewayRow) => (
         <span className="flex flex-col gap-0.5">
           <span className="flex items-center gap-2">
@@ -176,7 +185,8 @@ export default function GatewaysPage() {
       header: "Last seen",
       // ⚠ SORTS BY THE TIMESTAMP, SEARCHES BY THE WORDS. A never-connected gateway sorts to one end rather
       // than into the middle of a lexicographic jumble of "3h ago" / "17m ago".
-      sortValue: (r: GatewayRow) => (r.lastSeenAt ? Date.parse(r.lastSeenAt) : 0),
+      sortValue: (r: GatewayRow) =>
+        r.lastSeenAt ? Date.parse(r.lastSeenAt) : 0,
       cell: (r: GatewayRow) => (
         <span className="text-micro text-ink-tertiary" data-volatile>
           {r.lastSeenAt ? relativeAge(r.lastSeenAt) : "never connected"}

@@ -86,7 +86,8 @@ function BrowserLogin() {
     if (data.mfa_required) {
       setChallenge(data.challenge ?? null);
       setRemaining(
-        (data as { recovery_codes_remaining?: number }).recovery_codes_remaining,
+        (data as { recovery_codes_remaining?: number })
+          .recovery_codes_remaining,
       );
       return; // NO session yet — the second step mints it
     }
@@ -249,8 +250,6 @@ function BrowserLogin() {
         </Button>
       </form>
 
-
-
       {/* ⛔ A SECURITY PROPERTY, NOT REASSURANCE. Sign-up and reset answer the same 202 whether or
           not the address exists, so "check your email" must not be read as "that address was
           recognised". Same no-oracle rule the 401s follow. */}
@@ -298,12 +297,26 @@ function SsoSection({
       {/* ⛔ THE ORG SLUG IS A PRECONDITION, NOT AN AFTERTHOUGHT. `/auth/sso/{provider}/start`
           requires ?org=, so the field comes BEFORE the buttons — the previous order offered two
           buttons that could only error until a field below them was filled. */}
-      <Field label="Organization">
+      {/* ⛔ RELABELLED IN S12.5, AND THE OLD LABEL WAS THE DEFECT.
+          It said `Organization`, sat above the password form, and did nothing on the password path — its
+          value reaches exactly one call, the `?org=` query on `/auth/sso/{provider}/start`. So it read as
+          tenant selection and was not: a user in two organizations would type the one they wanted, sign in
+          with a password, and land in the other with nothing explaining why.
+
+          ⚠ AND S12.5 MADE IT WORSE BEFORE IT MADE IT BETTER. Once the header carries a real switcher,
+          a second control that looks like it steers is not merely useless — it competes with the correct
+          one. A control that appears to steer and does not is worse than no control. */}
+      <Field label="Your organization's sign-in name">
         <Input
           value={org}
           onChange={(e) => setOrg(e.target.value)}
           placeholder="acme"
         />
+        <p className="mt-1 text-badge text-ink-secondary">
+          Needed to reach your identity provider. Signing in with a password
+          does not use this — you will land in whichever organizations you
+          belong to.
+        </p>
       </Field>
       <div className="mt-3 space-y-2">
         {providers.includes("google") && (
@@ -336,10 +349,22 @@ function SsoSection({
 function GoogleMark() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
-      <path fill="#4285F4" d="M23 12.27c0-.79-.07-1.54-.2-2.27H12v4.3h6.18a5.3 5.3 0 0 1-2.29 3.47v2.88h3.7C21.74 18.7 23 15.76 23 12.27z" />
-      <path fill="#34A853" d="M12 23c3.1 0 5.7-1.03 7.6-2.79l-3.71-2.88c-1.03.69-2.35 1.1-3.89 1.1-2.99 0-5.52-2.02-6.43-4.73H1.74v2.97A11 11 0 0 0 12 23z" />
-      <path fill="#FBBC05" d="M5.57 13.7a6.6 6.6 0 0 1 0-4.22V6.51H1.74a11 11 0 0 0 0 9.87l3.83-2.68z" />
-      <path fill="#EA4335" d="M12 5.55c1.69 0 3.2.58 4.4 1.72l3.28-3.28C17.7 2.11 15.1 1 12 1A11 11 0 0 0 1.74 6.51l3.83 2.97C6.48 7.57 9.01 5.55 12 5.55z" />
+      <path
+        fill="#4285F4"
+        d="M23 12.27c0-.79-.07-1.54-.2-2.27H12v4.3h6.18a5.3 5.3 0 0 1-2.29 3.47v2.88h3.7C21.74 18.7 23 15.76 23 12.27z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 23c3.1 0 5.7-1.03 7.6-2.79l-3.71-2.88c-1.03.69-2.35 1.1-3.89 1.1-2.99 0-5.52-2.02-6.43-4.73H1.74v2.97A11 11 0 0 0 12 23z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.57 13.7a6.6 6.6 0 0 1 0-4.22V6.51H1.74a11 11 0 0 0 0 9.87l3.83-2.68z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 5.55c1.69 0 3.2.58 4.4 1.72l3.28-3.28C17.7 2.11 15.1 1 12 1A11 11 0 0 0 1.74 6.51l3.83 2.97C6.48 7.57 9.01 5.55 12 5.55z"
+      />
     </svg>
   );
 }
