@@ -5210,3 +5210,50 @@ against a single-use link.
 
 **Every one required a person doing the whole thing once, on the real system.** A suite proves the parts
 agree with the assumptions they were written under; a walk is what tests the assumptions.
+
+---
+
+## ⛔ WHEN A LIMIT IS ENFORCED ONLY AT CREATION, A TEMPORARY GRANT OF THAT LIMIT IS A PERMANENT GRANT OF EVERYTHING CREATED UNDER IT
+
+**Ruled by the founder while setting the trial band, S12.4.**
+
+Tunnex's gateway limit is checked at **enrolment only** — a running gateway is never stopped, deliberately,
+because stopping one disconnects people who did nothing. That rule is right and it is load-bearing.
+
+Now issue a **trial** on the Scale band:
+
+> ## ⛔ **SOMEONE ENROLS 1,000 GATEWAYS, LETS THE TRIAL LAPSE, AND KEEPS ALL 1,000 — FOREVER.**
+
+They can reconfigure and use them indefinitely. **That is not a trial. It is a permanent Scale licence that
+activates the moment the trial ends.** And Growth does not fix it — it makes the number 20 instead of 1,000.
+
+### ⭐ THE QUESTION TO ASK
+
+> ## **FOR EVERY TRIAL OR TEMPORARY ELEVATION: WHAT SURVIVES WHEN IT ENDS?**
+
+The grant expires. **The things created under it do not.** Anywhere a limit is checked at create-time —
+seats, gateways, projects, keys, integrations, storage — the temporary tier is really a permanent
+entitlement to whatever was provisioned while it was active. The expiry closes the *door*, not the *room*.
+
+**The trial ceiling is therefore not "enough to be useful". It is the number you are content to leave
+running forever**, because that is what you are granting. Two gateways is what a customer needs to see
+site-to-site, HA and cross-site DNS work, and two is a ceiling worth conceding permanently. Both halves have
+to be true at once.
+
+### ⚠ AND THIS IS TWO CORRECT RULINGS COLLIDING, WHICH IS WHY IT WAS EASY TO MISS
+
+- *"A trial should show the customer everything the product can do."* — correct.
+- *"Nothing running is ever stopped."* — correct.
+
+**They are individually right and jointly produce a permanent free Scale licence.** Neither is wrong; the
+combination is.
+
+⛔ **The second wins, and the reason generalises: it is OLDER and MORE LOAD-BEARING.** It protects people
+who did nothing wrong from being disconnected, and it is depended on by every other degradation rule in the
+model. The trial-generosity ruling was proposed later and **without being checked against it.**
+
+> ## ⭐ **A NEW RULING MUST BE CHECKED AGAINST THE STANDING ONES IT INTERACTS WITH — AND WHEN TWO COLLIDE,
+> ## THE OLDER, MORE DEPENDED-UPON ONE WINS UNLESS THERE IS A REASON TO REOPEN IT.**
+
+⚠ The tell is that the conflict lives in **neither ruling's own words**. Each reads as obviously right in
+isolation; the defect only appears when you ask what state the system is in *after* one of them fires.
