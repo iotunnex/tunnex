@@ -2,7 +2,7 @@
 // Zero Trust policy artifact — the typed structure the control plane pushes to a
 // node agent. It lives outside internal/enterprise so the open-build desired-state
 // path (S7.2) can reference the type even though only the enterprise build ever
-// produces a non-trivial value. The compiler (internal/enterprise/policy) emits
+// produces a non-trivial value. The compiler (internal/policy) emits
 // these; S7.2's agent programs them into the gateway forward chain.
 //
 // Contract: Compile is DETERMINISTIC — equal input DB state produces a
@@ -18,7 +18,7 @@ import (
 )
 
 // ResourceInput and RuleInput are the NEUTRAL CRUD payload DTOs for the policy
-// API. They live here (not in internal/enterprise/policy) so the open-build http
+// API. They live here (not in internal/policy) so the open-build http
 // port + handlers can reference them WITHOUT importing the enterprise package —
 // which would link the enterprise compiler into the open binary and break the
 // edition boundary (the SSO port takes primitives for the same reason). The

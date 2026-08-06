@@ -1,19 +1,13 @@
-//go:build !enterprise
-
 package http
 
 import (
-	"io"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
-	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
 )
 
 // TestGetSsoConfigEditionGatedInOpenBuild proves the SSO-config READ endpoint is
@@ -33,29 +27,15 @@ func TestGetSsoConfigEditionGatedInOpenBuild(t *testing.T) {
 
 // Open build: SSO is not wired, and the SSO endpoints return the edition_required
 // envelope (not a missing route or a crash).
-func TestSSONotWiredInOpenBuild(t *testing.T) {
-	if NewSSOPort(nil, nil, nil, "", slog.Default()) != nil {
-		t.Fatal("open build must NOT wire an SSO port")
-	}
-
-	h, err := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), Deps{Orgs: tenancy.NewService(nil)})
-	if err != nil {
-		t.Fatalf("NewRouter: %v", err)
-	}
-	srv := httptest.NewServer(h)
-	defer srv.Close()
-
-	resp, err := srv.Client().Get(srv.URL + "/api/v1/auth/sso/google/start?org=demo")
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("open build SSO start status = %d, want 403", resp.StatusCode)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	if !contains(body, "edition_required") {
-		t.Fatalf("expected edition_required envelope, got: %s", body)
+// ⛔ REVERSED (S12.1), AND THIS ONE LEAVES A GAP ON PURPOSE. It asserted the open build wired no SSO port.
+// With one binary the port is wired for everyone, and SSO is a PAID gate — so until the LicenseManager
+// slice reads a licence, SSO IS AVAILABLE TO EVERY DEPLOYMENT.
+//
+// ⚠ That is why this asserts the port is wired AND names the gap: see TestPaidCapabilitiesAreNotYetEnforced.
+// DO NOT RELEASE between this slice and the LicenseManager slice.
+func TestSSOPortIsWiredAndNotYetGated(t *testing.T) {
+	if NewSSOPort(nil, nil, nil, "", slog.Default()) == nil {
+		t.Fatal("the SSO port must be wired in the single binary")
 	}
 }
 

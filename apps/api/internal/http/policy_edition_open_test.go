@@ -1,5 +1,3 @@
-//go:build !enterprise
-
 package http
 
 import (
@@ -47,8 +45,12 @@ func TestPolicyEditionGatedInOpenBuild(t *testing.T) {
 // reached is covered by the spec 401-walk; here we assert the gate itself is the
 // 403 (not a nil-panic) for the authorized caller — i.e. the port nil-check is
 // after authorize, mirroring the SSO precedent.
-func TestPolicyPortNilInOpenBuild(t *testing.T) {
-	if NewPolicyPort(nil, nil) != nil {
-		t.Fatal("open build must NOT wire a policy port")
+// ⛔ REVERSED (S12.1). This asserted the open build wired NO policy port. There is one binary now and Zero
+// Trust is COMMUNITY — it must be wired for everyone. Rewritten rather than deleted: the invariant did not
+// disappear, it inverted.
+func TestPolicyPortIsAlwaysWired(t *testing.T) {
+	if NewPolicyPort(nil, nil) == nil {
+		t.Fatal("⛔ the policy port is nil — Zero Trust is Community and must be wired unconditionally. " +
+			"A nil port here means the free tier lost the engine that is the reason to choose Tunnex.")
 	}
 }

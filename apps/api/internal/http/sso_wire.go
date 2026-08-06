@@ -1,0 +1,72 @@
+package http
+
+import (
+	"context"
+	"log/slog"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
+	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
+	"github.com/tunnexio/tunnex/apps/api/internal/sso"
+)
+
+// ssoAdapter bridges the enterprise sso.Service to the http ssoPort interface,
+// resolving org slugs to ids (start) and org ids straight through (config).
+type ssoAdapter struct {
+	pool *pgxpool.Pool
+	svc  *sso.Service
+}
+
+// NewSSOPort builds the enterprise SSO port. Present only in the enterprise
+// build; the open build's stub returns nil (see sso_wire_open.go).
+func NewSSOPort(pool *pgxpool.Pool, sealer *crypto.Sealer, rdb *redis.Client, baseURL string, logger *slog.Logger) ssoPort {
+	configs := sso.NewConfigService(pool, sealer)
+	flows := sso.NewFlowStore(rdb, 10*time.Minute)
+	domains := sso.NewDomainService(pool)
+	svc := sso.NewService(pool, configs, flows, domains, sso.DefaultProviderFactory, baseURL, logger)
+	return &ssoAdapter{pool: pool, svc: svc}
+}
+
+func (a *ssoAdapter) StartLogin(ctx context.Context, orgSlug, provider string) (string, error) {
+	org, err := sqlc.New(a.pool).GetOrganizationBySlug(ctx, orgSlug)
+	if err != nil {
+		return "", apierr.NotFound("org_not_found", "organization not found")
+	}
+	return a.svc.StartLogin(ctx, org.ID, provider)
+}
+
+func (a *ssoAdapter) HandleCallback(ctx context.Context, provider, code, state string) (uuid.UUID, error) {
+	return a.svc.HandleCallback(ctx, provider, code, state)
+}
+
+func (a *ssoAdapter) SetConfig(ctx context.Context, actor, orgID uuid.UUID, provider, clientID, clientSecret, tenantID string, enabled bool) error {
+	return a.svc.Configs().Set(ctx, actor, orgID, provider, clientID, clientSecret, tenantID, enabled)
+}
+
+func (a *ssoAdapter) ViewConfig(ctx context.Context, orgID uuid.UUID, provider string) (SSOConfigView, error) {
+	v, err := a.svc.Configs().View(ctx, orgID, provider)
+	if err != nil {
+		return SSOConfigView{}, err
+	}
+	return SSOConfigView{
+		Provider:          v.Provider,
+		ClientID:          v.ClientID,
+		TenantID:          v.TenantID,
+		SecretFingerprint: v.SecretFingerprint,
+		Enabled:           v.Enabled,
+		UpdatedAt:         v.UpdatedAt,
+	}, nil
+}
+
+func (a *ssoAdapter) CreateDomainClaim(ctx context.Context, actor uuid.UUID, actorEmail string, actorVerified bool, orgID uuid.UUID, domain string) (string, error) {
+	return a.svc.Domains().CreateClaim(ctx, actor, actorEmail, actorVerified, orgID, domain)
+}
+
+func (a *ssoAdapter) VerifyDomain(ctx context.Context, actor, orgID uuid.UUID, domain string) error {
+	return a.svc.Domains().Verify(ctx, actor, orgID, domain)
+}
