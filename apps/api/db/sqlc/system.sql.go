@@ -23,3 +23,29 @@ func (q *Queries) GenerateID(ctx context.Context) (uuid.UUID, error) {
 	err := row.Scan(&id)
 	return id, err
 }
+
+const getSystemSetting = `-- name: GetSystemSetting :one
+SELECT value FROM system_settings WHERE key = $1
+`
+
+func (q *Queries) GetSystemSetting(ctx context.Context, key string) (string, error) {
+	row := q.db.QueryRow(ctx, getSystemSetting, key)
+	var value string
+	err := row.Scan(&value)
+	return value, err
+}
+
+const upsertSystemSetting = `-- name: UpsertSystemSetting :exec
+INSERT INTO system_settings (key, value) VALUES ($1, $2)
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+`
+
+type UpsertSystemSettingParams struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+func (q *Queries) UpsertSystemSetting(ctx context.Context, arg UpsertSystemSettingParams) error {
+	_, err := q.db.Exec(ctx, upsertSystemSetting, arg.Key, arg.Value)
+	return err
+}

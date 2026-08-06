@@ -11,6 +11,12 @@ type Status = {
   expires_at?: string | null;
   grace_ends_at?: string | null;
   clock_went_backwards?: boolean;
+  // ⚠ STORE HEALTH, NOT ENTITLEMENT. These ride BESIDE the tier and never replace it: a deployment whose
+  // store is unreachable is still entitled to whatever it last knew.
+  store_stale?: boolean;
+  store_rejected?:
+    "expired" | "malformed" | "unknown_kid" | "bad_signature" | null;
+  store_detail?: string | null;
 };
 
 /**
@@ -22,13 +28,10 @@ type Status = {
  * ⛔ AND "unlicensed" IS NOT AN ERROR STATE. A deployment with no key is a complete, supported Community
  * deployment. Rendering it as a problem would be a false claim about a working product.
  */
-export function LicenceCard({
-  orgId,
-  canManage,
-}: {
-  orgId: string;
-  canManage: boolean;
-}) {
+// ⚠ NO orgId. The licence is DEPLOYMENT-WIDE and the org-scoped URL it used to call was an error — the
+// org was never passed to the manager, only to authorization and the audit row. Taking an orgId here would
+// have kept implying a per-tenant licence that the data cannot hold.
+export function LicenceCard({ canManage }: { canManage: boolean }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [key, setKey] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -36,24 +39,18 @@ export function LicenceCard({
 
   useEffect(() => {
     void (async () => {
-      const { data } = await api.GET("/api/v1/organizations/{orgId}/license", {
-        params: { path: { orgId } },
-      });
+      const { data } = await api.GET("/api/v1/license", {});
       if (data) setStatus(data as Status);
     })();
-  }, [orgId]);
+  }, []);
 
   async function install(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const { data, error: err } = await api.POST(
-      "/api/v1/organizations/{orgId}/license",
-      {
-        params: { path: { orgId } },
-        body: { key: key.trim() },
-      },
-    );
+    const { data, error: err } = await api.POST("/api/v1/license", {
+      body: { key: key.trim() },
+    });
     setBusy(false);
     if (err) {
       // ⚠ The server's message names WHICH half was wrong and what to do — a truncated key and a key for
@@ -73,9 +70,42 @@ export function LicenceCard({
   const ceiling = (n: number | null | undefined) =>
     n === null || n === undefined ? "unlimited" : String(n);
 
+  // ⛔ THREE STATES THAT LOOK ALIKE AND MUST NOT BE COLLAPSED (S12.1 persistence).
+  //
+  //   nothing here            → the verdict is current. "No licence installed" is a HEALTHY version of this.
+  //   store_stale             → the store is unreachable; the tier shown is the LAST KNOWN one and nobody
+  //                             has been downgraded. Reassure BEFORE explaining.
+  //   store_rejected          → a key IS stored and does not verify. Community is being served on purpose,
+  //                             and the reason is named so the remedy is obvious.
+  //
+  // ⚠ `self_verify_failed` is why the reason is rendered rather than a generic failure: an opaque refusal
+  // cost a live session to diagnose, and the operator reading this has no other source of truth.
+  const storeNote =
+    status?.store_rejected != null
+      ? {
+          tone: "warn" as const,
+          text: status.store_detail ?? "The stored licence key was rejected.",
+        }
+      : status?.store_stale
+        ? {
+            tone: "info" as const,
+            text: status.store_detail ?? "Serving the last known entitlement.",
+          }
+        : null;
+
   return (
     <Card>
       <h2 className="text-title font-semibold text-ink-heading">Licence</h2>
+
+      {storeNote && (
+        <p
+          className={`mt-2 text-cell ${
+            storeNote.tone === "warn" ? "text-warn" : "text-ink-secondary"
+          }`}
+        >
+          {storeNote.text}
+        </p>
+      )}
 
       {status && (
         <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 text-cell">
