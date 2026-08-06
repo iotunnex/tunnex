@@ -5091,3 +5091,61 @@ now aimed at what the new ruling actually forbids.
 ⚠ Corollary to *when a hazard is a seam, census the callers*: **grep for the ruling, not for the file you
 were told about.** Here the ruling lived in a header, a test, and the shape of an interface — and only the
 test objected.
+
+---
+
+## ⛔ A CENSUS NAMES A **SUBJECT**. A SUBJECT CHOSEN BY SHAPE RATHER THAN BY CAPABILITY DRIFTS OUT FROM UNDER IT — SILENTLY
+
+**Found in S12.4, building the admin signing surface in `tunnex-web`.**
+
+⚠ **THIS ENTRY INVERTS THE USUAL SHAPE IN THIS FILE.** Every other one is a guard that fired wrongly, or a
+check that passed vacuously over an empty input set. **This is a guard that stayed SILENT while the exact
+hazard it exists for walked straight past it — with a non-empty input set, asserting truthfully, on a
+subject that had quietly stopped being the right one.**
+
+`issuance-gate.test.ts` existed to enforce one rule: **no unattended path may mint a licence.** It harvested
+`Issuer` factories from source, demanded a disposition for each, and checked the glue files. It was
+mutation-proven three ways. It was a good guard.
+
+Then the admin signing surface was built, and it **calls `signLicence` directly** rather than being an
+`Issuer`. So:
+
+> ## ⛔ **THE ONE PLACE IN THE CODEBASE THAT ACTUALLY MINTS WAS COVERED BY NOTHING — AND EVERY TEST STAYED
+> ## GREEN.**
+
+No red. No warning. The census kept passing **because it was still censusing issuer factories correctly**;
+there simply were no longer any interesting ones.
+
+### ⭐ THE TRANSFERABLE HALF
+
+**"Issuer factories" was a PROXY for "things that mint."** The proxy was exact when written — every mint
+went through a factory — and it stopped being exact the moment minting moved out of one. **Nothing
+announced the change, because a proxy failing does not look like a failure. It looks like a pass.**
+
+> ## ⭐ **ASK WHAT THE HAZARD *IS*, NOT WHERE IT CURRENTLY LIVES.**
+
+The hazard is *"a signature can be produced here."* The capability that expresses it is `signLicence`, and
+**importing that function IS the minting capability** — a subject that cannot drift, because it is the
+thing itself rather than a container the thing happened to sit in at the time.
+
+Subjects that are shapes and will drift: *files matching a name pattern · things in a directory · a
+particular interface · a naming convention · handlers with a given signature.* Subjects that are
+capabilities and will not: *callers of the dangerous function · holders of the dangerous permission ·
+writers to the dangerous table.*
+
+⚠ **The tell is a census whose subject is described in terms of CODE ORGANISATION** rather than in terms of
+what can go wrong. Organisation is a thing engineers change casually; risk is not.
+
+### ⚠ AND HOW IT WAS FOUND IS PART OF THE LAW
+
+**By building the very thing the guard exists to watch.**
+
+Nothing else would have. Reviewing the guard would have found it correct. Re-running it would have found it
+green. Mutating it would have found it sensitive — **to the subject it had, which is exactly the assertion
+being tested and not the choice being tested.**
+
+> ## ⛔ **MUTATION-TESTING PROVES THE ASSERTION. ONLY EXERCISING THE HAZARD PROVES THE SUBJECT.**
+
+So when a guard protects a rule you are about to build something under: **build it, and check the guard
+notices.** A guard that stays silent through the addition it was written for is not passing — it is
+absent, and it will keep reporting that everything is fine.
