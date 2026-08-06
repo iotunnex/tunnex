@@ -80,9 +80,12 @@ func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) erro
 //     first org exists, which is why it needs no flag: the condition that opens it is destroyed by using
 //     it, exactly once, forever.
 //
-//  2. AN INSIDER — the caller is already a member of some organization. They were admitted by someone
-//     already inside (an invitation, or SSO domain capture), so creating another is an act by a known
-//     party, not by a stranger. This is what the org switcher's "+ New organization" runs on.
+//  2. A HOLDER of `users.can_create_orgs` — the deployment itself has said this person may.
+//
+//     ⛔ NOT "IS A MEMBER OF SOMETHING", WHICH IS WHAT THIS ACCEPTED BEFORE AND IS THE WRONG SEAM.
+//     Membership in org A is authority INSIDE org A; it cannot license creating org B, which A has no
+//     relationship to. Every authority the identity model carries is `map[orgID]role` — org-keyed by
+//     construction — so "may this person create AN ORGANIZATION" had no carrier at all until 0073.
 //
 // ⛔ EVERYONE ELSE IS REFUSED, AND THAT IS THE WHOLE FIX. A verified account with no membership lands
 // NOWHERE until it is invited or its domain is captured — and both of those are acts by someone already
@@ -99,12 +102,12 @@ func (s *Service) checkMayCreateOrg(ctx context.Context, creator uuid.UUID) erro
 	if ever == 0 {
 		return nil // bootstrap: this deployment has never been set up
 	}
-	mine, err := s.q.ListMembershipsByUser(ctx, creator)
+	may, err := s.q.UserMayCreateOrgs(ctx, creator)
 	if err != nil {
 		return err
 	}
-	if len(mine) > 0 {
-		return nil // an insider, admitted by someone already here
+	if may {
+		return nil // the deployment granted this person the capability
 	}
 	// ⚠ REGISTERED HERE, BESIDE THE CHANGE THAT ALTERED ITS MEANING: `/api/v1/auth/signup` HAS NO RATE
 	// LIMIT. The only throttle in the router is `rekeyOnly(newRekeyThrottle(...))`, scoped to the agent
@@ -213,6 +216,17 @@ func (s *Service) CreateOrganization(ctx context.Context, creator uuid.UUID, nam
 			return mapDBError(e)
 		}
 		if _, e = q.UpsertMembership(ctx, sqlc.UpsertMembershipParams{OrgID: org.ID, UserID: creator, Role: rbac.RoleOwner}); e != nil {
+			return e
+		}
+		// ⛔ BOOTSTRAP GRANTS THE CAPABILITY, IN THE SAME TRANSACTION THAT USES IT.
+		//
+		// The first account creates the first organization because the deployment has never been set up —
+		// and must not have to re-derive that permission afterwards, because the condition that allowed it
+		// is destroyed by the act. Writing the grant here means the founder's authority OUTLIVES the
+		// window it came from, and the window itself stays shut forever.
+		//
+		// ⚠ Idempotent and harmless for an existing holder: this path is only reachable when `ever == 0`.
+		if e = q.GrantOrgCreation(ctx, creator); e != nil {
 			return e
 		}
 		return writeAudit(ctx, q, org.ID, &creator, "org.created", "organization", org.ID.String(),

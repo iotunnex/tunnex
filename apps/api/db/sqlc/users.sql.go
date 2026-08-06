@@ -14,7 +14,7 @@ import (
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, name, password_hash)
 VALUES ($1, $2, $3)
-RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at
+RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs
 `
 
 type CreateUserParams struct {
@@ -36,12 +36,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.CanCreateOrgs,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at FROM users
+SELECT id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs FROM users
 WHERE email = $1 AND deleted_at IS NULL
 `
 
@@ -58,12 +59,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.CanCreateOrgs,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at FROM users
+SELECT id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs FROM users
 WHERE id = $1 AND deleted_at IS NULL
 `
 
@@ -80,8 +82,23 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.CanCreateOrgs,
 	)
 	return i, err
+}
+
+const grantOrgCreation = `-- name: GrantOrgCreation :exec
+UPDATE users SET can_create_orgs = true, updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+// ⚠ Used ONCE, at bootstrap, inside the same transaction that creates the first organization.
+// ⛔ `deleted_at IS NULL` IS NOT BOILERPLATE HERE — the lint asked and the answer is a real filter, not an
+// annotation. Granting deployment-level authority to a soft-deleted account would arm an identity that is
+// meant to be gone, and a later undelete would restore it silently holding a capability nobody granted it.
+func (q *Queries) GrantOrgCreation(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, grantOrgCreation, id)
+	return err
 }
 
 const markEmailVerified = `-- name: MarkEmailVerified :exec
@@ -132,7 +149,7 @@ INSERT INTO users (id, email, name)
 VALUES ($1, $2, $3)
 ON CONFLICT (id) DO UPDATE
     SET email = EXCLUDED.email, name = EXCLUDED.name
-RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at
+RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs
 `
 
 type UpsertUserParams struct {
@@ -155,6 +172,18 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.CanCreateOrgs,
 	)
 	return i, err
+}
+
+const userMayCreateOrgs = `-- name: UserMayCreateOrgs :one
+SELECT can_create_orgs FROM users WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) UserMayCreateOrgs(ctx context.Context, id uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, userMayCreateOrgs, id)
+	var can_create_orgs bool
+	err := row.Scan(&can_create_orgs)
+	return can_create_orgs, err
 }

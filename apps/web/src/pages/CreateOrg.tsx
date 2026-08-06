@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { PRODUCT_NAME } from "../brand";
 import { api, apiErrorCode, apiErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { CeilingUpgrade } from "../components/CeilingUpgrade";
 import { AuthLayout } from "../components/AuthLayout";
 import { Button, ErrorText, Field, Input } from "../components/ui";
 
@@ -39,6 +40,15 @@ export default function CreateOrg() {
   const [slugEdited, setSlugEdited] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [capped, setCapped] = useState(false);
+  // ⚠ Distinguishes the two audiences of one refusal: a zero-org visitor (who cannot install anything and
+  // needs an invitation) from a capability holder already inside (who can, and should be offered the route).
+  const [ceilingMsg, setCeilingMsg] = useState<string | null>(null);
+  // ⚠ A HOLDER ALREADY INSIDE vs A ZERO-ORG VISITOR — one refusal, two audiences. The visitor cannot
+  // install a licence (no org, no settings screen, no owner role) and needs an invitation; the holder can,
+  // and gets the route. `can_create_orgs` is the honest discriminator: only a holder reaches this page
+  // with an organization already in hand.
+  const hasOrg =
+    state.status === "authed" && Boolean(state.user.can_create_orgs);
   const [busy, setBusy] = useState(false);
 
   // Verified-email gate (decision 3): unverified users can't create an org, so
@@ -87,6 +97,14 @@ export default function CreateOrg() {
         if (apiErrorCode(error) === "invitation_required") {
           return setCapped(true);
         }
+        // ⭐ THE ORG CEILING NOTICE FINALLY HAS A CALLER AN OWNER CAN REACH. Until the switcher's "+ New",
+        // this branch was only reachable by a ZERO-ORG visitor — never by the person who would actually
+        // pay. A holder hitting the ceiling here gets the route, not a dead end.
+        if (apiErrorCode(error) === "org_limit_reached" && hasOrg) {
+          return setCeilingMsg(
+            apiErrorMessage(error, "Could not create the organization."),
+          );
+        }
         if (apiErrorCode(error) === "org_limit_reached") {
           const { data: orgs } = await api.GET("/api/v1/organizations");
           if ((orgs?.length ?? 0) > 0)
@@ -105,6 +123,17 @@ export default function CreateOrg() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (ceilingMsg) {
+    return (
+      <AuthLayout>
+        <h1 className="text-xl font-semibold text-white">
+          Organization limit reached
+        </h1>
+        <CeilingUpgrade message={ceilingMsg} kind="organization" />
+      </AuthLayout>
+    );
   }
 
   if (capped) {

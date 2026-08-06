@@ -205,6 +205,9 @@ function ForcedEnroll() {
 // submit path still ends in the server's answer).
 function RequireNoOrg({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<"loading" | "none" | "has">("loading");
+  const { state } = useAuth();
+  const mayCreate =
+    state.status === "authed" && Boolean(state.user.can_create_orgs);
 
   useEffect(() => {
     let cancelled = false;
@@ -224,7 +227,12 @@ function RequireNoOrg({ children }: { children: React.ReactNode }) {
   }, []);
 
   if (status === "loading") return <FullScreenLoading />;
-  if (status === "has") return <Navigate to="/dashboard" replace />;
+  // ⛔ A CAPABILITY HOLDER IS NOT BOUNCED. RequireNoOrg guards the onboarding funnel — it stops a user who
+  // already has an org from re-entering the SIGNUP step. But this route is now also the only place org
+  // creation lives, reached from the switcher's "+ New", so bouncing a holder to /dashboard would make the
+  // affordance a dead link.
+  if (status === "has" && !mayCreate)
+    return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 

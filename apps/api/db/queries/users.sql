@@ -33,3 +33,14 @@ WHERE id = $1 AND deleted_at IS NULL AND email_verified_at IS NULL;
 UPDATE users
 SET status = $2
 WHERE id = $1 AND deleted_at IS NULL;
+
+-- name: UserMayCreateOrgs :one
+SELECT can_create_orgs FROM users WHERE id = $1 AND deleted_at IS NULL;
+
+-- name: GrantOrgCreation :exec
+-- ⚠ Used ONCE, at bootstrap, inside the same transaction that creates the first organization.
+-- ⛔ `deleted_at IS NULL` IS NOT BOILERPLATE HERE — the lint asked and the answer is a real filter, not an
+-- annotation. Granting deployment-level authority to a soft-deleted account would arm an identity that is
+-- meant to be gone, and a later undelete would restore it silently holding a capability nobody granted it.
+UPDATE users SET can_create_orgs = true, updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL;

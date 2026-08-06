@@ -110,7 +110,15 @@ func (s apiServer) Login(ctx context.Context, req api.LoginRequestObject) (api.L
 }
 
 func authUser(user sqlc.User) api.AuthUser {
-	return api.AuthUser{Id: user.ID, Email: openapi_types.Email(user.Email), EmailVerified: user.EmailVerifiedAt.Valid}
+	// ⚠ `can_create_orgs` RIDES ON THE USER ROW, and it is the only deployment-scoped authority this
+	// product has. The UI uses it to decide whether to OFFER creating an organization; the server refuses
+	// regardless (tenancy.checkMayCreateOrg), so a client that lies about it gains nothing — this is an
+	// affordance hint, never the boundary.
+	may := user.CanCreateOrgs
+	return api.AuthUser{
+		Id: user.ID, Email: openapi_types.Email(user.Email),
+		EmailVerified: user.EmailVerifiedAt.Valid, CanCreateOrgs: &may,
+	}
 }
 
 // logoutResponse clears the session cookie in its Visit.
