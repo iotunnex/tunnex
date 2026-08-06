@@ -26,6 +26,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/ipalloc"
+	"github.com/tunnexio/tunnex/apps/api/internal/licence"
 	"github.com/tunnexio/tunnex/apps/api/internal/nodepush"
 	"github.com/tunnexio/tunnex/apps/api/internal/pgerr"
 	"github.com/tunnexio/tunnex/apps/api/internal/subnetguard"
@@ -56,6 +57,9 @@ type Service struct {
 	// check — the SAME one truth the Tunnex client polls, so the two renderings never diverge. nil / a
 	// query error → the export is NOT enriched (pool-only, pre-Part-2 behavior; never fail the mint).
 	exportEnrich func(ctx context.Context, orgID uuid.UUID) (ranges []string, hasDNS bool, err error)
+	// licence answers one question and only one: may a NEW device come into existence right now.
+	// ⚠ nil means allowed — the fail-open default, matching nodes.Service.
+	licence *licence.Manager
 	// rebuildCRL (S9.1 Slice 5) — the SHARED revocation seam: after a device's OVPN client certs are
 	// marked revoked (in the revoke tx), regenerate + store the org's CRL. Wired to ovpn.Service.RebuildCRL;
 	// nil (no OVPN service) → no-op. Called from the ONE device-revoke path (D-S9.5-1 iii).
@@ -163,6 +167,19 @@ type CreateResult struct {
 func (s *Service) Create(ctx context.Context, in CreateInput) (CreateResult, error) {
 	if in.Name == "" {
 		return CreateResult{}, apierr.BadRequest("name_required", "a device name is required")
+	}
+	// ⛔ THE GRACE LADDER (S12.1 slice 7). A device is a principal; enrolling one is GROWTH, and growth is
+	// what an expired licence stops. Every device already issued keeps its tunnel, and no connected user is
+	// ever disconnected — the check is here, at creation, and nowhere near the data plane.
+	//
+	// ⚠ BEFORE THE KEYGEN, deliberately. Minting a WireGuard private key and then refusing would spend a
+	// one-time secret on a request that was never going to succeed.
+	//
+	// ⛔ AND NOTE WHAT IS *NOT* GATED: adding a MEMBER. A device is a principal; a person is a seat, and
+	// there are no seat gates in this product by founder ruling. Grace refusing new users would be a user
+	// count wearing a different name.
+	if e := s.checkNewPrincipalAllowed(); e != nil {
+		return CreateResult{}, e
 	}
 	// THE OVPN-CREATE FORK — ONE SEAM (D-S9.4-MODEL): transport determines only the CREDENTIAL here.
 	// Everything address-and-identity below (cap, pool, row, audit, and the org-wide push that places
@@ -943,4 +960,20 @@ func audit(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID, actor *uuid.UU
 		Action: action, TargetType: &targetType, TargetID: &targetID, Metadata: b,
 	})
 	return err
+}
+
+// checkNewPrincipalAllowed is the grace gate, extracted so it is provable without a database — the
+// wording and the status code are the parts an operator meets.
+func (s *Service) checkNewPrincipalAllowed() error {
+	if s.licence == nil || s.licence.AllowsNewPrincipals(time.Now()) {
+		return nil
+	}
+	return apierr.New(403, "licence_expired", s.licence.NewPrincipalRefusal(time.Now()))
+}
+
+// WithLicence wires the entitlement manager. Chainable, and optional: without it, device creation is never
+// refused for a licence reason.
+func (s *Service) WithLicence(m *licence.Manager) *Service {
+	s.licence = m
+	return s
 }

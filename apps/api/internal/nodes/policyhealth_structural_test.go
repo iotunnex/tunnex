@@ -44,7 +44,12 @@ func TestDesyncSingleWriter(t *testing.T) {
 // signal. If it ever does, the "advisory over the bool" invariant is broken (it became an input).
 func TestDesyncAdvisoryReadOnly(t *testing.T) {
 	forbidden := []string{"policy_desync_since", "PolicyDesyncSince", "degradedKind", "PolicyDegradedKind"}
-	dir := "../enterprise/policy" // compile + push + hash comparison
+	// ⚠ WAS `../enterprise/policy` UNTIL S12.1 SLICE 1 DISSOLVED THE ENTERPRISE TREE. The path was a proxy
+	// for "the compile/push code", and the code moved out from under it. ⭐ THE VACUITY FLOOR BELOW IS THE
+	// ONLY REASON THIS SURFACED AS A FAILURE RATHER THAN AS A GUARD THAT SILENTLY PASSED OVER ZERO FILES —
+	// the same rescue the entitlement census's floor performed in the same slice, on the same day, for the
+	// same cause (docs/laws.md: a census whose subject is a proxy drifts out from under it silently).
+	dir := "../policy" // compile + push + hash comparison
 	seen := false
 	err := filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {

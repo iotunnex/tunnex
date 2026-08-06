@@ -215,7 +215,7 @@ func main() {
 	nodeSvc.SetPolicyProvider(apphttp.NewNodePolicyProvider(pool))
 	nodes.LogPolicyHealthTuning(logger) // S7.4b: assumed R + derived T (operator discoverability)
 	pushHub := nodepush.New()
-	deviceSvc := devices.NewService(pool, pushHub, logger)
+	deviceSvc := devices.NewService(pool, pushHub, logger).WithLicence(licenceMgr)
 	// WF-OVPN-6: device-approval ENFORCEMENT follows the edition (enterprise only). The open build never
 	// enforces approval, so a stored device_approval='on' can't trap new devices when the admin surface is
 	// edition-gated away.
