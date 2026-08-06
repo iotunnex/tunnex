@@ -12,6 +12,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/devices"
 	"github.com/tunnexio/tunnex/apps/api/internal/idpsync"
+	"github.com/tunnexio/tunnex/apps/api/internal/licence"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
 )
 
@@ -26,8 +27,10 @@ func (d syncDeprovisioner) DeactivateForSync(ctx context.Context, orgID, userID 
 
 // NewIdpSyncPort builds the enterprise IdP-sync service: sqlc + AES-GCM sealer + the device pusher
 // (the same org-wide recompile the tenancy sweep uses) + the deactivate sweep behind Deprovisioner.
-func NewIdpSyncPort(pool *pgxpool.Pool, sealer *crypto.Sealer, members *tenancy.MembershipService, pusher *devices.Service, logger *slog.Logger) idpSyncPort {
-	svc := idpsync.NewService(pool, sealer, pusher, syncDeprovisioner{members: members}, logger)
+func NewIdpSyncPort(pool *pgxpool.Pool, sealer *crypto.Sealer, members *tenancy.MembershipService, pusher *devices.Service, lic *licence.Manager, logger *slog.Logger) idpSyncPort {
+	// ⛔ THE LICENCE REACHES THE RECONCILER THROUGH HERE, AND NOWHERE ELSE. It narrows provisioning only;
+	// the deprovision sweep above is untouched by any licence state, by construction.
+	svc := idpsync.NewService(pool, sealer, pusher, syncDeprovisioner{members: members}, logger).WithLicence(lic)
 	// Box-walk / e2e harness: a file-backed FAKE directory replaces live Graph so directory state
 	// can be mutated between sync legs by editing JSON. Gated behind an env var + a loud warning;
 	// never active in a normal deploy. (S7.5.2 slice 5.)

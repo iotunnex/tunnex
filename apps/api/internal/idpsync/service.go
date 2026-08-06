@@ -20,6 +20,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/idpsyncspec"
+	"github.com/tunnexio/tunnex/apps/api/internal/licence"
 )
 
 // Pusher fires the org-wide gateway recompile (<5s). Wired to the device pusher (same one the
@@ -59,6 +60,9 @@ type Service struct {
 	factory ProviderFactory
 	now     func() time.Time
 	logger  *slog.Logger
+	// licence answers ONE question: may the ADDITIVE half of a reconcile run. ⚠ nil => yes, the fail-open
+	// default. There is deliberately no licence hook on the subtractive half anywhere in this package.
+	licence *licence.Manager
 }
 
 func NewService(pool *pgxpool.Pool, sealer *crypto.Sealer, push Pusher, deprov Deprovisioner, logger *slog.Logger) *Service {
@@ -66,6 +70,20 @@ func NewService(pool *pgxpool.Pool, sealer *crypto.Sealer, push Pusher, deprov D
 		pool: pool, q: sqlc.New(pool), sealer: sealer, push: push, deprov: deprov,
 		factory: DefaultProviderFactory, now: time.Now, logger: logger,
 	}
+}
+
+// mayProvision is the predicate handed to the reconciler. ⭐ Extracted so the WIRING is provable without a
+// database — the defect this slice fixes was never a wrong predicate, it was a right one nobody called.
+// ⚠ nil manager => true, the fail-open default.
+func (s *Service) mayProvision() bool {
+	return s.licence == nil || s.licence.Has(licence.FeatIdpSync, s.now())
+}
+
+// WithLicence wires the entitlement manager. ⛔ It can only ever narrow the ADDITIVE half: the subtractive
+// half has no seam to attach to, by construction.
+func (s *Service) WithLicence(m *licence.Manager) *Service {
+	s.licence = m
+	return s
 }
 
 // SetProviderFactory overrides the directory-client factory (box-walk faked directory).
@@ -202,7 +220,18 @@ func (s *Service) reconcileConfig(ctx context.Context, cfg sqlc.IdpSyncConfig) e
 		_ = s.RecordResult(ctx, cfg.OrgID, cfg.Provider, false, false, msg, s.now())
 		return err
 	}
-	r := NewReconciler(prov, s, s.deprov, s.now)
+	// ⛔ D1 — THE PROVISIONING GATE, WIRED (S12.1 slice 9). ⚠ THIS LINE IS THE ENTIRE STORY OF THE SLICE.
+	//
+	// `WithProvisioningGate` and its three reds have existed since S7.5.2. The gate was correct, the tests
+	// were correct, and NOTHING EVER CALLED IT — `mayProvision()` returns true for a nil predicate, so in
+	// production every deployment provisioned unconditionally while a green test suite described a licence
+	// gate in detail (docs/laws.md: unit tests prove BEHAVIOUR, not REACHABILITY — name the trigger and
+	// check it can co-occur with the gate).
+	//
+	// ⭐ AND THE GATE IS HERE, AT THE SEAM, NOT AT A CALL SITE. reconcileConfig is the one path every
+	// reconcile takes — the scheduled poll and the operator's manual Trigger both land here. A gate on
+	// Trigger alone would leave the poller ungated, which is the shape the story paper names.
+	r := NewReconciler(prov, s, s.deprov, s.now).WithProvisioningGate(s.mayProvision)
 	return r.ReconcileConfig(ctx, cfg.OrgID, cfg.Provider)
 }
 
