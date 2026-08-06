@@ -54,3 +54,47 @@ func ClassifySyncHealth(lastSyncOk bool, lastSyncAt *time.Time, createdAt, now t
 	}
 	return TierDegraded
 }
+
+// ── D1: the partially-licensed state ────────────────────────────────────────────────────────────────
+
+// ⛔ THIS IS NOT A FOURTH SyncTier, AND THAT IS THE WHOLE POINT.
+//
+// TierDegraded and TierEscalated mean BROKEN — a poll is failing. A lapsed licence is not a failure: the
+// sync is running and doing exactly the right thing. Folding it into the tier would render a correct
+// deployment as a red one.
+//
+// ⛔ AND THE CONSEQUENCE OF GETTING THAT WRONG IS THE FAIL-OPEN WE JUST CLOSED. An operator who reads
+// "IdP sync: ERROR" does the obvious thing — disconnects or re-enters the credential — and the
+// deprovision half stops with it. **Copy that reads as a fault CAUSES the leak the ruling prevents.**
+//
+// So it rides ALONGSIDE the tier: the tier still says ok, and this says what is and is not happening.
+type ProvisioningState int
+
+const (
+	// ProvisioningActive — licensed. Joiners are provisioned, leavers are removed.
+	ProvisioningActive ProvisioningState = iota
+	// ProvisioningPaused — the licence has lapsed. New members are no longer provisioned; removals and
+	// deprovisions are STILL APPLIED (D1).
+	ProvisioningPaused
+)
+
+// The operator-facing copy, as constants rather than strings assembled at a call site, so the wording is
+// one truth and is testable. The customer is entitled to know their deployment is still talking to their
+// IdP on a lapsed licence — §2 of docs/S12.1-D1-idpsync-release.md accepts that it keeps calling, on the
+// condition that it is VISIBLE rather than silent.
+const (
+	ProvisioningPausedTitle = "Directory sync is partially licensed"
+	ProvisioningPausedBody  = "Your licence has lapsed, so new members are no longer being added from your " +
+		"directory. Removals are still being applied: someone removed or disabled in your directory still " +
+		"loses access here. Renew to resume adding members."
+)
+
+// DescribeProvisioning returns the operator-facing title and body for a provisioning state, or empty
+// strings when nothing needs saying. ⚠ Empty on Active by design — a permanent "provisioning is working"
+// banner trains the reader to stop seeing the line that matters when it changes.
+func DescribeProvisioning(p ProvisioningState) (title, body string) {
+	if p == ProvisioningPaused {
+		return ProvisioningPausedTitle, ProvisioningPausedBody
+	}
+	return "", ""
+}
