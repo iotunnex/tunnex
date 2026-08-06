@@ -5000,3 +5000,51 @@ A decisions paper is read by people reconstructing *why*; it can hold a claim th
 for years because nobody has to act on it. An operator doc has to be **executable by a stranger**, and the
 first step that cannot be written is a claim that was never true. **That is a cheap check and it is
 available for any claim about a system's operation: try writing the instructions.**
+
+---
+
+## ⛔ WHEN A HAZARD IS A **SEAM**, CENSUS THE CALLERS BEFORE FIXING THE FILE THAT NAMED IT
+
+**Found in S12.4, moving licence issuance into `tunnex-web`.**
+
+A comment in `src/pages/api/trial/verify.ts` read:
+
+> *"The one-line issuer swap point: when the product's real signer ships, replace `placeholderKeyIssuer()`
+> with it — nothing else changes."*
+
+That comment **instructs the next person to create the defect**, and taking it looks like following
+instructions: offline verification means no revocation, so an automated mint is a mistake that cannot be
+taken back. Bad enough on its own.
+
+⛔ **But the comment names ONE caller, and the seam has TWO.** `onTrialApproved` is also called by
+`lifecycle.ts`'s promote leg, driven by the **daily cron at 03:17 UTC, unattended, in a loop over every
+parked trial.**
+
+> ## ⛔ **FIXING THE FILE THAT CARRIES THE INVITATION LEAVES THE CALLER NOBODY THINKS TO CHECK — AND THAT
+> ## ONE RUNS WITH NO HUMAN PRESENT.**
+
+### ⭐ THE ASYMMETRY THAT MAKES THIS GENERAL
+
+**The file with the warning is the SAFE one.** Someone was thoughtful enough to write a comment there — so
+that is where attention has already been paid, where reviewers look, and where a fix gets proposed.
+
+**The dangerous caller is the one where nobody wrote anything**, because nobody was thinking about the
+hazard when they wrote it. Its silence is not evidence of safety; it is evidence that the hazard was never
+considered there.
+
+> ## ⭐ **A WARNING MARKS WHERE SOMEONE WAS PAYING ATTENTION, NOT WHERE THE RISK IS CONCENTRATED. THE
+> ## UNMARKED CALLER IS THE ONE TO FIND.**
+
+### WHAT TO DO
+
+⛔ **Before fixing a file that names a hazard, enumerate every caller of the seam it names.** Then put the
+guard **at the seam**, not at the call site — so new callers inherit it, and the fix does not depend on
+anyone remembering how many there were.
+
+Here that meant: the human gate lives in the `Issuer` implementation, not in `verify.ts`; and the guard
+(`issuance-gate.test.ts`) **harvests issuer names from source and checks every glue file**, rather than
+asserting something about the one file that happened to carry the comment.
+
+⚠ **And the corollary, which cost a red test to learn:** a ruling may be recorded in more than one place.
+The same reversal touched a comment **and** a test asserting `src/` contained no Ed25519. Only the test
+objected. **Grep for the ruling, not just for the file you were told about.**
