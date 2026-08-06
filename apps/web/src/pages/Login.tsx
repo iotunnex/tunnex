@@ -256,9 +256,24 @@ function BrowserLogin() {
       <p className="mt-4 text-xs text-slate-600">{GENERIC_202_NOTE}</p>
 
       <div className="mt-5 flex justify-between text-xs text-slate-400">
-        <Link to="/signup" className="hover:text-slate-200">
-          Create an account
-        </Link>
+        {/* ⛔ NO PUBLIC SIGNUP AFTER SETUP. A self-hosted deployment is ONE COMPANY: everyone inside
+            arrives by invitation or SSO domain capture, both acts by someone already here. An open form
+            after setup produces only orphan accounts on a private control plane.
+
+            ⚠ HIDING IS HALF THE FIX AND IS NOT THE BOUNDARY — auth.Signup refuses `signup_closed` on the
+            server regardless. Both halves exist because a hidden link is not a closed door, and a refused
+            endpoint behind a visible link is a dead end.
+
+            ⚠ `meta === null` KEEPS IT HIDDEN. A failed /meta read must not offer signup on a deployment
+            that has closed it; the first run's deployment answers reliably or nothing is bootstrapped
+            anyway. */}
+        {meta?.setup_complete === false ? (
+          <Link to="/signup" className="hover:text-slate-200">
+            Create an account
+          </Link>
+        ) : (
+          <span />
+        )}
         <Link to="/forgot-password" className="hover:text-slate-200">
           Forgot password?
         </Link>

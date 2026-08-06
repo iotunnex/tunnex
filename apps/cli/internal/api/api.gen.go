@@ -1250,6 +1250,7 @@ type Meta struct {
 
 	// PublicBaseUrl S8.2c: the control plane's own CONFIGURED public base URL (APP_BASE_URL / install.sh's public address) — the AUTHORITATIVE answer to "where do gateways reach me", independent of how an admin happened to open the dashboard (a tunnel/alias/bare IP would bake the wrong URL into the emitted gateway install command). The gateway-enroll command derives TUNNEX_API_URL/TUNNEX_AGENT_URL from this, never from window.location. Empty when unset (the SPA then falls back to its own origin).
 	PublicBaseUrl *string            `json:"public_base_url,omitempty"`
+	SetupComplete *bool              `json:"setup_complete,omitempty"`
 	SsoProviders  []MetaSsoProviders `json:"sso_providers"`
 }
 

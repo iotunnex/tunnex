@@ -44,10 +44,20 @@ func (s apiServer) GetMeta(ctx context.Context, _ api.GetMetaRequestObject) (api
 	if s.sso != nil {
 		providers = []api.MetaSsoProviders{api.MetaSsoProvidersGoogle, api.MetaSsoProvidersMicrosoft}
 	}
+	// ⛔ THE DEPLOYMENT QUESTION. Unauthenticated, because the login page must answer it before anyone has
+	// signed in — and it is a HINT, never the boundary: auth.Signup refuses on the server regardless.
+	// ⚠ Fail-open to "set up" on a read error: showing a signup form to a stranger because a query blipped
+	// is the wrong direction to fail.
+	setup := true
+	if s.orgs != nil {
+		if done, e := s.orgs.SetupComplete(ctx); e == nil {
+			setup = done
+		}
+	}
 	base := s.appBaseURL    // S8.2c: the CP's authoritative public URL for the gateway-enroll command
 	img := s.nodeAgentImage // WF-2: the (digest-pinnable) agent image the emitted command uses
 	return api.GetMeta200JSONResponse{
-		Body:    api.Meta{Edition: api.MetaEdition(s.editionName()), SsoProviders: providers, ProtocolVersion: policyspec.ProtocolVersion, PublicBaseUrl: &base, NodeAgentImage: &img},
+		Body:    api.Meta{Edition: api.MetaEdition(s.editionName()), SsoProviders: providers, ProtocolVersion: policyspec.ProtocolVersion, PublicBaseUrl: &base, SetupComplete: &setup, NodeAgentImage: &img},
 		Headers: api.GetMeta200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }

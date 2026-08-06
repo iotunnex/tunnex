@@ -227,6 +227,15 @@ function RequireNoOrg({ children }: { children: React.ReactNode }) {
   }, []);
 
   if (status === "loading") return <FullScreenLoading />;
+  // ⛔ THE FORM IS NEVER OFFERED TO SOMEONE WHO CANNOT USE IT.
+  //
+  // RequireNoOrg used to ask ONE question — "do you have an organization?" — and a brand-new account has
+  // none, so it rendered the form. That account does not hold `can_create_orgs`, so submitting it hit a
+  // refusal. ⚠ A form offered to someone who cannot use it is worse than no form: it costs them the
+  // attempt to learn what the screen could have said first.
+  //
+  // ⭐ The invitation card is the correct destination for exactly this state, it already exists, and it
+  // was previously one FAILED SUBMIT away. Now it is the first thing they see.
   // ⛔ A CAPABILITY HOLDER IS NOT BOUNCED. RequireNoOrg guards the onboarding funnel — it stops a user who
   // already has an org from re-entering the SIGNUP step. But this route is now also the only place org
   // creation lives, reached from the switcher's "+ New", so bouncing a holder to /dashboard would make the

@@ -3128,6 +3128,7 @@ export interface components {
             node_agent_image?: string;
             /** @description S8.3 (CW): the control plane's current compiled-artifact version CEILING (policyspec.ProtocolVersion). The cross-site upgrade warning names gateways whose reported max is below this — server-sourced so the UI never hardcodes the ceiling (it bumps with each protocol change; a hardcoded copy would silently fork on the next bump). */
             protocol_version: number;
+            setup_complete?: boolean;
             sso_providers: ("google" | "microsoft")[];
         };
         SignupRequest: {
