@@ -177,7 +177,7 @@ export default function Settings() {
             needs to know why without asking an owner. */}
         {org && (
           <div className="mb-3.5 break-inside-avoid">
-            <LicenceCard orgId={org.id} canManage={myRole === "owner"} />
+            <LicenceCard canManage={myRole === "owner"} />
           </div>
         )}
         <div className="mb-3.5 break-inside-avoid">

@@ -456,6 +456,12 @@ type SsoConfig struct {
 	SecretFingerprint  string    `json:"secret_fingerprint"`
 }
 
+type SystemSetting struct {
+	Key       string    `json:"key"`
+	Value     string    `json:"value"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type User struct {
 	ID              uuid.UUID          `json:"id"`
 	Email           string             `json:"email"`
