@@ -14,8 +14,8 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/idpsync"
-	"github.com/tunnexio/tunnex/apps/api/internal/policy"
 	"github.com/tunnexio/tunnex/apps/api/internal/idpsyncspec"
+	"github.com/tunnexio/tunnex/apps/api/internal/policy"
 )
 
 func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }

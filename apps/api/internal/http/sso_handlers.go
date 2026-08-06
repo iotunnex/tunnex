@@ -12,6 +12,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
+	"github.com/tunnexio/tunnex/apps/api/internal/licence"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 	"github.com/tunnexio/tunnex/apps/api/internal/session"
 )
@@ -40,6 +41,35 @@ type SSOConfigView struct {
 
 func editionRequired() error {
 	return apierr.New(http.StatusForbidden, "edition_required", "SSO is a Tunnex Enterprise feature")
+}
+
+// ⛔ THE SSO GATE (S12.1 slice 8) — AND IT IS DELIBERATELY ONLY HALF OF SSO.
+//
+// It guards CONFIGURING SSO and CLAIMING A DOMAIN — the additive, administrative half. It does NOT guard
+// StartSsoLogin or SsoCallback, and that asymmetry is the whole ruling:
+//
+//	> ⛔ A LICENCE STATE MUST NEVER LOCK A HUMAN OUT OF THE PRODUCT.
+//
+// Gating the LOGIN path would mean an org whose only identity source is Google or Entra loses access to
+// its own console 90 days after an expiry — including access to the screen where the licence is renewed.
+// The refusal would delete the remedy along with the capability, and a customer who forgot to renew would
+// need support to get back in. That is the same shape as the IdP-sync ruling one section over: a licence
+// may stop GRANTING, it must never stop what people already depend on.
+//
+// ⚠ AND IT STILL ENFORCES, which is the part that is easy to doubt. A deployment with no licence cannot
+// configure SSO AT ALL, so there is no config for the login path to use and no one to log in — enforcement
+// is complete for every new deployment. What survives an expiry is only what was already paid for and set
+// up, which is the create-time rule this whole model rests on.
+//
+// ⚠ SURFACED AS A FORK, NOT SETTLED: the alternative reading of "gated capabilities stop" is that SSO
+// login stops too, at the cost of the lockout above. Recorded here so the choice is visible at the seam.
+func (s apiServer) requireSSOAdmin() error {
+	if s.licence.Has(licence.FeatSSO, time.Now()) {
+		return nil
+	}
+	return apierr.New(http.StatusForbidden, "edition_required",
+		"SSO is a paid Tunnex capability. Existing sign-ins are unaffected; install a licence to "+
+			"configure it.")
 }
 
 // StartSsoLogin implements GET /api/v1/auth/sso/{provider}/start.
@@ -125,6 +155,9 @@ func (s apiServer) SetSsoConfig(ctx context.Context, req api.SetSsoConfigRequest
 	if req.Body == nil {
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
+	if err := s.requireSSOAdmin(); err != nil {
+		return nil, err
+	}
 	if s.sso == nil {
 		return nil, editionRequired()
 	}
@@ -147,6 +180,9 @@ func (s apiServer) SetSsoConfig(ctx context.Context, req api.SetSsoConfigRequest
 // honest), then the edition gate on the open build (403 edition_required).
 func (s apiServer) GetSsoConfig(ctx context.Context, req api.GetSsoConfigRequestObject) (api.GetSsoConfigResponseObject, error) {
 	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgView); err != nil {
+		return nil, err
+	}
+	if err := s.requireSSOAdmin(); err != nil {
 		return nil, err
 	}
 	if s.sso == nil {
@@ -180,6 +216,9 @@ func (s apiServer) CreateDomainClaim(ctx context.Context, req api.CreateDomainCl
 	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgUpdate); err != nil {
 		return nil, err
 	}
+	if err := s.requireSSOAdmin(); err != nil {
+		return nil, err
+	}
 	if s.sso == nil {
 		return nil, editionRequired()
 	}
@@ -200,6 +239,9 @@ func (s apiServer) VerifyDomainClaim(ctx context.Context, req api.VerifyDomainCl
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
 	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgUpdate); err != nil {
+		return nil, err
+	}
+	if err := s.requireSSOAdmin(); err != nil {
 		return nil, err
 	}
 	if s.sso == nil {

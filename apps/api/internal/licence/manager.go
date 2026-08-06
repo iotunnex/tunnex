@@ -73,6 +73,16 @@ type Status struct {
 
 // Evaluate answers for a given instant. ⚠ PER READ — see the note on Manager.claims.
 func (m *Manager) Evaluate(now time.Time) Status {
+	// ⛔ A NIL MANAGER IS COMMUNITY, NOT A PANIC — and this is a safety property, not a convenience.
+	//
+	// Every consumer in this story already treats a nil manager as "no licence, Community entitlements",
+	// which is the correct fail-open: an unlicensed deployment must keep the free product. Making the
+	// RECEIVER honour that too means the fail-open cannot be lost by one construction site forgetting the
+	// guard. Without it, a single unguarded field turns "this deployment has no licence" — the most common
+	// state there is — into a 500 on the first request that asks.
+	if m == nil {
+		return Status{State: StateUnlicensed, Tier: TierCommunity}
+	}
 	obs := m.clock.Observe(now)
 
 	m.mu.RLock()
