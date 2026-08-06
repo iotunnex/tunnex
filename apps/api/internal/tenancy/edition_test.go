@@ -48,8 +48,23 @@ func TestOrgLimitByLicence(t *testing.T) {
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback is the point
 
 	// Start from a clean slate within the (rolled-back) transaction.
-	if _, err := tx.Exec(ctx, "UPDATE organizations SET deleted_at = now() WHERE deleted_at IS NULL"); err != nil {
-		t.Fatalf("reset orgs: %v", err)
+	// ⛔ HARD-DELETE, NOT SOFT (S12.5 signup boundary). This used to soft-delete, which leaves
+	// `CountOrganizationsEver > 0` — so the fresh creator below is a STRANGER on an already-set-up
+	// deployment and is correctly refused `invitation_required`. This test is about the CEILING, not the
+	// admission boundary, so it needs a genuinely never-set-up deployment.
+	//
+	// ⚠ Triggers off for this tx only: audit_logs is append-only and refuses the SET NULL the org cascade
+	// attempts. Rolled back either way.
+	if _, err := tx.Exec(ctx, "SET LOCAL session_replication_role = replica"); err != nil {
+		t.Skipf("cannot disable triggers: %v", err)
+	}
+	for _, stmt := range []string{"DELETE FROM memberships", "DELETE FROM organizations"} {
+		if _, err := tx.Exec(ctx, stmt); err != nil {
+			t.Skipf("cannot clear (%s): %v", stmt, err)
+		}
+	}
+	if _, err := tx.Exec(ctx, "SET LOCAL session_replication_role = DEFAULT"); err != nil {
+		t.Fatal(err)
 	}
 
 	creator := uuid.New()
