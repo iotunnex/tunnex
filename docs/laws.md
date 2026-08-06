@@ -4946,3 +4946,57 @@ the promise is made, not when one is needed.** Then decide, per control, whether
 ⚠ **And the asymmetry to watch: detection and response degrade together.** Losing detection quietly makes
 every response plan downstream of it unrunnable, and those plans keep looking complete on paper. **Check
 whether a plan's TRIGGER still exists, not only whether its STEPS do.**
+
+---
+
+## ⛔ A PROPERTY THAT DEPENDS ON A HUMAN PROCEDURE CANNOT BE TESTED OR MUTATION-PROVEN — AND A SENTENCE DESCRIBING IT WILL READ AS A GUARANTEE UNLESS IT SAYS OTHERWISE
+
+**Found in S12.4, writing the operator README for the licence signing key.**
+
+The decisions paper claimed the private key is *"generated inside the Worker and never exists in plaintext
+anywhere else — not on a laptop, not in a password manager, not in a repo."* Confident, specific, and it
+survived four gates of review.
+
+**It is not achievable.** To place a key into a Cloudflare Worker secret you must first hold it as text. So:
+
+> ## ⛔ **THE PRIVATE KEY EXISTS IN PLAINTEXT EXACTLY ONCE, ON THE MACHINE THAT GENERATES IT. THAT IS THE
+> ## ONLY MOMENT THE COMMERCIAL MODEL IS COPYABLE, AND NO CODE CHANGE MOVES IT.**
+
+Everything *after* that moment is enforceable and was enforced — `wrangler secret put` is write-only, and
+the Worker imports the key as **non-extractable** so the runtime, not a convention, prevents export. **The
+one uncoverable instant is the first one.**
+
+### THE CLASS
+
+Some properties are **procedural**: they hold because a person follows steps, not because a system
+constrains them. Shell history off. Nothing pasted into a note. Scrollback cleared.
+
+**There is no test for that, and there is no mutation that proves the test.** The repo's strongest habit —
+*a guard that has only ever passed is indistinguishable from one that does nothing* — **cannot be applied
+here at all**, because there is nothing to mutate.
+
+⛔ **The danger is not the gap. It is that a sentence about a procedural property is indistinguishable in
+tone from a sentence about an enforced one.** *"The key never exists in plaintext"* and *"the key is
+imported non-extractable"* read identically as assurances. One is checked by a runtime; the other is
+checked by whoever last did it, at speed, possibly at night.
+
+### WHAT TO DO
+
+1. **Say which kind it is, in the sentence itself.** A procedural property must be labelled procedural
+   where it is claimed, not only where it is performed.
+2. **Put the steps where the person is** — an operator README, as a ceremony with an order — never as prose
+   in a decisions paper the performer will not be reading.
+3. **Do not let it sit beside enforced properties unmarked.** Adjacency launders it: a procedural claim in
+   a list of mutation-proven ones inherits their credibility.
+
+### ⚠ AND HOW IT SURFACED IS ITS OWN FINDING
+
+**The operator-facing README disproved the decisions paper.** Not a review, not a test, not the four
+rulings the paper had already passed through — *writing down how a person would actually do the thing.*
+
+> ## ⭐ **A DOC WRITTEN FOR SOMEONE ELSE IS A DIFFERENT CHECK FROM A DOC WRITTEN FOR THE RECORD.**
+
+A decisions paper is read by people reconstructing *why*; it can hold a claim that is directionally right
+for years because nobody has to act on it. An operator doc has to be **executable by a stranger**, and the
+first step that cannot be written is a claim that was never true. **That is a cheap check and it is
+available for any claim about a system's operation: try writing the instructions.**
