@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { PRODUCT_NAME } from "../brand";
 import { api, apiErrorCode, apiErrorMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -31,7 +31,7 @@ function slugify(s: string): string {
  *    the server's truth, it never invents the permission.
  */
 export default function CreateOrg() {
-  const { state } = useAuth();
+  const { state, logout } = useAuth();
   const navigate = useNavigate();
   const [name, setName] = useState("");
   // The slug tracks the name until the user edits it directly (then it sticks).
@@ -137,12 +137,22 @@ export default function CreateOrg() {
           </a>
           .
         </p>
-        <Link
-          to="/login"
+        {/* ⛔ SIGN OUT, NOT "back to sign in" — AND THE DIFFERENCE WAS AN INFINITE LOOP.
+            A link to /login for a user who is ALREADY signed in bounces straight back: /login sees an
+            authed session and forwards to /dashboard, RequireOrg finds no membership and forwards to
+            /create-org, which lands here again. The only exit was closing the tab.
+
+            ⚠ AND THIS STATE IS NOW PRODUCED BY DESIGN, which is why the dead end had to go. Signing up
+            creates an ACCOUNT and never an ORGANIZATION, so every new stranger arrives exactly here and
+            stays until somebody inside invites them. The session is the thing trapping them, so ending
+            the session is the only honest exit. */}
+        <button
+          type="button"
+          onClick={() => void logout()}
           className="mt-5 inline-block text-xs text-slate-400 hover:text-slate-200"
         >
-          Back to sign in
-        </Link>
+          Sign out
+        </button>
       </AuthLayout>
     );
   }
