@@ -39,7 +39,9 @@ const EXEMPT: Record<string, string> = {
 };
 
 function testFiles(): string[] {
-  return readdirSync(TEST_DIR).filter((f) => f.endsWith(".test.ts") || f.endsWith(".test.tsx"));
+  return readdirSync(TEST_DIR).filter(
+    (f) => f.endsWith(".test.ts") || f.endsWith(".test.tsx"),
+  );
 }
 
 /** Does this test open a file's CONTENTS? `readdirSync` alone is a path read, not a source read. */
@@ -57,7 +59,9 @@ describe("⛔ every census over source strips comments first", () => {
   });
 
   it("finds tests that actually read source (vacuity floor)", () => {
-    const readers = files.filter((f) => readsSource(readFileSync(join(TEST_DIR, f), "utf8")));
+    const readers = files.filter((f) =>
+      readsSource(readFileSync(join(TEST_DIR, f), "utf8")),
+    );
     expect(readers.length).toBeGreaterThanOrEqual(8);
   });
 
@@ -69,7 +73,10 @@ describe("⛔ every census over source strips comments first", () => {
         expect(EXEMPT[f]!.length).toBeGreaterThan(40);
         // The one exemption reason accepted: it never opens a body. Assert that, do not trust it.
         if (f !== "censuscensus.test.ts") {
-          expect(readsSource(raw), `${f} claims exemption but calls readFileSync`).toBe(false);
+          expect(
+            readsSource(raw),
+            `${f} claims exemption but calls readFileSync`,
+          ).toBe(false);
         }
       });
       continue;
@@ -93,7 +100,7 @@ describe("⛔ every census over source strips comments first", () => {
 describe("the strippers do what they claim", () => {
   it("removes a line comment and a block comment, and keeps a URL", () => {
     const src = [
-      "// import.meta.env.VITE_VISUAL_GALLERY === \"1\"",
+      '// import.meta.env.VITE_VISUAL_GALLERY === "1"',
       "/* client.html */",
       'const u = "https://tunnex.io/client.html";',
       "const flag = 1;",
@@ -119,8 +126,10 @@ describe("the strippers do what they claim", () => {
   });
 
   it("⛔ the block stripper is not fooled by a comment that spans the interesting line", () => {
-    expect(stripJsComments("/*\nloadURL(\"app://tunnex/client.html\")\n*/\nconst x=1;")).not.toContain(
-      "client.html",
-    );
+    expect(
+      stripJsComments(
+        '/*\nloadURL("app://tunnex/client.html")\n*/\nconst x=1;',
+      ),
+    ).not.toContain("client.html");
   });
 });

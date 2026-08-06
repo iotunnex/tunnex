@@ -353,7 +353,14 @@ describe("meshFrom — the sparse cases the wireframe never draws", () => {
     // in a failure tone would claim a link was attempted.
     const m = meshFrom(
       [mkCard("a", "hq-lan", [])],
-      [{ id: "h", name: "gw-hub", status: "active", is_site_hub: true } as Node],
+      [
+        {
+          id: "h",
+          name: "gw-hub",
+          status: "active",
+          is_site_hub: true,
+        } as Node,
+      ],
     );
     expect(m.links).toEqual([]);
     expect(m.nodes.map((n) => n.label)).toContain("hq-lan");
@@ -431,7 +438,12 @@ describe("meshFrom — a node with no link has no link STATE either", () => {
     const m = meshFrom(
       [mk("a", "branch-lan", [spokeGw])],
       [
-        { id: "h", name: "gw-hub", status: "active", is_site_hub: true } as Node,
+        {
+          id: "h",
+          name: "gw-hub",
+          status: "active",
+          is_site_hub: true,
+        } as Node,
       ],
     );
     expect(m.nodes.find((n) => n.label === "branch-lan")?.tone).toBe("down");

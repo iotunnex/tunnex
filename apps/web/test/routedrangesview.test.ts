@@ -227,7 +227,9 @@ describe("forwardsEmptyCopy", () => {
     for (const copy of [forwardsEmptyCopy(0), forwardsEmptyCopy(3)]) {
       // `[^.]*` deliberately: the SECOND sentence of the non-empty branch says zones may well BE configured,
       // which is the honest clarification. The banned claim is "no zones are configured" WITHIN one sentence.
-      expect(copy).not.toMatch(/\bno\b[^.]*\b(forwards?|zones?)\b[^.]*\bconfigured\b/i);
+      expect(copy).not.toMatch(
+        /\bno\b[^.]*\b(forwards?|zones?)\b[^.]*\bconfigured\b/i,
+      );
       expect(copy.toLowerCase()).toContain("reachable");
     }
   });
@@ -246,7 +248,9 @@ describe("sortForwards", () => {
       { domain: "corp.local", resolver_ip: "10.20.0.10" },
     ];
     const snapshot = JSON.stringify(input);
-    expect(sortForwards(input).map((f) => `${f.domain}@${f.resolver_ip}`)).toEqual([
+    expect(
+      sortForwards(input).map((f) => `${f.domain}@${f.resolver_ip}`),
+    ).toEqual([
       "aws.internal@10.10.0.2",
       "corp.local@10.20.0.10",
       "corp.local@10.20.0.53",
@@ -267,7 +271,10 @@ import {
   type Allocation,
 } from "../src/lib/routedrangesview";
 
-const a = (cidr: string, kind: Allocation["kind"] = "approved"): Allocation => ({
+const a = (
+  cidr: string,
+  kind: Allocation["kind"] = "approved",
+): Allocation => ({
   cidr,
   kind,
   label: `${kind}:${cidr}`,
@@ -346,7 +353,8 @@ describe("mapAddressSpace — the three defects the panel was cut and rebuilt fo
     expect(reversed.lit[0].kind).toBe("pool");
     // FULL still beats PARTIAL independently of kind.
     expect(
-      mapAddressSpace([a("10.7.0.0/24"), a("10.7.0.0/16")]).blocks[0].lit[0].state,
+      mapAddressSpace([a("10.7.0.0/24"), a("10.7.0.0/16")]).blocks[0].lit[0]
+        .state,
     ).toBe("full");
   });
 
@@ -369,7 +377,11 @@ describe("mapAddressSpace — the three defects the panel was cut and rebuilt fo
   });
 
   it("N=0 draws nothing rather than an empty grid", () => {
-    expect(mapAddressSpace([])).toEqual({ blocks: [], offMap: [], unparseable: [] });
+    expect(mapAddressSpace([])).toEqual({
+      blocks: [],
+      offMap: [],
+      unparseable: [],
+    });
   });
 });
 
@@ -408,7 +420,11 @@ describe("nextFreeRange — the answer the picture cannot give", () => {
   });
 
   it("merges adjacent and overlapping claims rather than stepping into the seam", () => {
-    const allocs = [a("10.0.0.0/16"), a("10.1.0.0/16"), a("10.1.0.0/24", "pool")];
+    const allocs = [
+      a("10.0.0.0/16"),
+      a("10.1.0.0/16"),
+      a("10.1.0.0/24", "pool"),
+    ];
     expect(nextFreeRange(allocs, block, 16)).toBe("10.2.0.0/16");
   });
 
@@ -421,8 +437,12 @@ describe("nextFreeRange — the answer the picture cannot give", () => {
   });
 
   it("works in the other blocks, at their own scales", () => {
-    expect(nextFreeRange([a("172.16.0.0/16")], BLOCKS[1], 16)).toBe("172.17.0.0/16");
-    expect(nextFreeRange([a("192.168.0.0/24")], BLOCKS[2], 24)).toBe("192.168.1.0/24");
+    expect(nextFreeRange([a("172.16.0.0/16")], BLOCKS[1], 16)).toBe(
+      "172.17.0.0/16",
+    );
+    expect(nextFreeRange([a("192.168.0.0/24")], BLOCKS[2], 24)).toBe(
+      "192.168.1.0/24",
+    );
   });
 
   it("ignores allocations belonging to a DIFFERENT block", () => {
@@ -436,7 +456,10 @@ describe("parseCidr", () => {
     // 172.x and 192.168.x have the high bit set; a signed int32 goes negative and every containment check
     // silently fails, so both blocks would come back empty.
     expect(parseCidr("10.0.0.0/8")).toEqual({ addr: 0x0a000000, prefix: 8 });
-    expect(parseCidr("192.168.4.0/24")).toEqual({ addr: 0xc0a80400, prefix: 24 });
+    expect(parseCidr("192.168.4.0/24")).toEqual({
+      addr: 0xc0a80400,
+      prefix: 24,
+    });
     expect(parseCidr("172.16.0.0/12")!.addr).toBeGreaterThan(0);
   });
 
@@ -458,14 +481,16 @@ describe("utilisationLabel / allocationLabel", () => {
   it("never prints a bare 0.0% for a real allocation, and says 0 for a real zero", () => {
     // A /24 in a /8 is 0.0000015%; toFixed(1) renders "0.0%", which reads as NOTHING IS ROUTED beside a lit
     // cell — the numeric form of the reassuring-empty defect. The two cases mean different things.
-    expect(utilisationLabel(mapAddressSpace([a("10.1.0.0/24")]).blocks[0])).toBe(
-      "<0.1% of /8",
-    );
+    expect(
+      utilisationLabel(mapAddressSpace([a("10.1.0.0/24")]).blocks[0]),
+    ).toBe("<0.1% of /8");
     expect(utilisationLabel(mapAddressSpace([a("10.0.0.0/8")]).blocks[0])).toBe(
       "100.0% of /8",
     );
     expect(
-      utilisationLabel(mapAddressSpace([a("10.1.0.0/16", "pending")]).blocks[0]),
+      utilisationLabel(
+        mapAddressSpace([a("10.1.0.0/16", "pending")]).blocks[0],
+      ),
     ).toBe("0% of /8");
   });
 

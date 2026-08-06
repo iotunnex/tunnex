@@ -32,7 +32,9 @@ function inv(over: Partial<Invitation> = {}): Invitation {
 // it — a stored status is correct at write time and wrong a day later.
 describe("invitationState", () => {
   it("derives expired from the clock, not from a column", () => {
-    expect(invitationState(inv({ expires_at: iso("2026-08-01T00:00:00Z") }), NOW)).toBe("expired");
+    expect(
+      invitationState(inv({ expires_at: iso("2026-08-01T00:00:00Z") }), NOW),
+    ).toBe("expired");
     expect(invitationState(inv(), NOW)).toBe("pending");
   });
 
@@ -55,7 +57,9 @@ describe("invitationState", () => {
   });
 
   it("expires ON the boundary, not after it", () => {
-    expect(invitationState(inv({ expires_at: NOW.toISOString() }), NOW)).toBe("expired");
+    expect(invitationState(inv({ expires_at: NOW.toISOString() }), NOW)).toBe(
+      "expired",
+    );
   });
 });
 
@@ -118,9 +122,21 @@ describe("outstandingCount", () => {
 describe("orderInvitations", () => {
   it("floats actionable states above terminal ones", () => {
     const rows = [
-      inv({ id: "acc", accepted_at: iso("2026-08-02T00:00:00Z"), created_at: iso("2026-08-02T00:00:00Z") }),
-      inv({ id: "rev", revoked_at: iso("2026-08-02T00:00:00Z"), created_at: iso("2026-08-02T00:00:00Z") }),
-      inv({ id: "exp", expires_at: iso("2026-08-01T00:00:00Z"), created_at: iso("2026-07-01T00:00:00Z") }),
+      inv({
+        id: "acc",
+        accepted_at: iso("2026-08-02T00:00:00Z"),
+        created_at: iso("2026-08-02T00:00:00Z"),
+      }),
+      inv({
+        id: "rev",
+        revoked_at: iso("2026-08-02T00:00:00Z"),
+        created_at: iso("2026-08-02T00:00:00Z"),
+      }),
+      inv({
+        id: "exp",
+        expires_at: iso("2026-08-01T00:00:00Z"),
+        created_at: iso("2026-07-01T00:00:00Z"),
+      }),
       inv({ id: "pend", created_at: iso("2026-07-01T00:00:00Z") }),
     ];
     expect(orderInvitations(rows, NOW).map((r) => r.id)).toEqual([
@@ -136,11 +152,17 @@ describe("orderInvitations", () => {
       inv({ id: "old", created_at: iso("2026-07-01T00:00:00Z") }),
       inv({ id: "new", created_at: iso("2026-08-02T00:00:00Z") }),
     ];
-    expect(orderInvitations(rows, NOW).map((r) => r.id)).toEqual(["new", "old"]);
+    expect(orderInvitations(rows, NOW).map((r) => r.id)).toEqual([
+      "new",
+      "old",
+    ]);
   });
 
   it("does not mutate the caller's array", () => {
-    const rows = [inv({ id: "a" }), inv({ id: "b", created_at: iso("2026-08-02T00:00:00Z") })];
+    const rows = [
+      inv({ id: "a" }),
+      inv({ id: "b", created_at: iso("2026-08-02T00:00:00Z") }),
+    ];
     orderInvitations(rows, NOW);
     expect(rows.map((r) => r.id)).toEqual(["a", "b"]);
   });
@@ -157,7 +179,9 @@ describe("inviterLabel", () => {
   });
 
   it("uses the address when there is one", () => {
-    expect(inviterLabel(inv({ invited_by_email: "o@acme.io" }))).toBe("o@acme.io");
+    expect(inviterLabel(inv({ invited_by_email: "o@acme.io" }))).toBe(
+      "o@acme.io",
+    );
   });
 });
 
@@ -189,13 +213,17 @@ describe("inviteErrorCopy", () => {
   });
 
   it("covers the service's other codes", () => {
-    expect(inviteErrorCopy("invite_not_pending")).toMatch(/no pending invitation/i);
+    expect(inviteErrorCopy("invite_not_pending")).toMatch(
+      /no pending invitation/i,
+    );
     expect(inviteErrorCopy("invalid_role")).toMatch(/role/i);
     expect(inviteErrorCopy("account_deactivated")).toMatch(/deactivated/i);
   });
 
   it("does not invent a diagnosis", () => {
-    expect(inviteErrorCopy("brand_new")).toBe("Could not complete the request.");
+    expect(inviteErrorCopy("brand_new")).toBe(
+      "Could not complete the request.",
+    );
     expect(inviteErrorCopy(null)).toBe("Could not complete the request.");
   });
 });

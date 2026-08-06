@@ -61,18 +61,28 @@ describe("deviceCountFor — the false zero", () => {
   it("`unknown` is DISTINCT from `hidden` — allowed-and-failed vs not-allowed", () => {
     // Two different facts: "we could not ask" and "you may not know". Collapsing them would tell an admin
     // their permissions are wrong when the network is.
-    const failed = deviceCountFor({ role: "admin", devices: null, userId: "a" });
-    const notAllowed = deviceCountFor({ role: "member", devices: null, userId: "a" });
+    const failed = deviceCountFor({
+      role: "admin",
+      devices: null,
+      userId: "a",
+    });
+    const notAllowed = deviceCountFor({
+      role: "member",
+      devices: null,
+      userId: "a",
+    });
     expect(failed.kind).toBe("unknown");
     expect(notAllowed.kind).toBe("hidden");
     expect(failed.kind).not.toBe(notAllowed.kind);
   });
 
   it("an admin with a genuinely empty list DOES get 0 — absence is knowable when you may look", () => {
-    expect(deviceCountFor({ role: "admin", devices: [], userId: "a" })).toEqual({
-      kind: "count",
-      n: 0,
-    });
+    expect(deviceCountFor({ role: "admin", devices: [], userId: "a" })).toEqual(
+      {
+        kind: "count",
+        n: 0,
+      },
+    );
   });
 
   it("no label is blank, and `hidden` never implies the member has none", () => {
@@ -108,9 +118,17 @@ describe("deviceCountFor — the false zero", () => {
 // `local password` / `no local password` — and DO NOT infer SSO from the org's `sso_configs`.
 type UnaccountedMemberField = Exclude<
   keyof Member,
-  "user_id" | "email" | "name" | "role" | "status" | "email_verified" | "joined_at"
+  | "user_id"
+  | "email"
+  | "name"
+  | "role"
+  | "status"
+  | "email_verified"
+  | "joined_at"
 >;
-const _memberHasNoAuthField: UnaccountedMemberField extends never ? true : false = true;
+const _memberHasNoAuthField: UnaccountedMemberField extends never
+  ? true
+  : false = true;
 
 describe("the AUTH column has no producer", () => {
   it("⛔ the tripwire is a TYPE assert; this test only keeps it referenced", () => {
@@ -122,7 +140,11 @@ describe("the AUTH column has no producer", () => {
 describe("rosterShape — four gates decided once", () => {
   it("an OWNER on enterprise sees everything", () => {
     const s = rosterShape({ role: "owner", isEnterprise: true });
-    expect(s).toEqual({ showDeviceCount: true, showGroupDerived: true, gateNote: null });
+    expect(s).toEqual({
+      showDeviceCount: true,
+      showGroupDerived: true,
+      gateNote: null,
+    });
   });
 
   it("⛔ an OPEN-EDITION MEMBER is told their ROLE, never sold Enterprise", () => {
@@ -161,7 +183,9 @@ describe("groupAccessState — three causes, three answers", () => {
   it("an OPEN-EDITION OWNER is told EDITION — the upsell reaches whoever can act on it", () => {
     // An owner holds policy:view, so they pass the permission line and land on `edition`. That is the caller a
     // purchase decision belongs to, so this is where naming Enterprise is right.
-    expect(groupAccessState({ ...base, isEnterprise: false }).kind).toBe("edition");
+    expect(groupAccessState({ ...base, isEnterprise: false }).kind).toBe(
+      "edition",
+    );
   });
 
   it("⛔ AN OPEN-EDITION MEMBER IS TOLD FORBIDDEN, MIRRORING THE SERVER — never the upsell", () => {
@@ -176,7 +200,11 @@ describe("groupAccessState — three causes, three answers", () => {
     // So `edition` for this caller both contradicted the server AND advertised Enterprise to someone who
     // would not see groups after buying it — the S14.5 halt shape, forward.
     expect(
-      groupAccessState({ isEnterprise: false, role: "member", groupCount: null }).kind,
+      groupAccessState({
+        isEnterprise: false,
+        role: "member",
+        groupCount: null,
+      }).kind,
     ).toBe("forbidden");
   });
 
@@ -186,20 +214,25 @@ describe("groupAccessState — three causes, three answers", () => {
     // prevents one function up. A member cannot show this: they return `forbidden` at the earlier line
     // regardless, which is why no test reached this branch.
     expect(
-      groupAccessState({ isEnterprise: true, role: "owner", groupCount: null }).kind,
+      groupAccessState({ isEnterprise: true, role: "owner", groupCount: null })
+        .kind,
     ).toBe("failed");
     // And `failed` must not read as an empty result either.
-    expect(groupAccessLabel({ kind: "failed" })).not.toBe(groupAccessLabel({ kind: "none" }));
+    expect(groupAccessLabel({ kind: "failed" })).not.toBe(
+      groupAccessLabel({ kind: "none" }),
+    );
   });
 
   it("separates FORBIDDEN from NONE — the whole point", () => {
     // "You cannot see them" and "there are none" are different facts, and a single "no groups" empty state
     // would be wrong in both.
     expect(
-      groupAccessState({ isEnterprise: true, role: "member", groupCount: null }).kind,
+      groupAccessState({ isEnterprise: true, role: "member", groupCount: null })
+        .kind,
     ).toBe("forbidden");
     expect(
-      groupAccessState({ isEnterprise: true, role: "owner", groupCount: 0 }).kind,
+      groupAccessState({ isEnterprise: true, role: "owner", groupCount: 0 })
+        .kind,
     ).toBe("none");
   });
 
@@ -230,8 +263,10 @@ describe("groupAccessState — three causes, three answers", () => {
 });
 
 describe("roleDistribution — the one of the panel's three promised facts that is served", () => {
-  const m = (role: Member["role"], status: Member["status"] = "active"): Member =>
-    ({ role, status }) as Member;
+  const m = (
+    role: Member["role"],
+    status: Member["status"] = "active",
+  ): Member => ({ role, status }) as Member;
 
   it("⛔ INCLUDES ZEROS — an omitted row reads as a role that does not exist", () => {
     const d = roleDistribution([m("owner"), m("member"), m("member")]);
@@ -248,7 +283,11 @@ describe("roleDistribution — the one of the panel's three promised facts that 
     // The tally counts ACCOUNTS ON THE ROSTER (ruled). `ListOrgMembersWithUser` keeps deactivated rows on
     // purpose, and a deactivated account is refused at login (403 account_deactivated). So `n` must include
     // them — the roster IS 7 — and the split must be visible, or "1 owner" hides an owner who cannot sign in.
-    const d = roleDistribution([m("owner"), m("member"), m("member", "deactivated")]);
+    const d = roleDistribution([
+      m("owner"),
+      m("member"),
+      m("member", "deactivated"),
+    ]);
     expect(d[2]).toEqual({ role: "member", n: 2, deactivated: 1 });
     expect(d[0]).toEqual({ role: "owner", n: 1, deactivated: 0 });
   });
@@ -267,14 +306,21 @@ describe("roleDistribution — the one of the panel's three promised facts that 
 
   it("pluralises, including the zero case", () => {
     // "0 owner" and "1 owners" both read as bugs; the zero takes the plural.
-    expect(roleTallyLabel({ role: "owner", n: 0, deactivated: 0 })).toBe("0 owners");
-    expect(roleTallyLabel({ role: "owner", n: 1, deactivated: 0 })).toBe("1 owner");
-    expect(roleTallyLabel({ role: "admin", n: 2, deactivated: 0 })).toBe("2 admins");
+    expect(roleTallyLabel({ role: "owner", n: 0, deactivated: 0 })).toBe(
+      "0 owners",
+    );
+    expect(roleTallyLabel({ role: "owner", n: 1, deactivated: 0 })).toBe(
+      "1 owner",
+    );
+    expect(roleTallyLabel({ role: "admin", n: 2, deactivated: 0 })).toBe(
+      "2 admins",
+    );
   });
 });
 
 describe("rosterSubtitle — states WHAT IS COUNTED, never who can act", () => {
-  const m = (status: Member["status"]): Member => ({ role: "member", status }) as Member;
+  const m = (status: Member["status"]): Member =>
+    ({ role: "member", status }) as Member;
 
   it("⛔ never claims 'members' who can act — it says accounts on the roster", () => {
     // The first subtitle read "Role hierarchy across N members", which claims WHO CAN ACT while counting
@@ -318,9 +364,15 @@ describe("filterMembers", () => {
   ];
 
   it("matches email, name and role, and is case-insensitive", () => {
-    expect(filterMembers(rows, "ADA").map((r) => r.email)).toEqual(["ada@x.io"]);
-    expect(filterMembers(rows, "stone").map((r) => r.email)).toEqual(["bob@y.io"]);
-    expect(filterMembers(rows, "owner").map((r) => r.email)).toEqual(["ada@x.io"]);
+    expect(filterMembers(rows, "ADA").map((r) => r.email)).toEqual([
+      "ada@x.io",
+    ]);
+    expect(filterMembers(rows, "stone").map((r) => r.email)).toEqual([
+      "bob@y.io",
+    ]);
+    expect(filterMembers(rows, "owner").map((r) => r.email)).toEqual([
+      "ada@x.io",
+    ]);
   });
 
   it("an empty or whitespace query is the IDENTITY, not a match-nothing", () => {

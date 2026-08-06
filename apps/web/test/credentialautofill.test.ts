@@ -114,6 +114,16 @@ describe("every password input declares what it is to the browser", () => {
         }
       }
     }
-    expect(current).toEqual(["src/pages/Login.tsx"]);
+    // ⭐ TWO FORMS LEGITIMATELY ASK FOR A CURRENT PASSWORD, and the second one is the forced first-login
+    // change. `current-password` is the CORRECT token there per the HTML spec — the field genuinely is the
+    // existing credential, and a password manager offering to fill it is helping rather than leaking.
+    //
+    // ⚠ THE GUARD STAYS AN ALLOW-LIST, not a rule that says "only Login". What it exists to catch is a
+    // form that claims to be a sign-in when it is not — an invite-accept or a reset screen mislabelled
+    // that way trains the browser to offer a credential on a page that should be minting a new one.
+    expect(current.sort()).toEqual([
+      "src/pages/ChangePassword.tsx",
+      "src/pages/Login.tsx",
+    ]);
   });
 });

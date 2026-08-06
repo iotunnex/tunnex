@@ -26,7 +26,11 @@ const SRC = join(__dirname, "..", "src");
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((e) => {
     const p = join(dir, e);
-    return statSync(p).isDirectory() ? walk(p) : p.endsWith(".ts") || p.endsWith(".tsx") ? [p] : [];
+    return statSync(p).isDirectory()
+      ? walk(p)
+      : p.endsWith(".ts") || p.endsWith(".tsx")
+        ? [p]
+        : [];
   });
 }
 
@@ -48,7 +52,8 @@ describe("the em-dash is never a placeholder value", () => {
     for (const f of files) {
       const src = stripJsComments(readFileSync(f, "utf8"));
       src.split("\n").forEach((line, i) => {
-        if (AS_A_VALUE.test(line)) offenders.push(`${f.replace(SRC, "src")}:${i + 1}  ${line.trim()}`);
+        if (AS_A_VALUE.test(line))
+          offenders.push(`${f.replace(SRC, "src")}:${i + 1}  ${line.trim()}`);
       });
     }
     expect(offenders).toEqual([]);

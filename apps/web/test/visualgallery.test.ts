@@ -10,7 +10,10 @@ import { stripJsComments } from "./support/source";
 // the build would complain, because the route works perfectly.
 
 const app = stripJsComments(
-  readFileSync(fileURLToPath(new URL("../src/App.tsx", import.meta.url)), "utf8"),
+  readFileSync(
+    fileURLToPath(new URL("../src/App.tsx", import.meta.url)),
+    "utf8",
+  ),
 );
 
 describe("the visual gallery is build-flagged OFF", () => {
@@ -24,11 +27,16 @@ describe("the visual gallery is build-flagged OFF", () => {
     for (const f of [".env", ".env.production", ".env.local"]) {
       let contents = "";
       try {
-        contents = readFileSync(fileURLToPath(new URL(`../${f}`, import.meta.url)), "utf8");
+        contents = readFileSync(
+          fileURLToPath(new URL(`../${f}`, import.meta.url)),
+          "utf8",
+        );
       } catch {
         continue; // absent is correct
       }
-      expect(contents, `${f} sets the gallery flag`).not.toMatch(/VITE_VISUAL_GALLERY\s*=\s*1/);
+      expect(contents, `${f} sets the gallery flag`).not.toMatch(
+        /VITE_VISUAL_GALLERY\s*=\s*1/,
+      );
     }
   });
 });

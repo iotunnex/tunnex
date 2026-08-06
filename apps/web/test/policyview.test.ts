@@ -593,20 +593,35 @@ describe("[75]+[101] accessView — upsell needs only edition; role in-flight is
     // GET /policies as member@ on :8081 answers 403 forbidden, not edition_required. Selling Enterprise to a
     // caller whose role forbids the feature on ANY edition is the S14.5 halt running forward.
     expect(
-      accessView({ ...base, isEnterprise: false, role: "member", canView: false }),
+      accessView({
+        ...base,
+        isEnterprise: false,
+        role: "member",
+        canView: false,
+      }),
     ).toBe("member_gate");
   });
 
   it("OPEN + OWNER -> upsell — the upsell reaches whoever could actually use it", () => {
     // Both arms of the same gate. Without this, "always member_gate" would satisfy the assertion above.
     expect(
-      accessView({ ...base, isEnterprise: false, role: "owner", canView: false }),
+      accessView({
+        ...base,
+        isEnterprise: false,
+        role: "owner",
+        canView: false,
+      }),
     ).toBe("upsell");
   });
 
   it("ENTERPRISE + member -> member_gate — the role answer is the same on both editions", () => {
     expect(
-      accessView({ ...base, isEnterprise: true, role: "member", canView: false }),
+      accessView({
+        ...base,
+        isEnterprise: true,
+        role: "member",
+        canView: false,
+      }),
     ).toBe("member_gate");
   });
   it("[101] enterprise + role in-flight → role_loading, NOT member_gate", () => {
@@ -961,22 +976,32 @@ describe("grantControls — the withhold decision (M3)", () => {
 // says WE KNOW, AND THE ANSWER IS EVERYTHING IS DENIED. Rendering the first as the second is
 // reassuring-empty; rendering the second as the first is alarming about a state that is correct.
 describe("rulesEmptyState — three claims about knowledge, never one message", () => {
-  const ok = <T,>(data: T) => ({ ok: true as const, data });
+  const ok = <T>(data: T) => ({ ok: true as const, data });
   const bad = { ok: false as const, error: "boom" };
 
   it("⛔ a FAILED rules read is `failed`, NEVER an empty-rules claim", () => {
     // The defect direction: a failed read leaves renderedCount at 0, which is exactly how a failure
     // disguises itself as an answer.
     expect(
-      rulesEmptyState({ rulesResult: bad, modeResult: ok("enforcing" as const), renderedCount: 0 }).kind,
+      rulesEmptyState({
+        rulesResult: bad,
+        modeResult: ok("enforcing" as const),
+        renderedCount: 0,
+      }).kind,
     ).toBe("failed");
-    expect(rulesEmptyCopy({ kind: "failed" }).text).not.toMatch(/no rules|0 rules|denied/i);
+    expect(rulesEmptyCopy({ kind: "failed" }).text).not.toMatch(
+      /no rules|0 rules|denied/i,
+    );
     expect(rulesEmptyCopy({ kind: "failed" }).loud).toBe(false);
   });
 
   it("⛔ 0 rules WHILE ENFORCING is LOUD and says everything is denied", () => {
     // The opposite direction: this state is CORRECT and must not be softened into "couldn't load".
-    const s = rulesEmptyState({ rulesResult: ok(0), modeResult: ok("enforcing" as const), renderedCount: 0 });
+    const s = rulesEmptyState({
+      rulesResult: ok(0),
+      modeResult: ok("enforcing" as const),
+      renderedCount: 0,
+    });
     expect(s.kind).toBe("enforcing_empty");
     const c = rulesEmptyCopy(s);
     expect(c.loud).toBe(true);
@@ -988,7 +1013,11 @@ describe("rulesEmptyState — three claims about knowledge, never one message", 
     // `rules.length === 0` used to print "under Enforcing, all device-to-device traffic is denied"
     // regardless of mode. The demo org's mode is `off`, so that sentence was false.
     const c = rulesEmptyCopy(
-      rulesEmptyState({ rulesResult: ok(0), modeResult: ok("off" as const), renderedCount: 0 }),
+      rulesEmptyState({
+        rulesResult: ok(0),
+        modeResult: ok("off" as const),
+        renderedCount: 0,
+      }),
     );
     expect(c.loud).toBe(false);
     expect(c.text).toMatch(/nothing is being denied/i);
@@ -996,16 +1025,25 @@ describe("rulesEmptyState — three claims about knowledge, never one message", 
 
   it("an UNKNOWN mode is `failed` — the consequence sentence depends on it", () => {
     expect(
-      rulesEmptyState({ rulesResult: ok(0), modeResult: bad, renderedCount: 0 }).kind,
+      rulesEmptyState({ rulesResult: ok(0), modeResult: bad, renderedCount: 0 })
+        .kind,
     ).toBe("failed");
     expect(
-      rulesEmptyState({ rulesResult: ok(0), modeResult: null, renderedCount: 0 }).kind,
+      rulesEmptyState({
+        rulesResult: ok(0),
+        modeResult: null,
+        renderedCount: 0,
+      }).kind,
     ).toBe("failed");
   });
 
   it("rows present → `rows`, and the three empty copies are all DISTINCT", () => {
     expect(
-      rulesEmptyState({ rulesResult: ok(3), modeResult: ok("enforcing" as const), renderedCount: 3 }).kind,
+      rulesEmptyState({
+        rulesResult: ok(3),
+        modeResult: ok("enforcing" as const),
+        renderedCount: 3,
+      }).kind,
     ).toBe("rows");
     const texts = (["failed", "enforcing_empty", "off_empty"] as const).map(
       (k) => rulesEmptyCopy({ kind: k }).text,
@@ -1020,7 +1058,9 @@ describe("flowGraphState — the threshold is a variable, not a constant", () =>
     // A test that only ever sees the graph drawn cannot tell a threshold from a constant. Asserting the
     // boundary exactly is what makes it a threshold.
     expect(flowGraphState(FLOW_GRAPH_MAX_RULES).kind).toBe("draw");
-    expect(flowGraphState(FLOW_GRAPH_MAX_RULES + 1).kind).toBe("withheld_too_many");
+    expect(flowGraphState(FLOW_GRAPH_MAX_RULES + 1).kind).toBe(
+      "withheld_too_many",
+    );
   });
 
   it("⛔ WITHHELD SAYS WHY, and names both the count and the limit", () => {
@@ -1047,15 +1087,29 @@ describe("flowGraphState — the threshold is a variable, not a constant", () =>
 
 describe("a deactivated per-user subject is a FACT, never a warning", () => {
   const mk = (status: string) =>
-    [{ user_id: "u9", name: "Grace Okafor", email: "g@x.io", status }] as unknown as Member[];
+    [
+      { user_id: "u9", name: "Grace Okafor", email: "g@x.io", status },
+    ] as unknown as Member[];
   const refs = (status: string) =>
     ruleRow(
-      { id: "r1", src_kind: "user", src_user_id: "u9", dst_kind: "group", dst_group_id: "g1" } as never,
+      {
+        id: "r1",
+        src_kind: "user",
+        src_user_id: "u9",
+        dst_kind: "group",
+        dst_group_id: "g1",
+      } as never,
       [{ id: "g1", name: "Eng" }] as never,
       [],
       mk(status),
       [],
-      { membersLoaded: true, groupsLoaded: true, resourcesLoaded: true, sitesLoaded: true, servicesLoaded: true } as never,
+      {
+        membersLoaded: true,
+        groupsLoaded: true,
+        resourcesLoaded: true,
+        sitesLoaded: true,
+        servicesLoaded: true,
+      } as never,
       [],
     );
 
@@ -1081,14 +1135,23 @@ describe("a deactivated per-user subject is a FACT, never a warning", () => {
 
 describe("flowLayout — the cap and the ordering, both ours to design", () => {
   const e = (id: string, src: string, dst: string, temp = false) => ({
-    id, src, dst, temp, srcKind: "group" as const, dstKind: "resource" as const,
+    id,
+    src,
+    dst,
+    temp,
+    srcKind: "group" as const,
+    dstKind: "resource" as const,
   });
 
   it("⛔ THE CAP AT BOTH SIDES — 4 fits whole, 5 is capped and the remainder is COUNTED", () => {
-    const four = flowLayout(["a", "b", "c", "d"].map((x) => e(x, "s" + x, "d" + x)));
+    const four = flowLayout(
+      ["a", "b", "c", "d"].map((x) => e(x, "s" + x, "d" + x)),
+    );
     expect(four.srcs).toHaveLength(4);
     expect(four.hidden).toBe(0);
-    const five = flowLayout(["a", "b", "c", "d", "z"].map((x) => e(x, "s" + x, "d" + x)));
+    const five = flowLayout(
+      ["a", "b", "c", "d", "z"].map((x) => e(x, "s" + x, "d" + x)),
+    );
     expect(five.srcs).toHaveLength(FLOW_COLUMN_CAP);
     expect(five.hidden).toBe(1); // never silently dropped
   });
@@ -1096,8 +1159,15 @@ describe("flowLayout — the cap and the ordering, both ours to design", () => {
   it("⛔ chosen by EDGE DEGREE, not insertion order", () => {
     // `hub` appears last but carries 3 edges; a degree cap must keep it and drop a 1-edge source.
     const l = flowLayout(
-      [e("1", "a", "x"), e("2", "b", "x"), e("3", "c", "x"), e("4", "d", "x"), e("5", "hub", "x"),
-       e("6", "hub", "y"), e("7", "hub", "z")],
+      [
+        e("1", "a", "x"),
+        e("2", "b", "x"),
+        e("3", "c", "x"),
+        e("4", "d", "x"),
+        e("5", "hub", "x"),
+        e("6", "hub", "y"),
+        e("7", "hub", "z"),
+      ],
       2,
     );
     expect(l.srcs[0].label).toBe("hub");
@@ -1111,13 +1181,24 @@ describe("flowLayout — the cap and the ordering, both ours to design", () => {
     // the wireframe reaches zero because a human chose five edges that do not cross. Asserting `=== 0` here
     // would pin an outcome the algorithm cannot guarantee and would fail on the next fixture row.
     const R = [
-      ["Engineering", "Internal Gitlab"], ["DevOps", "Contractors"], ["192.168.99.0/24", "Staging Database"],
-      ["Engineering", "removed service 0"], ["Grace Okafor", "Staging Database"], ["site eu-lan", "site ap-lan"],
-      ["Contractors", "EU LAN Services"], ["DevOps", "Internal Gitlab"], ["Demo Member", "Engineering"],
-      ["Contractors", "Contractors"], ["Engineering", "Staging Database"],
+      ["Engineering", "Internal Gitlab"],
+      ["DevOps", "Contractors"],
+      ["192.168.99.0/24", "Staging Database"],
+      ["Engineering", "removed service 0"],
+      ["Grace Okafor", "Staging Database"],
+      ["site eu-lan", "site ap-lan"],
+      ["Contractors", "EU LAN Services"],
+      ["DevOps", "Internal Gitlab"],
+      ["Demo Member", "Engineering"],
+      ["Contractors", "Contractors"],
+      ["Engineering", "Staging Database"],
     ].map(([s2, d], i) => ({
-      id: String(i), src: s2, dst: d, temp: false,
-      srcKind: "group" as const, dstKind: "resource" as const,
+      id: String(i),
+      src: s2,
+      dst: d,
+      temp: false,
+      srcKind: "group" as const,
+      dstKind: "resource" as const,
     }));
     const ordered = flowLayout(R);
     const insertion = {
@@ -1129,21 +1210,30 @@ describe("flowLayout — the cap and the ordering, both ours to design", () => {
         .filter((x) => ordered.dsts.some((n) => n.label === x))
         .map((label) => ({ label, kind: "resource" as const })),
     };
-    const before = flowCrossings(insertion), after = flowCrossings(ordered);
-    expect(after).toBeLessThan(before);   // the property
-    expect(before).toBeGreaterThan(0);    // and the input really does tangle, or the claim is vacuous
+    const before = flowCrossings(insertion),
+      after = flowCrossings(ordered);
+    expect(after).toBeLessThan(before); // the property
+    expect(before).toBeGreaterThan(0); // and the input really does tangle, or the claim is vacuous
     expect(after).toBeLessThanOrEqual(2); // pinned at the measured value; a regression is a red
   });
 
   it("⛔ A KNOWN-CROSSING INPUT COMES OUT ORDERED — the cap alone does not fix the tangle", () => {
     // Deliberately reversed: insertion order puts every destination opposite its source.
-    const edges = [e("1", "s1", "d4"), e("2", "s2", "d3"), e("3", "s3", "d2"), e("4", "s4", "d1")];
+    const edges = [
+      e("1", "s1", "d4"),
+      e("2", "s2", "d3"),
+      e("3", "s3", "d2"),
+      e("4", "s4", "d1"),
+    ];
     const ordered = flowLayout(edges);
     expect(flowCrossings(ordered)).toBe(0);
     // And prove the metric is not vacuous: the UNORDERED arrangement really does cross.
     const unordered = {
       ...ordered,
-      dsts: ["d1", "d2", "d3", "d4"].map((l) => ({ label: l, kind: "resource" as const })),
+      dsts: ["d1", "d2", "d3", "d4"].map((l) => ({
+        label: l,
+        kind: "resource" as const,
+      })),
     };
     expect(flowCrossings(unordered)).toBeGreaterThan(0);
   });
@@ -1159,7 +1249,6 @@ describe("flowLayout — the cap and the ordering, both ours to design", () => {
     expect(flowCrossings(l)).toBe(0);
   });
 });
-
 
 describe("flowGlyph / flowTag — every arm of BOTH unions, exhaustively", () => {
   // ⛔ THE DEFECT THIS REPLACES: the kind was guessed by matching the label against members, and
@@ -1191,8 +1280,22 @@ describe("flowGlyph / flowTag — every arm of BOTH unions, exhaustively", () =>
 
   it("the layout carries each node's kind THROUGH, never re-derives it", () => {
     const l = flowLayout([
-      { id: "1", src: "eng", dst: "gitlab", temp: false, srcKind: "group", dstKind: "resource" },
-      { id: "2", src: "10.0.0.0/8", dst: "hq", temp: false, srcKind: "cidr", dstKind: "site" },
+      {
+        id: "1",
+        src: "eng",
+        dst: "gitlab",
+        temp: false,
+        srcKind: "group",
+        dstKind: "resource",
+      },
+      {
+        id: "2",
+        src: "10.0.0.0/8",
+        dst: "hq",
+        temp: false,
+        srcKind: "cidr",
+        dstKind: "site",
+      },
     ]);
     expect(l.srcs.map((n) => n.kind).sort()).toEqual(["cidr", "group"]);
     expect(l.dsts.map((n) => n.kind).sort()).toEqual(["resource", "site"]);
@@ -1214,8 +1317,12 @@ describe("the SECOND threshold is COVERAGE, not count", () => {
   it("a HUB-AND-SPOKE set stays drawn no matter how many rules — the whole argument", () => {
     // 20 rules, all through one source: top-4 covers everything, so nothing is withheld.
     const edges = Array.from({ length: 20 }, (_, i) => ({
-      id: String(i), src: "hub", dst: "d" + (i % 3), temp: false,
-      srcKind: "group" as const, dstKind: "resource" as const,
+      id: String(i),
+      src: "hub",
+      dst: "d" + (i % 3),
+      temp: false,
+      srcKind: "group" as const,
+      dstKind: "resource" as const,
     }));
     const l = flowLayout(edges);
     expect(flowGraphState(edges.length, l.shown.length).kind).toBe("draw");
@@ -1224,11 +1331,17 @@ describe("the SECOND threshold is COVERAGE, not count", () => {
   it("a FULLY-DISTINCT set of the same size is withheld — same N, opposite verdict", () => {
     // Same 20 rules, every pair distinct: top-4 x top-4 covers a minority.
     const edges = Array.from({ length: 20 }, (_, i) => ({
-      id: String(i), src: "s" + i, dst: "d" + i, temp: false,
-      srcKind: "group" as const, dstKind: "resource" as const,
+      id: String(i),
+      src: "s" + i,
+      dst: "d" + i,
+      temp: false,
+      srcKind: "group" as const,
+      dstKind: "resource" as const,
     }));
     const l = flowLayout(edges);
-    expect(flowGraphState(edges.length, l.shown.length).kind).toBe("withheld_unrepresentative");
+    expect(flowGraphState(edges.length, l.shown.length).kind).toBe(
+      "withheld_unrepresentative",
+    );
   });
 
   it("the withheld note names the drawn count AND the total — never just disappears", () => {
@@ -1290,8 +1403,12 @@ describe("cascadeConfirmCopy — names the risk, never a count we do not own", (
   });
 
   it("group and resource differ in the ROLE they name", () => {
-    expect(cascadeConfirmCopy("group", "X").body).toMatch(/source or destination/);
-    expect(cascadeConfirmCopy("resource", "X").body).toMatch(/rule destination/);
+    expect(cascadeConfirmCopy("group", "X").body).toMatch(
+      /source or destination/,
+    );
+    expect(cascadeConfirmCopy("resource", "X").body).toMatch(
+      /rule destination/,
+    );
   });
 
   it("⛔ the typed guard requires an EXACT name — both directions", () => {

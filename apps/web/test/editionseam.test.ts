@@ -50,7 +50,10 @@ function specEnterprisePaths(): Set<string> {
       // Now: the word `enterprise` anywhere in the summary, on a word boundary. Wider means occasional false
       // positives, which are visible and cheap (a red naming a path), against silent false negatives, which
       // are the entire failure mode.
-      if (blk.includes("edition_required") || /summary:.*\benterprise\b/i.test(blk))
+      if (
+        blk.includes("edition_required") ||
+        /summary:.*\benterprise\b/i.test(blk)
+      )
         out.add(path);
     }
     inOp = false;

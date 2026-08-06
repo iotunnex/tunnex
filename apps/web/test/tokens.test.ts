@@ -153,7 +153,10 @@ describe("COVERAGE CENSUS — the CLAIM compared to the ARTIFACT (S14.3 slice 0)
   const css = stripCssComments(
     readFileSync(
       fileURLToPath(
-        new URL("../../../packages/shared/generated/tokens.css", import.meta.url),
+        new URL(
+          "../../../packages/shared/generated/tokens.css",
+          import.meta.url,
+        ),
       ),
       "utf8",
     ),

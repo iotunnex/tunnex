@@ -51,7 +51,11 @@ describe("⛔ the product asks rather than guessing", () => {
   });
 
   it("revoked gateways are never offered as a choice", () => {
-    const nodes = [gw("a", "2026-07-27"), gw("b", "2026-08-01"), gw("c", "2026-08-02", "revoked")];
+    const nodes = [
+      gw("a", "2026-07-27"),
+      gw("b", "2026-08-01"),
+      gw("c", "2026-08-02", "revoked"),
+    ];
     expect(selectableNodes(nodes).map((n) => n.id)).toEqual(["a", "b"]);
   });
 });

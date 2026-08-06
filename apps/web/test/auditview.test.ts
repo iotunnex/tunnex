@@ -36,7 +36,10 @@ describe("resolveActor", () => {
 
   it("⛔ named-system and unattributed never render the same label", () => {
     // One assertion for the whole defect: these two were indistinguishable.
-    const named = resolveActor({ actor_system: "device-health", action: "x" }, members);
+    const named = resolveActor(
+      { actor_system: "device-health", action: "x" },
+      members,
+    );
     const none = resolveActor({ action: "x" }, members);
     expect(named.label).not.toBe(none.label);
     expect(named.gap).not.toBe(none.gap);
@@ -60,13 +63,20 @@ describe("resolveActor", () => {
 
   it("prefers the system actor when a row somehow carries both", () => {
     // Defensive: `actor_system` is the more specific claim, and a row with both is malformed.
-    const a = resolveActor({ actor_id: "u1", actor_system: "idp-sync", action: "x" }, members);
+    const a = resolveActor(
+      { actor_id: "u1", actor_system: "idp-sync", action: "x" },
+      members,
+    );
     expect(a.kind).toBe("system");
   });
 
   it("treats a blank actor field as absent, not as a name", () => {
-    expect(resolveActor({ actor_system: "   ", action: "x" }, members).kind).toBe("unattributed");
-    expect(resolveActor({ actor_id: "  ", action: "x" }, members).kind).toBe("unattributed");
+    expect(
+      resolveActor({ actor_system: "   ", action: "x" }, members).kind,
+    ).toBe("unattributed");
+    expect(resolveActor({ actor_id: "  ", action: "x" }, members).kind).toBe(
+      "unattributed",
+    );
   });
 });
 
@@ -82,7 +92,9 @@ describe("unattributedCount", () => {
   });
 
   it("is zero when every row is attributed", () => {
-    expect(unattributedCount([{ actor_system: "device-health", action: "a" }])).toBe(0);
+    expect(
+      unattributedCount([{ actor_system: "device-health", action: "a" }]),
+    ).toBe(0);
   });
 });
 
@@ -115,7 +127,11 @@ describe("UNATTRIBUTED_NOTE", () => {
 // second-class read that can be slow or fail.
 describe("resolveActor — rosterKnown", () => {
   it("⛔ never asserts FORMER when the roster was never loaded", () => {
-    const a = resolveActor({ actor_id: "019fc421-aaaa", action: "x" }, [], false);
+    const a = resolveActor(
+      { actor_id: "019fc421-aaaa", action: "x" },
+      [],
+      false,
+    );
     expect(a.kind).toBe("unknown_human");
     expect(a.label).not.toMatch(/former/i);
     expect(a.label).toMatch(/^member 019fc421/);
@@ -124,13 +140,17 @@ describe("resolveActor — rosterKnown", () => {
 
   it("does assert FORMER when we actually looked and they were absent", () => {
     // The claim is allowed only when it was checked.
-    const a = resolveActor({ actor_id: "019fc421-aaaa", action: "x" }, members, true);
+    const a = resolveActor(
+      { actor_id: "019fc421-aaaa", action: "x" },
+      members,
+      true,
+    );
     expect(a.label).toMatch(/former member/i);
   });
 
   it("defaults to rosterKnown so existing callers keep the checked meaning", () => {
-    expect(resolveActor({ actor_id: "019fc421-aaaa", action: "x" }, members).label).toMatch(
-      /former member/i,
-    );
+    expect(
+      resolveActor({ actor_id: "019fc421-aaaa", action: "x" }, members).label,
+    ).toMatch(/former member/i);
   });
 });

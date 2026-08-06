@@ -23,7 +23,9 @@ describe("the standing ceiling notice", () => {
   // ⚠ BOTH SENTENCES PROMISE THE SAME THING FIRST, because the operator's real question is "is my fleet
   // about to stop", and the answer is no.
   it("always says nothing running is affected", () => {
-    expect(ceilingSentence(6, 1, "community")).toContain("Nothing running is affected");
+    expect(ceilingSentence(6, 1, "community")).toContain(
+      "Nothing running is affected",
+    );
   });
 
   it("pluralises the ceiling", () => {

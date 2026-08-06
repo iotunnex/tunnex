@@ -4107,6 +4107,10 @@ components:
         # that creates org B. ⚠ The UI uses it ONLY to decide whether to offer the affordance; the server
         # refuses regardless, so a client that ignores this field gains nothing.
         can_create_orgs: { type: boolean }
+        # ⛔ The one-time bootstrap credential was printed to the logs, so it is compromised the moment it
+        # works. The server refuses everything until it is changed; this field is what lets the CLIENT route
+        # there instead of showing a red error on whatever page the user happened to land on.
+        must_change_password: { type: boolean }
         # S7.5.5 D11: the user's UNUSED recovery-code count — CARDINALITY ONLY, never the codes
         # (nothing recoverable). Drives the low-remaining (<=3) + last-code warnings; returned on
         # /auth/me and on mfa/verify (the verify moment is exactly when a just-burned code matters).

@@ -51,7 +51,9 @@ describe("no caller overrides a baked-in utility class", () => {
           if (!cls) continue;
           for (const c of cls.split(/\s+/)) {
             if (families.some((fam) => c.startsWith(fam))) {
-              bad.push(`${f.replace(SRC, "src")}: <${comp} className="…${c}…">`);
+              bad.push(
+                `${f.replace(SRC, "src")}: <${comp} className="…${c}…">`,
+              );
             }
           }
         }
