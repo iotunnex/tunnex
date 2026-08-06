@@ -26,7 +26,7 @@ function slugify(s: string): string {
  *  - Unverified email: create-org is verified-gated server-side (requireVerifiedUser),
  *    so we route to /verify-pending up front — the refusal is structural, not a
  *    surprise 403 after the user fills in the form.
- *  - Single-org cap (open edition): the server owns the limit (org_limit_reached);
+ *  - Single-org cap (Community licence): the server owns the limit (org_limit_reached);
  *    on that code we swap the form for an invitation-only message. The UI mirrors
  *    the server's truth, it never invents the permission.
  */
