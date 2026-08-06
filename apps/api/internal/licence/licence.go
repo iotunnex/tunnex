@@ -56,7 +56,14 @@ type Claims struct {
 	// Domain is the eTLD+1 the key is bound to, proven by the trial's email verification. It is the
 	// BINDING; there is no company-name field, because a name nobody verified would be gated on.
 	Domain string `json:"dom"`
-	// Band is the gateway band: trial | starter | growth | scale.
+	// Tier is the commercial tier this key grants.
+	//
+	// ⚠ EMPTY MEANS COMMUNITY, and that is the same ruling as an ABSENT LICENCE — the safe direction. Keys
+	// minted before S12.1 carry no tier and are valid; reading them as Community matches exactly what they
+	// could do when they were signed, and never grants more than was attested.
+	Tier string `json:"tier"`
+	// Band is the gateway band: trial | starter | growth | scale. ⚠ `band` IS the spec's gateway_band —
+	// the field name predates the wording.
 	Band string `json:"band"`
 	// Gateways is the ceiling the band buys, RESOLVED AT MINT. nil means unlimited — never a sentinel,
 	// which is a ceiling somebody eventually hits. Resolved at mint so a later band-table change cannot

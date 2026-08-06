@@ -25,7 +25,10 @@ import (
 // The vector is deliberately awkward: a NULL gateway ceiling (unlimited), a UNICODE domain, and an expiry
 // far in the future — because the disagreements that survive between two languages are encoding ones, not
 // happy-path ones.
-const goldenWire = "tnxl_eyJ2IjoxLCJraWQiOiJrLWdvbGRlbi0xIiwiaWQiOiIxMTExMTExMS0yMjIyLTMzMzMtNDQ0NC01NTU1NTU1NTU1NTUiLCJkb20iOiJtw7xuY2hlbi1nbWJoLmV4YW1wbGUiLCJiYW5kIjoic2NhbGUiLCJndyI6bnVsbCwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDB9.7yAFvrNdbcCz4zHhw8kSzp-wx5jijbtxbbWbnk1FI3fV0IzvRJEkf0ThwAcVqyNMaXvn2xH7qY_RML17xkL_Aw"
+// ⚠ REGENERATED IN S12.1 when `tier` entered the wire format, and TRANSCRIBED BY HAND from the tunnex-web
+// twin — never derived from it, never shared through a package. If only one side had been updated the
+// other would be red right now, which is the entire reason two literals exist.
+const goldenWire = "tnxl_eyJ2IjoxLCJraWQiOiJrLWdvbGRlbi0xIiwiaWQiOiIxMTExMTExMS0yMjIyLTMzMzMtNDQ0NC01NTU1NTU1NTU1NTUiLCJkb20iOiJtw7xuY2hlbi1nbWJoLmV4YW1wbGUiLCJ0aWVyIjoic2NhbGUiLCJiYW5kIjoic2NhbGUiLCJndyI6bnVsbCwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDB9.lvAsH4hNbeLb-GU9RvYZbvI0IoH_HMWc6Mx2Felw39rmFtZN-Su_dM8P3ShS0K-tYWJ8TFILAuH2dVz5ki1lAw"
 
 func TestGoldenVectorVerifiesAndYieldsExactClaims(t *testing.T) {
 	// ⚠ Verified through TrustedKeys — the SAME path production uses. A test-only key map here would let
@@ -54,6 +57,9 @@ func TestGoldenVectorVerifiesAndYieldsExactClaims(t *testing.T) {
 	// verify the signature (it is over bytes) and then hand back a corrupted domain.
 	if c.Domain != "münchen-gmbh.example" {
 		t.Errorf("dom = %q, want münchen-gmbh.example", c.Domain)
+	}
+	if c.Tier != "scale" {
+		t.Errorf("tier = %q, want scale", c.Tier)
 	}
 	if c.Band != "scale" {
 		t.Errorf("band = %q, want scale", c.Band)
