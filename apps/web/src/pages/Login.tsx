@@ -306,16 +306,15 @@ function SsoSection({
           ⚠ AND S12.5 MADE IT WORSE BEFORE IT MADE IT BETTER. Once the header carries a real switcher,
           a second control that looks like it steers is not merely useless — it competes with the correct
           one. A control that appears to steer and does not is worse than no control. */}
-      <Field label="Your organization's sign-in name">
+      <Field label="Where should we send you to sign in?">
         <Input
           value={org}
           onChange={(e) => setOrg(e.target.value)}
-          placeholder="acme"
+          placeholder="your-company"
         />
         <p className="mt-1 text-badge text-ink-secondary">
-          Needed to reach your identity provider. Signing in with a password
-          does not use this — you will land in whichever organizations you
-          belong to.
+          Routes you to your organization&rsquo;s identity provider. Signing in
+          with a password does not use this.
         </p>
       </Field>
       <div className="mt-3 space-y-2">
