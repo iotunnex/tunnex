@@ -32,21 +32,14 @@ func TestZeroTrustIsCommunity(t *testing.T) {
 	}
 }
 
-// ⛔ THE INTERMEDIATE STATE THIS SLICE CREATES, ASSERTED SO IT CANNOT BE FORGOTTEN.
+// ⛔ TestPaidCapabilitiesAreNotYetEnforced LIVED HERE, AND IT IS GONE BECAUSE ITS PREMISE IS NOW FALSE.
 //
-// Collapsing the binary wires SSO and IdP sync unconditionally. Until the LicenseManager slice reads a
-// licence and gates them, THEY ARE AVAILABLE TO EVERY DEPLOYMENT — paid capabilities, given away, because
-// the compile-time gate is gone and the runtime one does not exist yet.
+// It said, in a t.Log: "SSO and IdP sync are wired unconditionally until the LicenseManager slice lands.
+// DO NOT RELEASE." That was true and honest for six slices, and it could never have stopped anything — a
+// t.Log does not fail a build, and a comment does not fail a build. The gap would have closed when someone
+// remembered, or not.
 //
-// ⚠ That is safe only while unreleased. This test is the tripwire: it passes while the gap is expected and
-// must be REPLACED (not deleted) by a real enforcement assertion in the LicenseManager slice.
-func TestPaidCapabilitiesAreNotYetEnforced(t *testing.T) {
-	// The map already knows the right answer...
-	if !licence.Has(licence.TierStarter, licence.FeatSSO) {
-		t.Fatal("the tier map should grant SSO to Starter")
-	}
-	// ...and nothing reads it yet. When a LicenseManager exists, this test's premise is false and it must
-	// be rewritten to assert enforcement instead.
-	t.Log("⚠ SSO and IdP sync are wired unconditionally until the LicenseManager slice lands. " +
-		"DO NOT RELEASE between these two slices.")
-}
+// ⚠ IT WAS REPLACED, NOT DELETED, AND THE REPLACEMENT IS enforcement_census_test.go — which asks the same
+// question mechanically, of every capability, and FAILS. Deleting a tripwire because the thing it watched
+// for got fixed retires the invariant with it (docs/laws.md: census what ENFORCES a ruling, not only what
+// states it; a reversed ruling should leave a NARROWER guard behind it, not an absence).

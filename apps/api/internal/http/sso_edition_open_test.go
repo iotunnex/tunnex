@@ -2,11 +2,15 @@ package http
 
 import (
 	"log/slog"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
+	"github.com/tunnexio/tunnex/apps/api/internal/licence"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
@@ -25,17 +29,42 @@ func TestGetSsoConfigEditionGatedInOpenBuild(t *testing.T) {
 	}
 }
 
-// Open build: SSO is not wired, and the SSO endpoints return the edition_required
-// envelope (not a missing route or a crash).
-// ⛔ REVERSED (S12.1), AND THIS ONE LEAVES A GAP ON PURPOSE. It asserted the open build wired no SSO port.
-// With one binary the port is wired for everyone, and SSO is a PAID gate — so until the LicenseManager
-// slice reads a licence, SSO IS AVAILABLE TO EVERY DEPLOYMENT.
+// ⭐ THE GAP THIS TEST NAMED IS CLOSED (S12.1 slice 8), AND THE ASSERTION MOVED WITH IT.
 //
-// ⚠ That is why this asserts the port is wired AND names the gap: see TestPaidCapabilitiesAreNotYetEnforced.
-// DO NOT RELEASE between this slice and the LicenseManager slice.
-func TestSSOPortIsWiredAndNotYetGated(t *testing.T) {
+// It used to assert the port was wired AND that nothing gated it — an honest description of an
+// intermediate state. Both halves now hold at once: the port is wired for every deployment, because there
+// is one binary, and the licence decides what it will do.
+//
+// ⚠ The refusal is 403 edition_required either way, which is why the OLD open-build test above still
+// passes unchanged. That is not the code being untouched — the CAUSE moved from "the port is nil" to "the
+// licence does not grant SSO", and only the census can tell those apart.
+func TestSSOPortIsWiredAndGatedByLicence(t *testing.T) {
 	if NewSSOPort(nil, nil, nil, "", slog.Default()) == nil {
 		t.Fatal("the SSO port must be wired in the single binary")
+	}
+	// ⛔ Community configures nothing.
+	if (apiServer{licence: &licence.Manager{}}).requireSSOAdmin() == nil {
+		t.Error("⛔ SSO IS FREE — an unlicensed deployment can configure an IdP")
+	}
+	if (apiServer{licence: licence.NewTestManager("starter", time.Now().Add(time.Hour))}).requireSSOAdmin() != nil {
+		t.Error("a valid Starter licence was refused SSO configuration")
+	}
+	// ⭐ AND THE HALF THAT MUST NEVER BE GATED, asserted as an ABSENCE: no licence check exists on the
+	// login path, so an org whose only identity source is its IdP can always reach its own console.
+	src, err := os.ReadFile("sso_handlers.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	start := strings.Index(body, "func (s apiServer) StartSsoLogin")
+	end := strings.Index(body, "func (s apiServer) SetSsoConfig")
+	if start < 0 || end < 0 || end < start {
+		t.Fatal("⛔ could not locate the login handlers — this guard is scanning nothing")
+	}
+	if strings.Contains(body[start:end], "requireSSOAdmin") {
+		t.Error("⛔ THE SSO LOGIN PATH IS NOW LICENCE-GATED. An org that signs in only through Google or " +
+			"Entra is locked out of its own console — including the screen where a licence is renewed. " +
+			"A licence state must never delete the remedy along with the capability.")
 	}
 }
 
