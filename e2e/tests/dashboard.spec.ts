@@ -24,8 +24,16 @@ test("dashboard renders real counts for the seeded org", async ({ page }) => {
   const members = page.getByRole("group", { name: "Members" });
   await expect(members).toBeVisible();
   await expect(members.locator("span.font-bold")).toHaveText(/^\d+$/);
-  // Honest online label from S3.6 (not a fabricated "online" claim).
-  await expect(page.getByText("Seen in last 3 min")).toBeVisible();
+  // ⛔ THE "Seen in last 3 min" ASSERTION WAS REMOVED HERE, AND THE CARD IS WHY.
+  //
+  // f5f84a8a (PR #91) deleted that stat card at the founder's direction and gave its slot to the AI-agent
+  // count. The honest-liveness label it asserted is not hidden or renamed — it is GONE from this screen, so
+  // there is nothing for this spec to point at. Re-aiming it at the AI-agent card would look like a repair
+  // and assert a different property.
+  //
+  // ⚠ WHAT THAT REMOVAL ALSO TOOK, recorded because nothing else records it: Overview no longer surfaces
+  // LIVENESS AT ALL. See the reserved-green test below — its subject went with the same card.
+  await expect(members).toHaveCount(1);
 });
 
 test("a fresh org shows the empty-state onboarding funnel", async ({
@@ -41,33 +49,34 @@ test("a fresh org shows the empty-state onboarding funnel", async ({
   await expect(page.getByText("No gateway enrolled yet.")).toBeVisible();
 });
 
-test("the activity feed renders an explicit empty state (mocked)", async ({
-  page,
-}) => {
-  // Deterministic empty-activity render, independent of accumulated audit rows.
-  await page.route("**/api/v1/organizations/*/overview", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        members: 1,
-        devices: 0,
-        nodes: 0,
-        online: 0,
-        recent_activity: [],
-      }),
-    }),
-  );
-  await login(page);
-  await expect(page.getByText("No activity yet.")).toBeVisible();
-});
+// ⛔ THE ACTIVITY-FEED EMPTY-STATE TEST IS GONE BECAUSE THE FEED IS GONE.
+//
+// The founder removed Recent Activity, Needs Attention and System Health from Overview. This test proved
+// the feed rendered an explicit "No activity yet." rather than an ambiguous blank — a real property, of a
+// panel that no longer exists. There is no narrower version of it to keep: you cannot assert the empty
+// state of an absent panel.
+//
+// ⚠ THE CAPABILITY DID NOT MOVE, IT ENDED. The audit log is still reachable at Audit Log and audit.spec.ts
+// covers its rendering, but that is a different screen with a different empty state — it is not where this
+// assertion went.
+//
+// ⚠ AND `recent_activity` IS STILL IN THE `/overview` RESPONSE with no consumer. Producer without consumer,
+// registered rather than fixed here: deleting a wire field is an API change, not an e2e repair.
 
-test("the reserved status-green appears only on the live liveness tile", async ({
-  page,
-}) => {
-  // Mock a populated overview so the online tile is > 0. The seed has online=0,
-  // so this is the only way to exercise the reservation. Green (#2ecc8f / .text-ok)
-  // must land on the 'Seen in last 3 min' value and nowhere else on the page.
+// ⛔ REWRITTEN, NOT DELETED. The invariant is "green is a STATUS colour, never brand" — that survives. What
+// died is its only positive witness: the one tile that legitimately went green was "Seen in last 3 min",
+// and f5f84a8a removed it.
+//
+// ⚠ SO THIS IS NOW A ONE-SIDED GUARD, AND SAYING SO IS THE POINT. It can prove no stat card is green; it
+// can no longer prove green still WORKS where it belongs, because nowhere belongs any more. A one-sided
+// guard that presents itself as the original is worse than the gap it hides.
+//
+// ⚠ AND THE `tone="ok"` PATH IS NOW DORMANT MACHINERY — StatCard still renders `text-ok` for it and no
+// caller passes it (docs/laws.md: dormant machinery is removed or given a named trigger, not left to look
+// live). Registered for disposition, not ripped out inside an e2e fix.
+test("green stays reserved: no stat card renders it", async ({ page }) => {
+  // The populated mock is kept: online > 0 is exactly the input that USED to turn a tile green, so this
+  // asserts the reservation under the condition most likely to break it.
   await page.route("**/api/v1/organizations/*/overview", (route) =>
     route.fulfill({
       status: 200,
@@ -83,14 +92,12 @@ test("the reserved status-green appears only on the live liveness tile", async (
   );
   await login(page);
 
-  const onlineValue = page
-    .getByRole("group", { name: "Seen in last 3 min" })
-    .locator("span.font-bold");
-  await expect(onlineValue).toHaveText("2");
-  await expect(onlineValue).toHaveClass(/text-ok/);
-  // The other tiles are neutral, never green — green is a status color, not brand.
-  const membersValue = page
-    .getByRole("group", { name: "Members" })
-    .locator("span.font-bold");
-  await expect(membersValue).not.toHaveClass(/text-ok/);
+  // Every stat card on the screen, not a named sample — a sample would keep passing after a new card
+  // arrives wearing brand-green.
+  const values = page.locator('[role="group"] span.font-bold');
+  const n = await values.count();
+  expect(n).toBeGreaterThan(0); // vacuity floor: zero cards would pass this test forever
+  for (let i = 0; i < n; i++) {
+    await expect(values.nth(i)).not.toHaveClass(/text-ok/);
+  }
 });
