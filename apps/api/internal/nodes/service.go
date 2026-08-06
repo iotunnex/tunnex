@@ -300,7 +300,7 @@ type EnrollResult struct {
 // code keeps one gateway rather than losing the ability to enrol at all.
 func (s *Service) checkGatewayCeiling(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID) error {
 	tier := s.effectiveTier(time.Now())
-	ceiling := licence.GatewayCeiling[tier]
+	ceiling, _ := licence.GatewayCeilingFor(tier)
 	if ceiling == nil {
 		return nil // unlimited
 	}

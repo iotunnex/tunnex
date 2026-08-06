@@ -86,7 +86,7 @@ func (m *Manager) Evaluate(now time.Time) Status {
 	// ⚠ A TIER THIS BUILD DOES NOT KNOW IS COMMUNITY, not everything. A licence naming an unknown tier is
 	// one this build cannot honour, and the safe reading is the free tier.
 	tier := Tier(c.Tier)
-	if _, known := GatewayCeiling[tier]; !known {
+	if !KnownTier(tier) {
 		tier = TierCommunity
 	}
 
@@ -123,10 +123,12 @@ func (m *Manager) Has(f Feature, now time.Time) bool {
 // ⛔ AT ENROLMENT ONLY. Running gateways are never stopped, and an UPGRADE IS NOT AN ENROLMENT: a
 // deployment already running three gateways keeps all three and cannot add a fourth.
 func (m *Manager) GatewayCeilingNow(now time.Time) *int {
-	return GatewayCeiling[m.Evaluate(now).Tier]
+	c, _ := GatewayCeilingFor(m.Evaluate(now).Tier)
+	return c
 }
 
 // OrgCeilingNow is the number of organizations this deployment may CREATE. nil means unlimited.
 func (m *Manager) OrgCeilingNow(now time.Time) *int {
-	return OrgCeiling[m.Evaluate(now).Tier]
+	c, _ := OrgCeilingFor(m.Evaluate(now).Tier)
+	return c
 }

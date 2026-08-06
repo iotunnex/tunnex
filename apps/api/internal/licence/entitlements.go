@@ -42,7 +42,18 @@ const (
 // not 20: a temporary grant of a create-time limit is a permanent grant of everything created under it
 // (docs/laws.md). Two is what shows site-to-site and failover, and a ceiling we are content to leave
 // running forever.
-var GatewayCeiling = map[Tier]*int{
+// ⛔ THE CEILINGS ARE UNEXPORTED AND REACHED ONLY THROUGH THE ACCESSORS BELOW.
+//
+// ⚠ AND THAT IS A NARROWER PROTECTION THAN IT LOOKS — said plainly rather than implied. Unexporting stops
+// arbitrary code INDEXING the map with an arbitrary tier and acting on the number; it does NOT stop someone
+// editing `TierTrial: ptr(2)` to `ptr(20)` because it looks inconsistent beside Growth. No API shape
+// prevents a literal being changed.
+//
+// ⭐ WHAT ACTUALLY GUARDS THE NUMBER IS THE TEST THAT PINS IT WITH ITS REASON
+// (nodes.TestTheBandsAreTheFoundersNumbers): a temporary grant of a create-time limit is a permanent grant
+// of everything created under it, so 2 is what shows site-to-site and failover AND a ceiling we are content
+// to leave running forever. Both halves must hold, and only 2 satisfies both.
+var gatewayCeiling = map[Tier]*int{
 	TierCommunity: ptr(1),
 	TierTrial:     ptr(2),
 	TierStarter:   ptr(5),
@@ -51,7 +62,7 @@ var GatewayCeiling = map[Tier]*int{
 }
 
 // OrgCeiling is the number of organizations a tier may CREATE. nil means unlimited.
-var OrgCeiling = map[Tier]*int{
+var orgCeiling = map[Tier]*int{
 	TierCommunity: ptr(1),
 	TierTrial:     ptr(1),
 	TierStarter:   nil,
@@ -72,6 +83,33 @@ var tierFeatures = map[Tier]map[Feature]bool{
 	TierGrowth:    {FeatMultiGateway: true, FeatMultiOrg: true, FeatSSO: true, FeatIdpSync: true},
 	TierScale:     {FeatMultiGateway: true, FeatMultiOrg: true, FeatSSO: true, FeatIdpSync: true},
 }
+
+// GatewayCeilingFor is the number of gateways a tier may ENROL. nil means unlimited.
+//
+// ⚠ AN UNKNOWN TIER GETS COMMUNITY'S CEILING, NOT UNLIMITED — and closing that is most of why the accessor
+// exists. `gatewayCeiling[unknownTier]` returns a nil *int, which this package reads as UNLIMITED: the most
+// permissive possible answer for a tier this build cannot honour. A missing entry and "unlimited" are the
+// same zero value, and only a function can tell them apart.
+func GatewayCeilingFor(t Tier) (ceiling *int, known bool) {
+	c, ok := gatewayCeiling[t]
+	if !ok {
+		return gatewayCeiling[TierCommunity], false
+	}
+	return c, true
+}
+
+// OrgCeilingFor is the number of organizations a tier may CREATE. nil means unlimited. Same unknown-tier
+// rule as GatewayCeilingFor.
+func OrgCeilingFor(t Tier) (ceiling *int, known bool) {
+	c, ok := orgCeiling[t]
+	if !ok {
+		return orgCeiling[TierCommunity], false
+	}
+	return c, true
+}
+
+// KnownTier reports whether this build understands a tier name.
+func KnownTier(t Tier) bool { _, ok := gatewayCeiling[t]; return ok }
 
 // AllFeatures is every feature, for censuses and for the admin surface. Derived from the map so a new
 // feature cannot be invisible to either.

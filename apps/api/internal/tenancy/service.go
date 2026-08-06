@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,7 +24,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
-	"github.com/tunnexio/tunnex/apps/api/internal/enterprise"
+	"github.com/tunnexio/tunnex/apps/api/internal/licence"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
@@ -39,8 +40,10 @@ func actorFromCtx(ctx context.Context) *uuid.UUID {
 
 // Service provides organization operations.
 type Service struct {
-	pool *pgxpool.Pool
-	q    *sqlc.Queries
+	// licence answers the entitlement questions. ⚠ nil means Community — the fail-open default.
+	licence *licence.Manager
+	pool    *pgxpool.Pool
+	q       *sqlc.Queries
 }
 
 // NewService builds a tenancy service over the given pool.
@@ -66,19 +69,72 @@ func (s *Service) withTx(ctx context.Context, fn func(*sqlc.Queries) error) erro
 	return tx.Commit(ctx)
 }
 
+// checkOrgCeiling refuses creating an organization beyond the licensed ceiling.
+//
+// ⚠ A nil manager means Community — the fail-open default. A deployment that upgrades into this code keeps
+// its one organization rather than losing the ability to create at all.
+func (s *Service) checkOrgCeiling(ctx context.Context) error {
+	tier := s.effectiveTier()
+	ceiling, _ := licence.OrgCeilingFor(tier)
+	if ceiling == nil {
+		return nil // unlimited
+	}
+	count, err := s.q.CountOrganizations(ctx)
+	if err != nil {
+		return err
+	}
+	if count < int64(*ceiling) {
+		return nil
+	}
+	// ⭐ THE REFUSAL NAMES THE BAND AND THE CEILING, like the gateway one. ⚠ AND THE ERROR CODE IS
+	// UNCHANGED (`org_limit_reached`) ON PURPOSE: apps/web's CreateOrg funnel branches on that code to swap
+	// the form for an invitation-only card. Changing the code would silently break a shipped flow that no
+	// test here covers.
+	return apierr.Forbidden("org_limit_reached", s.orgRefusal(tier, *ceiling, count))
+}
+
+// effectiveTier resolves the entitlement tier. ⚠ nil manager => Community, the fail-open default.
+func (s *Service) effectiveTier() licence.Tier {
+	if s.licence == nil {
+		return licence.TierCommunity
+	}
+	return s.licence.Evaluate(time.Now()).Tier
+}
+
+// orgRefusal is the message an operator reads. Extracted so the wording is testable without a database.
+func (s *Service) orgRefusal(tier licence.Tier, ceiling int, count int64) string {
+	unit := "organizations"
+	if ceiling == 1 {
+		unit = "organization"
+	}
+	return fmt.Sprintf(
+		"This deployment is on the %s band, which allows %d %s, and %d already exist. "+
+			"Nothing existing is affected — this applies only to creating a new organization. "+
+			"To add another, upgrade the licence.",
+		tier, ceiling, unit, count)
+}
+
+// WithLicence wires the entitlement source. ⚠ Optional: a Service without one behaves as Community.
+func (s *Service) WithLicence(m *licence.Manager) *Service {
+	s.licence = m
+	return s
+}
+
 // CreateOrganization creates an organization (enforcing the edition cap), makes
 // the creator its first owner, and records an org.created audit event — all
 // atomically.
 func (s *Service) CreateOrganization(ctx context.Context, creator uuid.UUID, name, slug string) (sqlc.Organization, error) {
-	if !enterprise.Unlimited {
-		count, err := s.q.CountOrganizations(ctx)
-		if err != nil {
-			return sqlc.Organization{}, err
-		}
-		if count >= int64(enterprise.MaxOrganizations) {
-			return sqlc.Organization{}, apierr.Forbidden("org_limit_reached",
-				"the open edition supports a single organization; upgrade to Tunnex Enterprise for multiple organizations")
-		}
+	// ⛔ THE ORGANIZATION CEILING — AT CREATION ONLY (S12.1 slice 5).
+	//
+	// Community 1 · trial 1 · Starter and above unlimited. An EXISTING org never disappears: this is checked
+	// here and nowhere else, so a deployment that lapses keeps every org it has and simply cannot create
+	// another. Same rule as the gateway ceiling, and for the same reason.
+	//
+	// ⚠ THIS REPLACES A COMPILE-TIME CONSTANT. `enterprise.Unlimited` was a build-tag const, so the check
+	// was eliminated at compile time in the enterprise binary — the branch was not present, rather than
+	// present-and-false. With one binary the question is a runtime one and must be asked every time.
+	if err := s.checkOrgCeiling(ctx); err != nil {
+		return sqlc.Organization{}, err
 	}
 
 	var org sqlc.Organization
