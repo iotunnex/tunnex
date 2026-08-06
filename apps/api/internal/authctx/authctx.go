@@ -50,6 +50,10 @@ type Principal struct {
 	EmailVerified bool
 	AuthMethod    string               // how this principal authenticated (AuthLocalPassword | AuthSSO | AuthBearer | AuthMachine | "")
 	Roles         map[uuid.UUID]string // orgID -> role
+	// ⛔ MustChangePassword — the CP admin's bootstrap credential was PRINTED TO LOGS, so it is treated as
+	// compromised from the moment it works. Until it is changed the principal may authenticate and may do
+	// NOTHING ELSE.
+	MustChangePassword bool
 	// MachineID / MachineName (S10.2) — set ONLY for a machine principal (AuthMachine); zero for a human.
 	// A machine has NO UserID (kept out of the identity-binding subject space, D4). MachineName is the
 	// operator-chosen credential label surfaced in audit as the system actor "operator:<name>".

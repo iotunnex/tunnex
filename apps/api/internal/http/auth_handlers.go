@@ -271,3 +271,29 @@ func (s apiServer) ConfirmPasswordReset(ctx context.Context, req api.ConfirmPass
 		Headers: api.ConfirmPasswordReset200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }
+
+// ChangePassword implements POST /api/v1/auth/password.
+//
+// ⛔ THE ONLY WAY OUT OF A FORCED PASSWORD CHANGE, AND THEREFORE THE ONE AUTHENTICATED ROUTE THAT MUST NOT
+// BE BLOCKED BY ONE. It deliberately does not go through `authorize()` — that is org-scoped and carries the
+// `password_change_required` wall, so routing this through it would make the forced change a LOCKOUT with
+// no recovery: the bootstrap admin belongs to no organization and there is no signup to replace them.
+//
+// ⚠ THE CURRENT PASSWORD IS REQUIRED EVEN THOUGH THE CALLER IS AUTHENTICATED. A live session is not proof
+// of knowing the credential — a borrowed browser is enough — and this is the act that makes a printed,
+// log-visible password permanent.
+func (s apiServer) ChangePassword(ctx context.Context, req api.ChangePasswordRequestObject) (api.ChangePasswordResponseObject, error) {
+	p, err := requireVerifiedUserAllowingPasswordChange(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	if err := s.auth.ChangePassword(ctx, p.UserID, req.Body.CurrentPassword, req.Body.NewPassword); err != nil {
+		return nil, err
+	}
+	return api.ChangePassword204Response{
+		Headers: api.ChangePassword204ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}

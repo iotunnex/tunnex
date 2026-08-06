@@ -73,6 +73,7 @@ type Querier interface {
 	// device is freed. Returns the affected devices for auditing + org push. Runs at
 	// open-build boot; idempotent (no blocks -> no rows).
 	ClearAllHealthBlocks(ctx context.Context) ([]ClearAllHealthBlocksRow, error)
+	ClearMustChangePassword(ctx context.Context, id uuid.UUID) error
 	// S7.4b (X-4): clear the desync stamp on RECONVERGENCE or non-enforcing (applied == pushed,
 	// or pushed == "" ). Convergence is a STATE predicate — revert-to-clear (admin reverts the
 	// pushed target back to the applied hash) legitimately clears. CP-only, single-writer, org-scoped.
@@ -182,7 +183,12 @@ type Querier interface {
 	CountPolicyRulesReferencingSite(ctx context.Context, arg CountPolicyRulesReferencingSiteParams) (int64, error)
 	// lint:cross-org — user-scoped credential.
 	CountUnusedRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
+	// ⛔ INCLUDES SOFT-DELETED ROWS. The bootstrap condition is "has this deployment ever had a user", not
+	// "does it have one now" — otherwise deleting every account reopens admin minting, which is the same
+	// re-open CountOrganizationsEver exists to prevent.
+	CountUsers(ctx context.Context) (int64, error)
 	CreateAuthToken(ctx context.Context, arg CreateAuthTokenParams) (AuthToken, error)
+	CreateBootstrapAdmin(ctx context.Context, arg CreateBootstrapAdminParams) (User, error)
 	CreateCliAuthCode(ctx context.Context, arg CreateCliAuthCodeParams) (CliAuthCode, error)
 	// CLI credential flow (S5.1). All secrets arrive here PRE-HASHED (sha-256); the
 	// raw token/code never reaches SQL. Consumption is a single atomic UPDATE so a

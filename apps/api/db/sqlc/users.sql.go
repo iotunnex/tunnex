@@ -11,10 +11,65 @@ import (
 	"github.com/google/uuid"
 )
 
+const clearMustChangePassword = `-- name: ClearMustChangePassword :exec
+UPDATE users SET must_change_password = false, updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) ClearMustChangePassword(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearMustChangePassword, id)
+	return err
+}
+
+const countUsers = `-- name: CountUsers :one
+SELECT count(*) FROM users
+`
+
+// ⛔ INCLUDES SOFT-DELETED ROWS. The bootstrap condition is "has this deployment ever had a user", not
+// "does it have one now" — otherwise deleting every account reopens admin minting, which is the same
+// re-open CountOrganizationsEver exists to prevent.
+func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countUsers)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createBootstrapAdmin = `-- name: CreateBootstrapAdmin :one
+INSERT INTO users (email, name, password_hash, email_verified_at, can_create_orgs, must_change_password)
+VALUES ($1, $2, $3, now(), true, true)
+RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs, must_change_password
+`
+
+type CreateBootstrapAdminParams struct {
+	Email        string  `json:"email"`
+	Name         string  `json:"name"`
+	PasswordHash *string `json:"password_hash"`
+}
+
+func (q *Queries) CreateBootstrapAdmin(ctx context.Context, arg CreateBootstrapAdminParams) (User, error) {
+	row := q.db.QueryRow(ctx, createBootstrapAdmin, arg.Email, arg.Name, arg.PasswordHash)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Name,
+		&i.PasswordHash,
+		&i.EmailVerifiedAt,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.CanCreateOrgs,
+		&i.MustChangePassword,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, name, password_hash)
 VALUES ($1, $2, $3)
-RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs
+RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs, must_change_password
 `
 
 type CreateUserParams struct {
@@ -37,12 +92,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.CanCreateOrgs,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs FROM users
+SELECT id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs, must_change_password FROM users
 WHERE email = $1 AND deleted_at IS NULL
 `
 
@@ -60,12 +116,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.CanCreateOrgs,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs FROM users
+SELECT id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs, must_change_password FROM users
 WHERE id = $1 AND deleted_at IS NULL
 `
 
@@ -83,6 +140,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.CanCreateOrgs,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
@@ -150,7 +208,7 @@ VALUES ($1, $2, $3, $4)
 ON CONFLICT (id) DO UPDATE
     SET email = EXCLUDED.email, name = EXCLUDED.name,
         can_create_orgs = EXCLUDED.can_create_orgs
-RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs
+RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs, must_change_password
 `
 
 type UpsertUserParams struct {
@@ -189,6 +247,7 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (User, e
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.CanCreateOrgs,
+		&i.MustChangePassword,
 	)
 	return i, err
 }

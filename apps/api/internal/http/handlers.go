@@ -61,6 +61,18 @@ func authorize(ctx context.Context, orgID uuid.UUID, perm rbac.Permission) (cont
 	if !ok {
 		return ctx, apierr.New(http.StatusUnauthorized, "unauthenticated", "authentication required")
 	}
+	// ⛔ A FORCED PASSWORD CHANGE IS A WALL, NOT A SUGGESTION. The bootstrap credential was printed to the
+	// logs — shipped, aggregated, searchable — so it is compromised the moment it is useful. Until it is
+	// replaced the principal may authenticate and may do NOTHING ELSE.
+	//
+	// ⚠ THE GATE IS HERE, IN authorize(), WHICH EVERY ORG-SCOPED ROUTE PASSES THROUGH. A screen the client
+	// could skip, or a check on a handful of handlers, would leave the API open to a credential that is
+	// public by construction — and "not by API, not by skipping the screen" was the ruling.
+	if p.MustChangePassword {
+		return ctx, apierr.New(http.StatusForbidden, "password_change_required",
+			"This account is still using its one-time bootstrap password. Set a new password before "+
+				"doing anything else.")
+	}
 	role, member := p.RoleIn(orgID)
 	if !member {
 		return ctx, apierr.NotFound("org_not_found", "organization not found")
@@ -80,7 +92,29 @@ func authorize(ctx context.Context, orgID uuid.UUID, perm rbac.Permission) (cont
 
 // requireVerifiedUser requires an authenticated, verified principal (for actions
 // not scoped to an existing org, e.g. creating one). Returns the principal.
+// ⛔ THE FORCED CHANGE COVERS THIS PATH TOO, AND A LIVE WALK IS WHY.
+//
+// The gate went into authorize() first — which is ORG-SCOPED. Creating an organization has no orgId, so it
+// runs through requireVerifiedUser and sailed straight past the wall: the bootstrap admin created the
+// first org while still holding the password that had been printed to the logs. "No path around it — not
+// by API, not by skipping the screen" was the ruling, and one route around it is all it takes.
+//
+// ⚠ ChangePassword is the deliberate exception and calls requireVerifiedUserAllowingPasswordChange —
+// without it the wall would be a lockout with no recovery.
 func requireVerifiedUser(ctx context.Context) (*authctx.Principal, error) {
+	p, err := requireVerifiedUserAllowingPasswordChange(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if p.MustChangePassword {
+		return nil, apierr.New(http.StatusForbidden, "password_change_required",
+			"This account is still using its one-time bootstrap password. Set a new password before "+
+				"doing anything else.")
+	}
+	return p, nil
+}
+
+func requireVerifiedUserAllowingPasswordChange(ctx context.Context) (*authctx.Principal, error) {
 	p, ok := authctx.PrincipalFrom(ctx)
 	if !ok {
 		return nil, apierr.New(http.StatusUnauthorized, "unauthenticated", "authentication required")

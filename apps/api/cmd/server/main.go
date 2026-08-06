@@ -27,6 +27,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/accesslog"
 	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
 	"github.com/tunnexio/tunnex/apps/api/internal/auth"
+	"github.com/tunnexio/tunnex/apps/api/internal/bootstrap"
 	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
 	"github.com/tunnexio/tunnex/apps/api/internal/config"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
@@ -214,6 +215,12 @@ func main() {
 	//
 	// ⚠ The TTL is the bounded window in which two replicas may disagree, and it is floored inside WithStore
 	// because a zero — which is what an unset field is — would make this a database query per request.
+	// ⛔ THE ONLY WAY INTO A FRESH DEPLOYMENT. There is no public signup, so without this a new install has
+	// no account and no way to make one. Idempotent: on any deployment that has ever had a user it does
+	// nothing and prints nothing — a restart must not be a security event.
+	if e := bootstrap.EnsureAdmin(context.Background(), sqlc.New(pool), logger); e != nil {
+		logger.Error("bootstrap_admin_failed", slog.String("err", e.Error()))
+	}
 	licenceMgr := (&licence.Manager{}).WithStore(
 		apphttp.NewLicenceStore(pool), licence.DefaultRefreshInterval, logger)
 
