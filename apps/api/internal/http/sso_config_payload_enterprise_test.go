@@ -17,6 +17,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	tcrypto "github.com/tunnexio/tunnex/apps/api/internal/crypto"
+	"github.com/tunnexio/tunnex/apps/api/internal/licence"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
@@ -104,7 +105,11 @@ func TestGetSsoConfigPayloadCarriesNoSecret(t *testing.T) {
 		t.Fatalf("set config: %v", err)
 	}
 
-	s := apiServer{sso: port}
+	// ⚠ A LICENCE IS REQUIRED TO REACH THIS HANDLER AS OF S12.1 SLICE 8, and supplying one here is
+	// deliberate rather than incidental: this test's subject is the PAYLOAD, not the entitlement. Leaving
+	// it unlicensed would turn a blocking secret-leak assertion into a 403 check that passes for the wrong
+	// reason — the strongest possible version of a test that no longer tests what it says it does.
+	s := apiServer{sso: port, licence: licence.NewTestManager("starter", time.Now().Add(time.Hour))}
 	authed := principalWithRole(org, rbac.RoleOwner)
 	resp, err := s.GetSsoConfig(authed, api.GetSsoConfigRequestObject{OrgId: org, Provider: "google"})
 	if err != nil {
