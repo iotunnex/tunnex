@@ -3026,6 +3026,7 @@ export interface components {
             email_verified: boolean;
             mfa_enrollment_required?: boolean;
             can_create_orgs?: boolean;
+            must_change_password?: boolean;
             recovery_codes_remaining?: number;
         };
         LoginResult: {

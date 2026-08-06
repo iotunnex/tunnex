@@ -505,6 +505,7 @@ type AuthUser struct {
 	EmailVerified          bool                `json:"email_verified"`
 	Id                     openapi_types.UUID  `json:"id"`
 	MfaEnrollmentRequired  *bool               `json:"mfa_enrollment_required,omitempty"`
+	MustChangePassword     *bool               `json:"must_change_password,omitempty"`
 	RecoveryCodesRemaining *int                `json:"recovery_codes_remaining,omitempty"`
 }
 

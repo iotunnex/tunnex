@@ -24,9 +24,13 @@ import { stripJsComments } from "./support/source";
 
 describe("TRUST_BADGES", () => {
   it("⛔ makes no compliance claim we cannot evidence", () => {
-    const all = TRUST_BADGES.map((b) => b.text).join(" | ").toLowerCase();
+    const all = TRUST_BADGES.map((b) => b.text)
+      .join(" | ")
+      .toLowerCase();
     for (const c of FORBIDDEN_CLAIMS) {
-      expect(all, `badge set must not claim ${c}`).not.toContain(c.toLowerCase());
+      expect(all, `badge set must not claim ${c}`).not.toContain(
+        c.toLowerCase(),
+      );
     }
   });
 

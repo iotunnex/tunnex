@@ -44,7 +44,9 @@ describe("⛔ the gateway health verdict is formed in ONE place", () => {
 
   it("the verdict owner still exists and still reads the raw signal", () => {
     // If this stops being true the census is pointing at nothing and every assertion below passes free.
-    const owner = stripJsComments(readFileSync(join(SRC, VERDICT_OWNER), "utf8"));
+    const owner = stripJsComments(
+      readFileSync(join(SRC, VERDICT_OWNER), "utf8"),
+    );
     expect(owner).toMatch(/policy_degraded/);
     expect(owner).toMatch(/status === "revoked"/);
   });
@@ -54,7 +56,11 @@ describe("⛔ the gateway health verdict is formed in ONE place", () => {
     // counted its own explanation would be the shape this repo has filed three times.
     const offenders = files
       .filter((f) => !f.endsWith(VERDICT_OWNER.replace("/", "/")))
-      .filter((f) => /\bn(ode)?\.policy_degraded\b/.test(stripJsComments(readFileSync(f, "utf8"))))
+      .filter((f) =>
+        /\bn(ode)?\.policy_degraded\b/.test(
+          stripJsComments(readFileSync(f, "utf8")),
+        ),
+      )
       .map((f) => f.replace(SRC, "src"));
     expect(
       offenders,
@@ -75,6 +81,9 @@ describe("⛔ the gateway health verdict is formed in ONE place", () => {
         ),
       )
       .map((f) => f.replace(SRC, "src"));
-    expect(restaters, "the revoked guard is being restated at a call site again").toEqual([]);
+    expect(
+      restaters,
+      "the revoked guard is being restated at a call site again",
+    ).toEqual([]);
   });
 });

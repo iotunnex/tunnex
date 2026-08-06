@@ -145,9 +145,11 @@ func authUser(user sqlc.User) api.AuthUser {
 	// regardless (tenancy.checkMayCreateOrg), so a client that lies about it gains nothing — this is an
 	// affordance hint, never the boundary.
 	may := user.CanCreateOrgs
+	mustChange := user.MustChangePassword
 	return api.AuthUser{
 		Id: user.ID, Email: openapi_types.Email(user.Email),
 		EmailVerified: user.EmailVerifiedAt.Valid, CanCreateOrgs: &may,
+		MustChangePassword: &mustChange,
 	}
 }
 

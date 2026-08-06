@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { gatewayHealthRow, policyHealthBadge, siteLinkNote } from "../src/lib/healthview";
+import {
+  gatewayHealthRow,
+  policyHealthBadge,
+  siteLinkNote,
+} from "../src/lib/healthview";
 import type { Node } from "../src/lib/api";
 
 // ⛔ `status` IS NOW PART OF THE VERDICT'S INPUT (S14.21), so the helper must supply it. This file did
@@ -130,13 +134,19 @@ describe("⛔ a revoked gateway gets NO health verdict — not a healthy one, no
     // "site link down" on a deliberately-revoked node instructs an operator to repair something that was
     // decommissioned on purpose. The state IS revoked; a degradation badge beside it describes a machine
     // that is no longer meant to work.
-    expect(policyHealthBadge(node(true, "site_link_down", "revoked"))).toBeNull();
+    expect(
+      policyHealthBadge(node(true, "site_link_down", "revoked")),
+    ).toBeNull();
     expect(policyHealthBadge(node(true, undefined, "revoked"))).toBeNull();
   });
 
   it("an ACTIVE gateway is unaffected — the guard must not swallow real verdicts", () => {
-    expect(policyHealthBadge(node(true, "site_link_down", "active"))).not.toBeNull();
-    expect(policyHealthBadge(node(true, undefined, "active"))?.label).toBe("degraded");
+    expect(
+      policyHealthBadge(node(true, "site_link_down", "active")),
+    ).not.toBeNull();
+    expect(policyHealthBadge(node(true, undefined, "active"))?.label).toBe(
+      "degraded",
+    );
   });
 });
 
@@ -159,7 +169,10 @@ describe("⛔ gatewayHealthRow — 'no badge' is not 'healthy'", () => {
   });
 
   it("an active, undegraded gateway is healthy — the guard must not swallow the ordinary case", () => {
-    expect(gatewayHealthRow(node(false))).toEqual({ label: "healthy", tone: "ok" });
+    expect(gatewayHealthRow(node(false))).toEqual({
+      label: "healthy",
+      tone: "ok",
+    });
   });
 
   it("an active, degraded gateway carries the badge's own label and tone", () => {

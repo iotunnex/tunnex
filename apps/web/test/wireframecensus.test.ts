@@ -184,12 +184,13 @@ const CLIENT_MAIN = join(__dirname, "..", "..", "client", "src", "main");
 
 /** Every .ts under the client's main process, RECURSIVELY, as paths relative to CLIENT_MAIN. */
 function mainSources(dir = ""): string[] {
-  return readdirSync(join(CLIENT_MAIN, dir), { withFileTypes: true }).flatMap((e) =>
-    e.isDirectory()
-      ? mainSources(join(dir, e.name))
-      : e.name.endsWith(".ts")
-        ? [join(dir, e.name)]
-        : [],
+  return readdirSync(join(CLIENT_MAIN, dir), { withFileTypes: true }).flatMap(
+    (e) =>
+      e.isDirectory()
+        ? mainSources(join(dir, e.name))
+        : e.name.endsWith(".ts")
+          ? [join(dir, e.name)]
+          : [],
   );
 }
 
@@ -212,9 +213,9 @@ describe("wireframe census — the DESIGN is the authoritative set", () => {
   });
 
   it("⛔ NOTHING IS UNBUILT — this is the assertion that rejects, and it names them", () => {
-    const unbuilt = BLOCKS.filter((b) => DISPOSITIONS[b]?.kind === "unbuilt").map(
-      (b) => `${b} (${(DISPOSITIONS[b] as { story: string }).story})`,
-    );
+    const unbuilt = BLOCKS.filter(
+      (b) => DISPOSITIONS[b]?.kind === "unbuilt",
+    ).map((b) => `${b} (${(DISPOSITIONS[b] as { story: string }).story})`);
     expect(unbuilt).toEqual([]);
   });
 
@@ -293,7 +294,9 @@ describe("wireframe census — the DESIGN is the authoritative set", () => {
       const loaded = new Map<string, string[]>();
       for (const f of mainSources()) {
         const src = stripJsComments(readFileSync(join(CLIENT_MAIN, f), "utf8"));
-        for (const m of src.matchAll(/app:\/\/tunnex\/([A-Za-z0-9._-]+\.html)/g)) {
+        for (const m of src.matchAll(
+          /app:\/\/tunnex\/([A-Za-z0-9._-]+\.html)/g,
+        )) {
           loaded.set(m[1]!, [...(loaded.get(m[1]!) ?? []), f]);
         }
       }
@@ -314,7 +317,10 @@ describe("wireframe census — the DESIGN is the authoritative set", () => {
         stripJsComments(readFileSync(join(CLIENT_MAIN, f), "utf8")),
       ),
     );
-    expect(spellers, "the entry URL is spelled out in more than one file").toEqual(["entry.ts"]);
+    expect(
+      spellers,
+      "the entry URL is spelled out in more than one file",
+    ).toEqual(["entry.ts"]);
   });
 
   it("⛔ the entry a block claims is a DECLARED VITE INPUT — a reference is not an artifact", () => {
@@ -351,11 +357,15 @@ describe("wireframe census — the DESIGN is the authoritative set", () => {
     for (const b of BLOCKS) {
       const d = DISPOSITIONS[b];
       if (d?.kind === "absorbed") {
-        expect(d.into.length, `${b} must name its destination`).toBeGreaterThan(10);
+        expect(d.into.length, `${b} must name its destination`).toBeGreaterThan(
+          10,
+        );
         expect(d.why.length, `${b} must say why`).toBeGreaterThan(20);
       }
       if (d?.kind === "cut") {
-        expect(d.why.length, `${b} must say why it was cut`).toBeGreaterThan(30);
+        expect(d.why.length, `${b} must say why it was cut`).toBeGreaterThan(
+          30,
+        );
       }
     }
   });

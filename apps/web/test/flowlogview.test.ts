@@ -32,7 +32,13 @@ const ev = (over: Partial<AccessEvent> = {}): AccessEvent => ({
 // verdicts — would present an INCOMPLETE security log as a complete one.
 describe("decision handling", () => {
   it("labels and tones every decision the SCHEMA has, not just the four the design draws", () => {
-    for (const d of ["allow", "deny", "deny_aggregate", "terminated", "gap"] as const) {
+    for (const d of [
+      "allow",
+      "deny",
+      "deny_aggregate",
+      "terminated",
+      "gap",
+    ] as const) {
       expect(decisionLabel(d)).toBeTruthy();
       expect(decisionTone(d)).toBeTruthy();
     }
@@ -45,21 +51,29 @@ describe("decision handling", () => {
   });
 
   it("⛔ a gap SAYS events are missing, and how many when it knows", () => {
-    expect(causeFor(ev({ decision: "gap", deny_count: 12 }), () => null)).toMatch(
-      /12 events missing/i,
+    expect(
+      causeFor(ev({ decision: "gap", deny_count: 12 }), () => null),
+    ).toMatch(/12 events missing/i);
+    expect(causeFor(ev({ decision: "gap" }), () => null)).toMatch(
+      /missing from the log/i,
     );
-    expect(causeFor(ev({ decision: "gap" }), () => null)).toMatch(/missing from the log/i);
   });
 });
 
 describe("causeFor", () => {
   it("names the rule when there is one, and falls back to its id rather than a blank", () => {
-    expect(causeFor(ev({ rule_id: "r-1" }), () => "eng → gitlab")).toBe("rule: eng → gitlab");
-    expect(causeFor(ev({ rule_id: "abcdef01-2345" }), () => null)).toBe("rule: abcdef01");
+    expect(causeFor(ev({ rule_id: "r-1" }), () => "eng → gitlab")).toBe(
+      "rule: eng → gitlab",
+    );
+    expect(causeFor(ev({ rule_id: "abcdef01-2345" }), () => null)).toBe(
+      "rule: abcdef01",
+    );
   });
 
   it("⛔ says DEFAULT-DENY in words — the most common deny reason", () => {
-    expect(causeFor(ev({ decision: "deny" }), () => null)).toBe("no matching grant");
+    expect(causeFor(ev({ decision: "deny" }), () => null)).toBe(
+      "no matching grant",
+    );
   });
 
   it("⛔ uses n/a, never an em-dash — a dash reads as short data, n/a reads as an answer", () => {
@@ -70,9 +84,9 @@ describe("causeFor", () => {
   });
 
   it("reports an aggregate's count", () => {
-    expect(causeFor(ev({ decision: "deny_aggregate", deny_count: 412 }), () => null)).toBe(
-      "412 denies aggregated",
-    );
+    expect(
+      causeFor(ev({ decision: "deny_aggregate", deny_count: 412 }), () => null),
+    ).toBe("412 denies aggregated");
   });
 });
 
@@ -101,7 +115,10 @@ describe("destinationFor", () => {
 // that sort before ones already shown, and a page boundary could skip them forever.
 describe("nextCursor", () => {
   it("takes created_at + id from the LAST row", () => {
-    const page = [ev({ id: "a" }), ev({ id: "z", created_at: "2026-08-03T10:00:00Z" })];
+    const page = [
+      ev({ id: "a" }),
+      ev({ id: "z", created_at: "2026-08-03T10:00:00Z" }),
+    ];
     expect(nextCursor(page)).toEqual({
       cursor_ts: "2026-08-03T10:00:00Z",
       cursor_id: "z",
@@ -109,7 +126,13 @@ describe("nextCursor", () => {
   });
 
   it("⛔ never paginates on occurred_at", () => {
-    const page = [ev({ id: "a", created_at: "2026-08-03T12:00:00Z", occurred_at: "1999-01-01T00:00:00Z" })];
+    const page = [
+      ev({
+        id: "a",
+        created_at: "2026-08-03T12:00:00Z",
+        occurred_at: "1999-01-01T00:00:00Z",
+      }),
+    ];
     expect(nextCursor(page)?.cursor_ts).toBe("2026-08-03T12:00:00Z");
   });
 
@@ -135,7 +158,10 @@ describe("retentionNote", () => {
   });
 
   it("is quiet and factual on success", () => {
-    const r = retentionNote({ retention_dropped: 1234, retention_failed: false });
+    const r = retentionNote({
+      retention_dropped: 1234,
+      retention_failed: false,
+    });
     expect(r.loud).toBe(false);
     expect(r.text).toMatch(/1,?234/);
   });

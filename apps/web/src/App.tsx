@@ -15,6 +15,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import AcceptInvite from "./pages/AcceptInvite";
 import VerifyEmail from "./pages/VerifyEmail";
+import { ChangePassword } from "./pages/ChangePassword";
 import VerifyPending from "./pages/VerifyPending";
 import CreateOrg from "./pages/CreateOrg";
 import CliAuth from "./pages/CliAuth";
@@ -98,6 +99,9 @@ export default function App() {
               </RequireNoOrg>
             }
           />
+          {/* ⛔ THE FORCED PASSWORD CHANGE. Org-independent by construction — the bootstrap admin belongs
+              to no organization, so this cannot live inside the shell. */}
+          <Route path="/change-password" element={<ChangePassword />} />
           <Route path="/verify-pending" element={<VerifyPending />} />
           {/* S5.1 CLI auth: the browser consent leg (`tunnex login`) and the
               device-code approval page. Authenticated but org-independent. */}
@@ -160,6 +164,16 @@ function RequireAuth() {
   // (default-deny middleware, typed mfa_enrollment_required 403); this is the client routing so the
   // user lands on the ceremony rather than hitting dead 403s. Decision is a pure fn (authroute.ts),
   // table-pinned in BOTH directions (resolveMfaGateRoute).
+  // ⛔ THE PASSWORD WALL IS ROUTED BEFORE EVERYTHING ELSE, INCLUDING THE MFA GATE. The credential was
+  // printed to logs; until it is replaced this account may authenticate and do nothing else, and the
+  // server enforces exactly that. Without this redirect the user meets the refusal as a red error on
+  // whichever page they happened to land on — which is what shipped, and what an operator actually saw.
+  if (
+    state.user.must_change_password &&
+    location.pathname !== "/change-password"
+  ) {
+    return <Navigate to="/change-password" replace />;
+  }
   const gateRoute = resolveMfaGateRoute(
     Boolean(state.user.mfa_enrollment_required),
     location.pathname,

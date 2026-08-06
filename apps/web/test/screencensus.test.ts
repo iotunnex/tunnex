@@ -25,6 +25,17 @@ const PAGES_DIR = join(__dirname, "..", "src", "pages");
 
 // EXEMPT — the reason is part of the datum, not documentation about it.
 const EXEMPT: Record<string, string> = {
+  // ⛔ PENDING, WITH ITS REASON AND ITS TRIGGER. ChangePassword is the door in the forced-password wall:
+  // the server refused every route with `password_change_required` and the client had nowhere to send
+  // anyone, so an operator signed in with the log-printed credential and read a red error under a button
+  // that could never work.
+  //
+  // ⚠ IT SHIPPED WITHOUT A WIRING TEST BECAUSE THE OPERATOR WAS BLOCKED, and that is a reason, not an
+  // excuse. TRIGGER: the next piece of the onboarding rebuild (invitations + forced password SET for
+  // invitees) touches this same flow — the wiring test lands with it, covering both screens at once
+  // rather than testing this one twice.
+  "ChangePassword.tsx":
+    "PENDING — forced first-login change; wiring test lands with the invitation flow, which shares it",
   // ⛔ NOT A PRODUCT SCREEN, AND NOT SHIPPED. The visual gallery is a fixture surface behind
   // `VITE_VISUAL_GALLERY`, unset in every production build. It renders primitives with literal props, calls no
   // API, and makes no decision — so a wiring test would assert that a fixture equals itself.
@@ -108,7 +119,8 @@ const PENDING: Record<string, string> = {
   // specifically: that a 403 renders ABSENCE rather than an error, and that a real failure does NOT
   // render as "no agents". PENDING rather than COVERED on purpose: a half-covered screen must be
   // VISIBLY half-covered, and those two are the ones this screen would be worst at getting wrong.
-  "Agents.tsx": "S15.3 — view-model covered; 403-as-absence + failure-path wiring tests owed",
+  "Agents.tsx":
+    "S15.3 — view-model covered; 403-as-absence + failure-path wiring tests owed",
   // ⛔ S14.19. Routed and rendering; its VIEW-MODEL is covered (flowlogview.test.ts) but the wiring
   // and failure-path tests are not written yet. PENDING rather than COVERED on purpose — the ledger
   // is only worth having if a half-covered screen is visibly half-covered.

@@ -47,7 +47,9 @@ describe("txtInstruction — measured against the resolver, not the design", () 
   it("normalizes the name the way CreateClaim does before comparing", () => {
     // domain.go:93 lowercases and trims before the lookup; a panel showing "ACME.io " while
     // the server queries "acme.io" invites a mismatch report that is not a mismatch.
-    expect(txtInstruction("  ACME.io  ", "tunnex-verify=x").name).toBe("acme.io");
+    expect(txtInstruction("  ACME.io  ", "tunnex-verify=x").name).toBe(
+      "acme.io",
+    );
     expect(normalizeDomain("  ACME.io ")).toBe("acme.io");
   });
 });

@@ -202,9 +202,12 @@ describe("clusterReachability — D9", () => {
 
   it("⛔ reachable and UNREACHABLE are both observed, in one test", () => {
     // Mechanism ⑨: a function that always returned reachable:true would pass a happy-path-only test.
-    expect(clusterReachability({ siteId: "s1", gateways: [gw("s1")] }).reachable).toBe(true);
     expect(
-      clusterReachability({ siteId: "s1", gateways: [gw("s1", true)] }).reachable,
+      clusterReachability({ siteId: "s1", gateways: [gw("s1")] }).reachable,
+    ).toBe(true);
+    expect(
+      clusterReachability({ siteId: "s1", gateways: [gw("s1", true)] })
+        .reachable,
     ).toBe(false);
   });
 
@@ -212,12 +215,17 @@ describe("clusterReachability — D9", () => {
     const r = clusterReachability({ siteId: "s1", gateways: [gw("s1", true)] });
     expect(r.why).toMatch(/no endpoint view/i);
     // Measured at dnat_linux.go:174 — the kind is also true for RBAC denial and an unsynced watch.
-    expect(r.why).not.toMatch(/cluster is down|cluster down|unreachable cluster/i);
+    expect(r.why).not.toMatch(
+      /cluster is down|cluster down|unreachable cluster/i,
+    );
   });
 
   it("no gateway at all is UNREACHABLE, with a different reason than a failed watch", () => {
     const none = clusterReachability({ siteId: "s1", gateways: [] });
-    const failed = clusterReachability({ siteId: "s1", gateways: [gw("s1", true)] });
+    const failed = clusterReachability({
+      siteId: "s1",
+      gateways: [gw("s1", true)],
+    });
     expect(none.reachable).toBe(false);
     // Two distinct facts: nothing is bound, versus something is bound and blind.
     expect(none.why).not.toBe(failed.why);

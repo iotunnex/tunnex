@@ -73,7 +73,10 @@ describe("⛔ the mark is never cropped to fit its box", () => {
       readFileSync(join(__dirname, "..", "src", "brand.tsx"), "utf8"),
     );
     const img = /<img[\s\S]*?\/>/.exec(src)?.[0] ?? "";
-    expect(img, "the mark <img> was not found — this census is measuring nothing").toContain("logoUrl");
+    expect(
+      img,
+      "the mark <img> was not found — this census is measuring nothing",
+    ).toContain("logoUrl");
     expect(img).not.toMatch(/rounded-/);
     expect(img).not.toMatch(/overflow-hidden/);
     // object-contain is the opposite of a crop and must stay: it fits the whole mark inside the box.

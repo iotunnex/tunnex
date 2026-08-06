@@ -50,7 +50,9 @@ describe("colour utilities name real tokens", () => {
    */
   const ourFamilies = new Set(Object.keys(tokens.colors));
   const valid = new Set<string>();
-  for (const [family, v] of Object.entries(tokens.colors as Record<string, unknown>)) {
+  for (const [family, v] of Object.entries(
+    tokens.colors as Record<string, unknown>,
+  )) {
     if (typeof v === "string") {
       valid.add(family);
       continue;
@@ -70,7 +72,9 @@ describe("colour utilities name real tokens", () => {
       // ⚠ THE LOOKAHEAD MUST EXCLUDE `-` TOO. Without it the pattern backtracks on `bg-ink-950/80`,
       // matches the prefix `bg-ink`, and reports a false hit on correct code — which it did, on three files,
       // before this character was added.
-      for (const m of src.matchAll(/\b(?:bg|text|border|ring|from|to|via|fill|stroke)-([a-z]+(?:-[a-z0-9]+)?)\b(?![\w/[-])/g)) {
+      for (const m of src.matchAll(
+        /\b(?:bg|text|border|ring|from|to|via|fill|stroke)-([a-z]+(?:-[a-z0-9]+)?)\b(?![\w/[-])/g,
+      )) {
         const name = m[1];
         const family = name.split("-")[0];
         // ⚠ ONLY UTILITIES WHOSE FAMILY IS OURS. `text-` is overloaded — `text-xl` is a font SIZE, and

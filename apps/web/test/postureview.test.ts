@@ -45,7 +45,6 @@ describe("postureBadge — the three-way legibility rider", () => {
     });
     expect(stale).toEqual({ label: "posture stale", tone: "unknown" });
 
-
     // The load-bearing distinction: unknown must never share compliant's tone/label.
     const ok = postureBadge({
       health_state: "compliant",
@@ -196,7 +195,10 @@ describe("unknownPostureLabel — TWO reachable causes, and the third is unreach
     // With a row present, `evaluated_state` is NOT NULL and CHECK-constrained to compliant|noncompliant, so
     // `healthInfoFor` can only reach `unknown` via staleness. No client clock is used or needed.
     expect(
-      unknownPostureLabel({ ...base, health_reported_at: "2026-08-02T09:00:00Z" }),
+      unknownPostureLabel({
+        ...base,
+        health_reported_at: "2026-08-02T09:00:00Z",
+      }),
     ).toBe("posture stale");
   });
 
@@ -289,7 +291,12 @@ describe("needsAttention / applyDeviceFilter", () => {
     // come back — the same defect as showing it a re-export badge.
     expect(
       needsAttention(
-        d({ status: "revoked", health_blocked: true, health_state: "noncompliant", needs_reexport: true }),
+        d({
+          status: "revoked",
+          health_blocked: true,
+          health_state: "noncompliant",
+          needs_reexport: true,
+        }),
       ),
     ).toBe(false);
   });

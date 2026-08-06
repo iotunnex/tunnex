@@ -14,8 +14,16 @@ import {
 describe("CLIENT_STATES", () => {
   it("carries every state the design names, and `failed` which it omits", () => {
     for (const s of [
-      "connected", "connecting", "disconnected", "revoked", "posture_blocked",
-      "migrate_failed", "pending_approval", "helper_outdated", "kill_switch", "expired_creds",
+      "connected",
+      "connecting",
+      "disconnected",
+      "revoked",
+      "posture_blocked",
+      "migrate_failed",
+      "pending_approval",
+      "helper_outdated",
+      "kill_switch",
+      "expired_creds",
     ] as const) {
       expect(CLIENT_STATES).toContain(s);
     }
@@ -74,13 +82,26 @@ describe("notifications", () => {
 // work — worse than none.
 describe("the primary verb", () => {
   it("is absent where the user genuinely cannot act", () => {
-    for (const s of ["revoked", "posture_blocked", "pending_approval", "helper_outdated"] as const) {
+    for (const s of [
+      "revoked",
+      "posture_blocked",
+      "pending_approval",
+      "helper_outdated",
+    ] as const) {
       expect(stateView(s).action, `${s} must offer no button`).toBeNull();
     }
   });
 
   it("is present where pressing it does something", () => {
-    for (const s of ["connected", "connecting", "disconnected", "failed", "migrate_failed", "kill_switch", "expired_creds"] as const) {
+    for (const s of [
+      "connected",
+      "connecting",
+      "disconnected",
+      "failed",
+      "migrate_failed",
+      "kill_switch",
+      "expired_creds",
+    ] as const) {
       expect(stateView(s).action, `${s} needs a verb`).toBeTruthy();
     }
   });
@@ -138,18 +159,28 @@ describe("parsePreviewState", () => {
 // a burst, otherwise a low idle band. Beside it every stat field read `n/a`. A plot of invented data
 // next to an honest `n/a` is worse than either alone: the `n/a` says "not measured", the curve says
 // "measured", and the one that looks like evidence is the one that is lying.
-import { drawGraph, pushRate, rateBetween, THROUGHPUT_WINDOW } from "../src/client/throughput";
+import {
+  drawGraph,
+  pushRate,
+  rateBetween,
+  THROUGHPUT_WINDOW,
+} from "../src/client/throughput";
 
 describe("throughput samples are measured, not generated", () => {
   it("⛔ a rate is a DELTA between two counter readings — no source reports bytes/sec", () => {
-    const r = rateBetween({ bytes: 1000, at: 1_000 }, { bytes: 3000, at: 3_000 });
+    const r = rateBetween(
+      { bytes: 1000, at: 1_000 },
+      { bytes: 3000, at: 3_000 },
+    );
     expect(r).toBe(1000); // 2000 bytes over 2 seconds
   });
 
   it("⛔ a counter that went BACKWARDS is a rebuilt interface, not negative traffic", () => {
     // `wg show` counters reset when the tunnel is torn down and brought back. A naive delta would
     // draw a large negative spike at exactly the moment a reconnect succeeds.
-    expect(rateBetween({ bytes: 9_000, at: 1_000 }, { bytes: 12, at: 2_000 })).toBe(0);
+    expect(
+      rateBetween({ bytes: 9_000, at: 1_000 }, { bytes: 12, at: 2_000 }),
+    ).toBe(0);
   });
 
   it("the first reading has no baseline, so it reports 0 rather than guessing", () => {
@@ -157,8 +188,12 @@ describe("throughput samples are measured, not generated", () => {
   });
 
   it("a zero or backwards clock cannot produce an infinite rate", () => {
-    expect(rateBetween({ bytes: 0, at: 2_000 }, { bytes: 100, at: 2_000 })).toBe(0);
-    expect(rateBetween({ bytes: 0, at: 2_000 }, { bytes: 100, at: 1_000 })).toBe(0);
+    expect(
+      rateBetween({ bytes: 0, at: 2_000 }, { bytes: 100, at: 2_000 }),
+    ).toBe(0);
+    expect(
+      rateBetween({ bytes: 0, at: 2_000 }, { bytes: 100, at: 1_000 }),
+    ).toBe(0);
   });
 
   it("caps the window at 64 samples so the plot scrolls rather than rescaling", () => {
@@ -176,10 +211,19 @@ describe("throughput samples are measured, not generated", () => {
     // Normalisation is against the session peak; a flat zero series must draw a flat line, not NaN.
     const calls: number[] = [];
     const ctx = {
-      clearRect() {}, beginPath() {}, moveTo() {}, closePath() {}, fill() {}, stroke() {},
-      lineTo(_x: number, y: number) { calls.push(y); },
+      clearRect() {},
+      beginPath() {},
+      moveTo() {},
+      closePath() {},
+      fill() {},
+      stroke() {},
+      lineTo(_x: number, y: number) {
+        calls.push(y);
+      },
       createLinearGradient: () => ({ addColorStop() {} }),
-      strokeStyle: "", fillStyle: "", lineWidth: 0,
+      strokeStyle: "",
+      fillStyle: "",
+      lineWidth: 0,
     } as unknown as CanvasRenderingContext2D;
     drawGraph(ctx, 100, 50, [0, 0, 0, 0]);
     expect(calls.every((y) => Number.isFinite(y))).toBe(true);

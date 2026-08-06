@@ -115,8 +115,14 @@ describe("peerSlices — the donut counts DEVICES, and the buckets are disjoint"
 
   it("precedence: a revoked device is NOT idle, and a blocked device is NOT connected", () => {
     // Both would otherwise be double-counted into the reassuring bucket.
-    expect(peerSlices([D({ status: "revoked", online: true })])[0]!.value).toBe(0);
-    expect(peerSlices([D({ status: "active", online: true, health_blocked: true })])[0]!.value).toBe(0);
+    expect(peerSlices([D({ status: "revoked", online: true })])[0]!.value).toBe(
+      0,
+    );
+    expect(
+      peerSlices([
+        D({ status: "active", online: true, health_blocked: true }),
+      ])[0]!.value,
+    ).toBe(0);
   });
 });
 
@@ -126,7 +132,10 @@ describe("postureSplit — UNKNOWN is its own state and is excluded from the per
   it("never-reported devices are unknown, not compliant", () => {
     // Counting them compliant is the reassuring-empty defect with a denominator. The design says it too:
     // "Absence ≠ compliance — unknown is its own state."
-    const s = postureSplit([D({ status: "active" }), D({ status: "active", health_state: "ok" })]);
+    const s = postureSplit([
+      D({ status: "active" }),
+      D({ status: "active", health_state: "ok" }),
+    ]);
     expect(s.unknown).toBe(1);
     expect(s.compliant).toBe(1);
     expect(s.percent).toBe(100); // 1 of 1 REPORTED, not 1 of 2 total
@@ -138,7 +147,9 @@ describe("postureSplit — UNKNOWN is its own state and is excluded from the per
   });
 
   it("revoked devices are excluded entirely", () => {
-    expect(postureSplit([D({ status: "revoked", health_state: "ok" })])).toEqual({
+    expect(
+      postureSplit([D({ status: "revoked", health_state: "ok" })]),
+    ).toEqual({
       compliant: 0,
       blocked: 0,
       unknown: 0,
@@ -146,4 +157,3 @@ describe("postureSplit — UNKNOWN is its own state and is excluded from the per
     });
   });
 });
-
