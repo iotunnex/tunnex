@@ -4782,6 +4782,14 @@ first would fail.
 
 ## ⛔ A LOCAL COMMAND THAT RAN IS NOT A LOCAL COMMAND THAT CHECKED — TWO INSTANCES, ONE SESSION
 
+**⚠ THIRD INSTANCE (S12.1, 2026-08-06) — AND THE TELL WAS THAT THE NUMBER GOT BETTER.** A failing-package
+sweep reported **1** where every prior run reported **5**. The grep matched the bare `FAIL` summary line as
+well as the `FAIL<TAB>package` lines, so `awk '{print $2}'` emitted an empty field — a parsing artifact
+that looked like four packages had been FIXED. Caught only by refusing to accept a number that had no
+explanation. **A result that moves in your favour is the one nobody re-checks**, which makes it the most
+dangerous form of an uninterrogated measurement: a worse number gets investigated by reflex, a better one
+gets reported.
+
 **2026-08-04. Both times a command ran, produced output, and the output did not mean what it appeared to
 mean.** The class is more useful than either instance.
 
@@ -4847,10 +4855,20 @@ are opposite:
 > ## **RELEASING A RESTRICTION RETURNS THE SYSTEM TO ITS DEFAULT. RELEASING A REVOCATION MECHANISM STRANDS
 > ## THE SYSTEM AT A PAST STATE OF THE WORLD, AND CALLS IT CURRENT.**
 
-**The test: ask what the capability's ABSENCE means, not what its release does.** Absent posture
+### ⭐ THE TEST — and it is the operational part, not the epigram
+
+> ## **ASK WHAT THE CAPABILITY'S *ABSENCE* MEANS, NOT WHAT ITS *RELEASE* DOES.**
+
+Absent posture
 enforcement, nothing was ever blocked — a clean default. Absent sync, membership means *"true as of the last
-poll"* while every surface renders it as *"true"*. **Staleness that is indistinguishable from currency is
-the actual defect**, and "release the enforcement" is the phrasing that hides it.
+poll"* while every surface renders it as *"true"*.
+
+> ## ⛔ **STALENESS INDISTINGUISHABLE FROM CURRENCY IS THE DEFECT — AND "RELEASE THE ENFORCEMENT" IS THE
+> ## PHRASING THAT HIDES IT.**
+
+The phrase is doing the damage: it describes an action taken on OUR side and says nothing about the state
+the world is left in. Every downgrade path should be described by **what a reader of the data will now
+wrongly believe**, and if the answer is "nothing — it reads as a clean default", release is safe.
 
 ⭐ **THE RULING THAT FOLLOWS, AND IT IS THE DURABLE PART:**
 
