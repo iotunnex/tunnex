@@ -5257,3 +5257,49 @@ model. The trial-generosity ruling was proposed later and **without being checke
 
 ⚠ The tell is that the conflict lives in **neither ruling's own words**. Each reads as obviously right in
 isolation; the defect only appears when you ask what state the system is in *after* one of them fires.
+
+---
+
+## ⛔ A LAW PROPOSED FROM A SUMMARY IS A LAW PROPOSED FROM NOTHING — GREP FOR THE THING BEFORE WRITING ABOUT IT
+
+**Near-miss, S12.1. Two entries were proposed for this file and neither had a referent.**
+
+1. *"The `TrialGatewayCap` constant that must never be read."* **No such constant exists.** `grep -rn
+   TrialGatewayCap apps/ docs/` returns nothing. The trial ceiling is an ordinary map entry that IS read.
+2. *"Ed25519 vs EdDSA again, in the Go verifier — second instance."* **It never recurred.** The Go verifier
+   has no JWK path at all: `TrustedKeys` holds base64url of raw 32-byte public keys. There is no `alg`
+   field to disagree about. **One instance, in `tunnex-web`, already fixed and already filed.**
+
+Both were plausible. Both fit the shape of things that HAD happened. Both were describable in a sentence
+that reads exactly like the fifty true entries above them.
+
+> ## ⛔ **A FABRICATED PATTERN IN THIS FILE IS WORSE THAN A MISSING ONE. Every future session reads it as
+> ## MEASURED — that is the file's entire value, and one invented entry spends it.**
+
+A missing law costs a rediscovery. **A false one costs trust in all of them**, and there is no way for a
+later reader to tell which entry was checked and which was recalled: they are the same prose.
+
+### ⚠ WHERE THEY CAME FROM, WHICH IS THE USEFUL PART
+
+**Not from source. From a summary of the session** — a description of work, at one remove, where "the
+constant that must never be read" and "the second Ed25519 instance" are both things that *could* have been
+concluded from what was nearby. Long sessions compress, and compression invents structure: two adjacent
+true facts acquire a connective that was never there.
+
+⛔ **The hazard is specific to writing DOWN what a session learned, and it peaks exactly when the material
+is richest** — at the end, when there is most to record and least context left to check it against.
+
+### THE CHECK, AND IT IS CHEAP
+
+> ## ⭐ **BEFORE WRITING A LAW ABOUT AN ARTEFACT, GREP FOR THE ARTEFACT.**
+
+`grep -rn TrialGatewayCap` · `grep -rn alg internal/licence/`. **Two commands, both instant, both
+conclusive.** Neither requires remembering anything — which is the point, because memory is what failed.
+
+⚠ **And the same check applies to the count.** "Second instance" is a claim about the world, not a summary
+of it: it asserts that a search WAS performed and returned two. If no search ran, the number is invented
+even when the first instance is real.
+
+⚠ **Corollary, and it is the harder half:** this near-miss was caught because the two claims arrived as an
+INSTRUCTION to write them down, which forced a look. **A law drafted unprompted gets no such trigger** —
+nobody asks it to prove its referent. The discipline has to be self-imposed at the moment of writing.
