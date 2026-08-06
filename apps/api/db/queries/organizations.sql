@@ -97,3 +97,12 @@ RETURNING *;
 -- S9.1 Slice 5: orgs with OpenVPN enabled — the scheduled CRL refresh regenerates each org's CRL well
 -- inside CRLValidity so no CRL ever EXPIRES (an expired CRL can fail-OPEN, silently un-revoking a fleet).
 SELECT id FROM organizations WHERE ovpn_enabled = true AND deleted_at IS NULL;
+
+-- name: CountOrganizationsEver :one
+-- ⛔ INCLUDES SOFT-DELETED ROWS, DELIBERATELY, AND THAT IS THE WHOLE POINT.
+--
+-- This answers "has this deployment ever been set up", which is a DIFFERENT question from
+-- CountOrganizations' "how many exist now". The bootstrap window — the one moment a stranger may create
+-- the first organization — must key on the former. Keyed on the latter, deleting every organization
+-- REOPENS setup, and the next person to reach the URL becomes owner of the deployment.
+SELECT count(*) FROM organizations;
