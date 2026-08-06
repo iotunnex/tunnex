@@ -5048,3 +5048,46 @@ asserting something about the one file that happened to carry the comment.
 ⚠ **And the corollary, which cost a red test to learn:** a ruling may be recorded in more than one place.
 The same reversal touched a comment **and** a test asserting `src/` contained no Ed25519. Only the test
 objected. **Grep for the ruling, not just for the file you were told about.**
+
+---
+
+## ⛔ WHEN REVERSING A RULING, CENSUS WHAT **ENFORCES** IT — NOT ONLY WHAT **STATES** IT
+
+**Found in S12.4, moving licence issuance into `tunnex-web`.**
+
+The destination repo carried a ruling in a file header: *"The site NEVER holds signing keys… no key
+material in this repo."* The founder reversed it. The obvious work was to rewrite that header, and I did.
+
+⛔ **The ruling was not only a comment. It was a TEST** — `trial-issuance.test.ts`, asserting *"src/
+contains no Ed25519 usage or embedded private keys"*, walking the tree and matching on `ed25519`, PEM
+blocks and `signingKey`. **It went red the instant the signer landed.**
+
+> ## ⛔ **REWRITING THE HEADER ALONE WOULD HAVE LEFT A RED TEST WITH NO EXPLANATION — AND THE NEXT PERSON
+> ## WOULD HAVE DELETED THE TEST TO MAKE THE BUILD PASS.**
+
+That is the whole hazard, and it is quiet: the deletion would look like housekeeping. A guard removed to
+make a build green takes its invariant with it, and **nothing afterwards records that the invariant ever
+existed** — the header now says the opposite, so there is not even a contradiction left to notice.
+
+### ⭐ THE GENERAL FORM
+
+**A ruling worth writing down was often worth guarding, and the guard is where the reversal actually costs
+something.** Prose states an intention; a test *enforces* one, and only the enforcement will object when
+you contradict it. So the census is not "where is this ruling described" but **"what would fail if I did
+the opposite"**:
+
+1. **tests** naming the invariant (they fail loudly — the best case)
+2. **schema constraints** — CHECKs, UNIQUEs, NOT NULLs encoding the old rule
+3. **lint rules, CI steps, censuses** that enumerate or forbid
+4. **types** whose shape only makes sense under the old ruling
+
+⚠ **And the right move on the objecting guard is REWRITE, NOT DELETE.** The reversal narrows an invariant;
+it rarely abolishes one. Here *"no key material in this repo"* became **"Ed25519 lives in exactly one
+module, and no private key is ever a literal"** — still mechanical, still failing on the real hazard, and
+now aimed at what the new ruling actually forbids.
+
+> ## ⭐ **A REVERSED RULING SHOULD LEAVE A NARROWER GUARD BEHIND IT, NOT AN ABSENCE.**
+
+⚠ Corollary to *when a hazard is a seam, census the callers*: **grep for the ruling, not for the file you
+were told about.** Here the ruling lived in a header, a test, and the shape of an interface — and only the
+test objected.
