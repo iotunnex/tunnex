@@ -74,6 +74,7 @@ func BearerAuth(q *sqlc.Queries) BearerAuthFunc {
 			AuthMethod:         authctx.AuthBearer, // a CLI/automation credential — exempt from the MFA-enrollment gate (D5)
 			Roles:              roles,
 			MustChangePassword: user.MustChangePassword,
+			CanCreateOrgs:      user.CanCreateOrgs,
 		}, nil
 	}
 }

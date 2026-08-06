@@ -189,10 +189,22 @@ func (s apiServer) CurrentUser(ctx context.Context, _ api.CurrentUserRequestObje
 	if !ok {
 		return nil, apierr.New(http.StatusUnauthorized, "unauthenticated", "authentication required")
 	}
+	// ⛔ THIS PROJECTION IS BUILT BY HAND AND authUser() EXISTS — one truth, written twice, and the copies
+	// drifted. `can_create_orgs` and `must_change_password` were added to authUser() (used by LOGIN) and
+	// never reached here (used by every page load), so both worked once and vanished on refresh: the
+	// switcher's "+ New" disappeared, and the forced-password redirect never fired at all because the SPA
+	// rehydrates from THIS response.
+	//
+	// ⚠ Not collapsed into authUser() here because that takes a sqlc.User and this has only a Principal —
+	// the real fix is one projection over one type, and it is registered rather than done mid-hotfix.
+	mustChange := p.MustChangePassword
+	mayCreate := p.CanCreateOrgs
 	au := api.AuthUser{
-		Id:            p.UserID,
-		Email:         openapi_types.Email(p.Email),
-		EmailVerified: p.EmailVerified,
+		Id:                 p.UserID,
+		Email:              openapi_types.Email(p.Email),
+		EmailVerified:      p.EmailVerified,
+		MustChangePassword: &mustChange,
+		CanCreateOrgs:      &mayCreate,
 	}
 	// Carry the gate state so a gated client (session minted, enrollment-restricted) can route to
 	// the enrollment ceremony rather than hit dead 403s. Enterprise only. The gate-state error is
