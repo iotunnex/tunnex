@@ -260,6 +260,22 @@ func (s *Service) IssueJoinToken(ctx context.Context, actor, orgID uuid.UUID, no
 		namePin = &nodeName
 	}
 	err = s.withTx(ctx, func(q *sqlc.Queries) error {
+		// ⛔ THE CEILING IS CHECKED HERE TOO, AND THIS IS WHERE A HUMAN CAN ACT ON IT.
+		//
+		// Enforcement lives at ENROLMENT and stays there — an old token must never bypass the band. But
+		// enrolment happens on the CUSTOMER'S SERVER, inside the agent, minutes later: the operator pastes
+		// a docker command and reads a shell error. The web had already shown them a successful
+		// join-token ceremony for an enrolment that could not possibly succeed.
+		//
+		// > ⛔ **A REFUSAL THAT ARRIVES WHERE NOBODY IS LOOKING IS A REFUSAL NOBODY CAN ACT ON.**
+		//
+		// ⚠ TWO CHECKS, ONE TRUTH, AND THE SECOND IS NOT REDUNDANT: this one is ADVISORY and early, so the
+		// operator meets the limit at the moment they are deciding to add a gateway — the moment they
+		// would upgrade. The enrolment check remains authoritative, because the fleet can grow between
+		// minting a token and redeeming it.
+		if e := s.checkGatewayCeiling(ctx, q, orgID); e != nil {
+			return e
+		}
 		// ⛔ THE ACTOR WAS ALWAYS IN HAND AND WAS ALWAYS THROWN AWAY (S15.2 slice 1). This function has
 		// received `actor` since it was written and wrote it to the audit log ALONE, so every token minted
 		// before 0066 discarded its issuer to a table nobody joins against. One parameter, and it stops.

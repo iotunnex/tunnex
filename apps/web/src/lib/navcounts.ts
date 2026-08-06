@@ -38,18 +38,44 @@ export function badgeText(c: NavCount): string | null {
 }
 
 /**
- * The gateway badge — `3/7` — needs BOTH numbers, so it is the case where a partial answer is most tempting.
+ * The gateway badge — `6/20` — is USED over CEILING (founder-ruled).
  *
- * ⛔ IF EITHER SIDE IS UNKNOWN THE WHOLE BADGE IS ABSENT. Rendering `?/7` or `3/?` would be worse than nothing:
- * it asserts one half as fact while implying the other is momentarily missing, when in truth the reader has no
- * way to know which half is real.
+ * ⛔ IT USED TO BE ONLINE OVER TOTAL, AND THAT WAS THE DEFECT. `1/6` sat in the sidebar beside a licence card
+ * reading `20 gateways`, and the two looked like one fact disagreeing with itself. They were two different
+ * facts wearing the same shape, and the reading it invited — "6 of my 20" — was wrong in BOTH numbers.
+ *
+ * ⭐ HEADROOM IS WHAT A DENOMINATOR MEANS. A reader seeing `x/y` asks "how much of my allowance is gone",
+ * not "how many are awake" — so the badge now answers the question it was always being asked. Liveness is
+ * still on the Gateways page, where a reader is looking at gateways rather than glancing at a nav.
+ *
+ * ⛔ IF EITHER SIDE IS UNKNOWN THE WHOLE BADGE IS ABSENT. Rendering `?/20` or `6/?` would be worse than
+ * nothing: it asserts one half as fact while implying the other is momentarily missing, when the reader has
+ * no way to know which half is real.
  */
 export function gatewayBadgeText(
-  online: NavCount,
-  total: NavCount,
+  used: NavCount,
+  ceiling: NavCount | null,
 ): string | null {
-  if (online.state !== "ok" || total.state !== "ok") return null;
-  return `${online.value}/${total.value}`;
+  if (used.state !== "ok") return null;
+  // ⭐ UNLIMITED IS `∞`, NOT "unlimited" AND NOT A BLANK (founder-ruled).
+  //
+  // A blank denominator reads as a loading state — the reader waits for a number that is never coming. The
+  // word "unlimited" does not fit a nav badge and forces the numerator to shrink. `∞` is the only rendering
+  // that stays the same SHAPE as every other badge, so the eye compares it to `6/20` without re-reading.
+  if (ceiling === null) return `${used.value}/∞`;
+  if (ceiling.state !== "ok") return null;
+  // ⛔ NO CLAMP. `24/20` RENDERS AS `24/20`.
+  //
+  // A deployment sits above its band whenever a licence lapses or a tier is downgraded — running gateways
+  // are never stopped, by ruling, so exceeding the ceiling is a NORMAL state and not an error. Clamping to
+  // `20/20` would hide the one number the operator needs to act on, and erroring would put a fault on a
+  // deployment that is behaving exactly as designed.
+  //
+  // ⚠ `1/1` ON COMMUNITY IS THE SAME KIND OF TRUTH AND MUST NOT LOOK LIKE AN ALARM. It says "you are using
+  // the gateway you have", which is the expected steady state of every free deployment — not a warning, not
+  // red, and not something to soften into `1` or hide. The badge states it and the refusal explains it if
+  // the operator ever tries to add another.
+  return `${used.value}/${ceiling.value}`;
 }
 
 /**
@@ -75,6 +101,8 @@ export function countFrom<T>(
 export interface NavCounts {
   gatewaysOnline: NavCount;
   gatewaysTotal: NavCount;
+  // ⚠ null means UNLIMITED (Scale), which is a real answer — distinct from a NavCount that failed to load.
+  gatewayCeiling: NavCount | null;
   sites: NavCount;
   devices: NavCount;
 }
@@ -82,6 +110,7 @@ export interface NavCounts {
 export const INITIAL_NAV_COUNTS: NavCounts = {
   gatewaysOnline: LOADING,
   gatewaysTotal: LOADING,
+  gatewayCeiling: LOADING,
   sites: LOADING,
   devices: LOADING,
 };

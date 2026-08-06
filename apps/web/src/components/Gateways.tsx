@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   api,
+  apiErrorCode,
   apiErrorMessage,
   type Node,
   type Org,
@@ -8,6 +9,7 @@ import {
 } from "../lib/api";
 import { policyHealthBadge, badgeClass } from "../lib/healthview";
 import { relativeAge } from "../lib/format";
+import { CeilingUpgrade, ceilingKind } from "./CeilingUpgrade";
 import { Button, Card, ErrorText, Field, Input } from "./ui";
 import { OneTimeSecretModal } from "./OneTimeSecret";
 
@@ -169,6 +171,9 @@ export function Gateways({
   // omitted TUNNEX_NODE_NAME and the agent looped node_name_mismatch.)
   const [pinnedName, setPinnedName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ceiling, setCeiling] = useState<"gateway" | "organization" | null>(
+    null,
+  );
   const [busy, setBusy] = useState(false);
   // The CP's authoritative public base URL for the emitted command (review #1 — not window.location).
   // metaError distinguishes "fetch FAILED" from "fetch ok, field unset" (re-review #2): both leave
@@ -215,9 +220,14 @@ export function Gateways({
         },
       );
       if (error || !data) {
+        // ⛔ THE CEILING REFUSAL IS THE ONE ERROR HERE THAT IS NOT A FAULT — it is the product working,
+        // at the exact moment the operator was deciding to add a gateway. Rendering it as a generic red
+        // string told them no and offered nowhere to go.
+        setCeiling(ceilingKind(apiErrorCode(error)));
         setError(apiErrorMessage(error, "Could not issue a join token."));
         return;
       }
+      setCeiling(null);
       setToken(data.join_token); // shown once — never re-served
       setPinnedName(pinned);
       setPinnedEndpoint(endpoint.trim() || null);
@@ -365,7 +375,14 @@ export function Gateways({
         </p>
       )}
 
-      <ErrorText>{error}</ErrorText>
+      {/* ⚠ THE ROUTE REPLACES THE BARE ERROR, never sits beside it — two renderings of one refusal read as
+          two problems. The server's message is passed through verbatim: it already names the band, the
+          ceiling, what is enrolled, and that nothing running is affected. */}
+      {ceiling && error ? (
+        <CeilingUpgrade message={error} kind={ceiling} />
+      ) : (
+        <ErrorText>{error}</ErrorText>
+      )}
 
       {renderList && (
         <ul className="mt-3 space-y-2">

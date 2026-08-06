@@ -46,6 +46,7 @@ export function useNavCounts(): NavCounts {
       setCounts({
         gatewaysOnline: FAILED,
         gatewaysTotal: FAILED,
+        gatewayCeiling: FAILED,
         sites: FAILED,
         devices: FAILED,
       });
@@ -53,7 +54,7 @@ export function useNavCounts(): NavCounts {
     }
     const orgId = currentOrg.id;
 
-    const [nodes, sites, devices] = await Promise.all([
+    const [nodes, sites, devices, lic] = await Promise.all([
       loadOne(() =>
         api.GET("/api/v1/organizations/{orgId}/nodes", {
           params: { path: { orgId } },
@@ -69,11 +70,22 @@ export function useNavCounts(): NavCounts {
           params: { path: { orgId } },
         }),
       ) as Promise<Loaded<Device[]>>,
+      // ⚠ DEPLOYMENT-SCOPED, so it takes no orgId — the licence belongs to the box, not the tenant.
+      loadOne(() => api.GET("/api/v1/license")) as Promise<
+        Loaded<{ gateway_ceiling?: number | null }>
+      >,
     ]);
 
     setCounts({
       gatewaysTotal: countFrom(nodes, (n) => n.length),
       gatewaysOnline: countFrom(nodes, (n) => n.filter(isOnline).length),
+      // ⚠ THE CEILING IS DEPLOYMENT-WIDE AND COMES FROM THE LICENCE, not from anything org-scoped. A null
+      // ceiling is UNLIMITED — a real answer — and must not be confused with a read that failed.
+      gatewayCeiling: lic.ok
+        ? lic.data.gateway_ceiling == null
+          ? null
+          : { state: "ok" as const, value: lic.data.gateway_ceiling }
+        : FAILED,
       sites: countFrom(sites, (r) => r.length),
       devices: countFrom(devices, (r) => r.length),
     });
