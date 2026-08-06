@@ -1,0 +1,24 @@
+name = "tunnex-issuance"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# ⛔ SECRETS ARE NOT LISTED HERE AND MUST NEVER BE. Set with `wrangler secret put`, which is write-only
+# after the fact — that write-only property IS the protection for the signing key, and a value in this
+# file is a value in git.
+#
+#   wrangler secret put SIGNING_KEY_JWK    # the Ed25519 PRIVATE key as a JWK. See README §generate.
+#   wrangler secret put SIGNING_PUBLIC_JWK # the matching public JWK — used ONLY to self-verify a mint
+#   wrangler secret put SIGNING_KID        # ⭐ D4: which key in the SET minted this. Never reused.
+#   wrangler secret put ADMIN_TOKEN        # floor auth for /admin. Cloudflare Access is the real control.
+#   wrangler secret put MAIL_ENDPOINT      # optional. Absent => the admin view hands you the key instead
+#   wrangler secret put MAIL_TOKEN
+#   wrangler secret put MAIL_FROM
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tunnex-issuance"
+database_id = "SET_ME"   # `wrangler d1 create tunnex-issuance` prints it
+
+# ⚠ D3 (HELD): D1's region is a DPDP question for Indian customers' billing data
+# (docs/architecture-licensing.md §6). Cheaper to choose now than to migrate later — and it is a lawyer's
+# question, not a session's.

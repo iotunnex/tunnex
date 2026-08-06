@@ -4893,3 +4893,56 @@ HAZARD*, one level up: here the guard is not even wrong, it is **wrong for this 
 
 ⛔ **So the question to ask of any downgrade path is not "what does release mean here" but "is this thing a
 restriction or a revocation".** Only the first releases.
+
+---
+
+## ⛔ WHEN A PRODUCT'S CORE PROMISE IS THE **ABSENCE OF A CHANNEL**, EVERY CONTROL THAT WOULD HAVE USED THAT CHANNEL IS UNAVAILABLE — AND THE COST LANDS SOMEWHERE THAT LOOKS UNRELATED
+
+**Found in S12.4, designing the licence signing key's compromise-recovery plan. The finding is not about
+keys.**
+
+Tunnex verifies licences **offline**. Customer deployments never call home. That is the differentiator a
+sovereignty buyer pays for, and it is stated as a feature — *"no SaaS in the trust path."*
+
+Follow it to its consequences and it stops being only a feature:
+
+- **No revocation.** A key that leaves is alive until its expiry.
+- **No usage signal.** We cannot see which deployments run which keys.
+- ⛔ **AND THEREFORE NO DETECTION OF A FORGED KEY.** If the signing key leaked, an attacker could mint valid
+  licences indefinitely and **nothing would ever indicate it had happened** — because the telemetry that
+  would show it is exactly what the product promises not to have.
+
+> ## ⛔ **THE RECOVERY PLAN CAN NEVER BE TRIGGERED BY EVIDENCE, ONLY BY SUSPICION.**
+
+The plan itself is fine — rotate, ship a binary trusting a new key, re-issue. **Every step is executable and
+none of them will ever be prompted**, because the event that should start them is unobservable. A response
+plan whose trigger cannot fire is not a response plan; it is a document.
+
+### ⭐ THE GENERAL FORM
+
+**Every product promise of the shape "we do not collect / we do not connect / we do not see" is also a
+promise that a class of CONTROL is unavailable.** The controls are usually not enumerated when the promise
+is made, because the promise is made in marketing terms and the controls are discovered later, one at a
+time, by whoever needs one.
+
+**The pattern is that the cost lands somewhere that looks unrelated to the promise.** Nobody choosing
+offline verification is thinking about signing-key compromise; they are thinking about customer trust. The
+bill arrives in an incident-response document years later.
+
+> ## ⭐ **SOVEREIGNTY IS NOT FREE. IT MOVES THE BURDEN TO PREVENTION AND MAKES RESPONSE A RUMOUR-DRIVEN
+> ## ACT.**
+
+### WHAT TO DO WITH IT
+
+⛔ **When a promise removes a channel, enumerate the controls that channel would have carried — at the time
+the promise is made, not when one is needed.** Then decide, per control, whether:
+
+1. **prevention absorbs it** (the S12.4 answer: the key exists in plaintext nowhere, and the account
+   boundary is the real control), or
+2. **a different channel can carry it** (a customer-initiated check, an out-of-band signal), or
+3. ⚠ **it is genuinely accepted as absent** — which is a legitimate answer and must be *written down*, or
+   it will be rediscovered as a defect by someone who assumes it was overlooked.
+
+⚠ **And the asymmetry to watch: detection and response degrade together.** Losing detection quietly makes
+every response plan downstream of it unrunnable, and those plans keep looking complete on paper. **Check
+whether a plan's TRIGGER still exists, not only whether its STEPS do.**
