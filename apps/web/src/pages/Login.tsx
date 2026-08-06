@@ -256,24 +256,16 @@ function BrowserLogin() {
       <p className="mt-4 text-xs text-slate-600">{GENERIC_202_NOTE}</p>
 
       <div className="mt-5 flex justify-between text-xs text-slate-400">
-        {/* ⛔ NO PUBLIC SIGNUP AFTER SETUP. A self-hosted deployment is ONE COMPANY: everyone inside
-            arrives by invitation or SSO domain capture, both acts by someone already here. An open form
-            after setup produces only orphan accounts on a private control plane.
+        {/* ⛔ THERE IS NO PUBLIC SIGNUP. EVER. (founder-ruled)
+            A self-hosted control plane is owned by ONE COMPANY. Install creates the CP admin; everyone
+            else arrives by INVITATION — the invite mints the account and the invited person sets their own
+            password from that link. An account-creation form on this page offers a stranger a door into
+            someone's private deployment, and there is no version of that which makes sense.
 
-            ⚠ HIDING IS HALF THE FIX AND IS NOT THE BOUNDARY — auth.Signup refuses `signup_closed` on the
-            server regardless. Both halves exist because a hidden link is not a closed door, and a refused
-            endpoint behind a visible link is a dead end.
-
-            ⚠ `meta === null` KEEPS IT HIDDEN. A failed /meta read must not offer signup on a deployment
-            that has closed it; the first run's deployment answers reliably or nothing is bootstrapped
-            anyway. */}
-        {meta?.setup_complete === false ? (
-          <Link to="/signup" className="hover:text-slate-200">
-            Create an account
-          </Link>
-        ) : (
-          <span />
-        )}
+            ⚠ THE LINK IS GONE UNCONDITIONALLY, not hidden behind setup_complete. A conditional link says
+            "sometimes you may sign up"; the ruling is that you never may. The server refuses regardless
+            (signup_closed), so this is the affordance matching the rule rather than guarding it. */}
+        <span />
         <Link to="/forgot-password" className="hover:text-slate-200">
           Forgot password?
         </Link>
