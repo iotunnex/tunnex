@@ -339,8 +339,33 @@ func (s *Service) ceilingRefusal(tier licence.Tier, ceiling int, live int64) str
 		tier, ceiling, unit, live)
 }
 
+// checkNewPrincipalAllowed refuses to bring a NEW gateway or agent into existence once the licence has
+// expired. ⚠ nil manager => allowed, the fail-open default.
+func (s *Service) checkNewPrincipalAllowed() error {
+	if s.licence == nil || s.licence.AllowsNewPrincipals(time.Now()) {
+		return nil
+	}
+	return apierr.New(403, "licence_expired", s.licence.NewPrincipalRefusal(time.Now()))
+}
+
 func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentVersion string) (EnrollResult, error) {
 	var res EnrollResult
+	// ⛔ THE GRACE LADDER (S12.1 slice 7) — AND IT RUNS BEFORE THE TOKEN IS CONSUMED, DELIBERATELY.
+	//
+	// After a licence expires, everything enrolled keeps working and nothing stops; what stops is GROWTH.
+	// This is that refusal for gateways and agents.
+	//
+	// ⚠ THE ORDERING IS THE CARE HERE. `ConsumeJoinToken` is single-use, so a refusal AFTER it destroys the
+	// token — and a licence-state refusal is one the operator FIXES and retries. Burning their token for
+	// being a day past expiry would mean renewing the licence still leaves them unable to enrol until they
+	// mint a fresh one. A licence check needs no org, so it costs nothing to ask first.
+	//
+	// ⚠ The band ceiling below still runs inside the tx and still burns the token, because it CANNOT be
+	// asked first: the ceiling is per-org and the org is only known once the token is read. Recorded as a
+	// known asymmetry rather than pretended away.
+	if e := s.checkNewPrincipalAllowed(); e != nil {
+		return res, e
+	}
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
 		tok, e := q.ConsumeJoinToken(ctx, hashToken(rawToken))
 		if errors.Is(e, pgx.ErrNoRows) {

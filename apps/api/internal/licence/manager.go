@@ -132,3 +132,37 @@ func (m *Manager) OrgCeilingNow(now time.Time) *int {
 	c, _ := OrgCeilingFor(m.Evaluate(now).Tier)
 	return c
 }
+
+// AllowsNewPrincipals reports whether a new principal — a device, an agent, a gateway — may be enrolled.
+//
+// ⛔ THIS IS THE GRACE LADDER'S TEETH, AND IT IS THE ONLY THING GRACE CHANGES.
+//
+//	valid    → yes
+//	expired  → NO. Everything already enrolled keeps working; nothing stops. What stops is GROWTH.
+//	lapsed   → NO.
+//
+// ⚠ THAT IS THE WHOLE DISTINCTION THE MODEL RESTS ON: a limit that blocks a new principal blocks GROWTH,
+// and a limit that stops a running one blocks WORK. Grace refuses the first and never the second — a
+// running VPN never stops, and no human already connected is ever disconnected by a licence state.
+func (m *Manager) AllowsNewPrincipals(now time.Time) bool {
+	switch m.Evaluate(now).State {
+	case StateExpired, StateLapsed:
+		return false
+	default:
+		return true
+	}
+}
+
+// NewPrincipalRefusal is what an operator reads when grace has begun.
+//
+// ⭐ It says what still works before it says what does not, because the first thing an operator needs is
+// to know their fleet is fine.
+func (m *Manager) NewPrincipalRefusal(now time.Time) string {
+	st := m.Evaluate(now)
+	when := ""
+	if !st.ExpiresAt.IsZero() {
+		when = " on " + st.ExpiresAt.Format("2 January 2006")
+	}
+	return "This licence expired" + when + ". Everything already enrolled keeps working and nothing has " +
+		"stopped — but new devices, agents and gateways cannot be enrolled until it is renewed."
+}
