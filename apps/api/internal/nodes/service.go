@@ -347,6 +347,13 @@ func (s *Service) ceilingRefusal(tier licence.Tier, ceiling int, live int64) str
 	if ceiling == 1 {
 		unit = "gateway"
 	}
+	// ⚠ THE COUNT PLURALISES SEPARATELY FROM THE CEILING. "allows 1 gateway, and 1 are already enrolled"
+	// shipped to a real screen — same fact, two sentences, one ungrammatical — because only the ceiling was
+	// pluralised. This is the message an operator reads at the exact moment they are deciding to pay.
+	verb := "are"
+	if live == 1 {
+		verb = "is"
+	}
 	// ⛔ THE LAST SENTENCE IS NOT POLISH — IT IS THE ONLY WARNING AN OPERATOR GETS.
 	//
 	// This refusal fires AFTER `ConsumeJoinToken`, so the token is already spent. The ceiling is per-org
@@ -358,12 +365,12 @@ func (s *Service) ceilingRefusal(tier licence.Tier, ceiling int, live int64) str
 	// for a token problem that does not exist. Telling them here costs one line; not telling them costs a
 	// support round-trip at the exact moment the product first says no to them.
 	return fmt.Sprintf(
-		"This deployment is on the %s band, which allows %d %s, and %d are already enrolled. "+
+		"This deployment is on the %s band, which allows %d %s, and %d %s already enrolled. "+
 			"Nothing running is affected — existing gateways keep working, and this refusal applies only "+
 			"to enrolling a new one. To add another: upgrade the licence, or revoke a gateway you no "+
 			"longer use to free a slot. Note that this join token has been used up — mint a new one "+
 			"before retrying.",
-		tier, ceiling, unit, live)
+		tier, ceiling, unit, live, verb)
 }
 
 // checkNewPrincipalAllowed refuses to bring a NEW gateway or agent into existence once the licence has

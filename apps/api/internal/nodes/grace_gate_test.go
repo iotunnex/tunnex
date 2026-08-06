@@ -50,6 +50,14 @@ func TestEnrolmentGateFollowsTheLadder(t *testing.T) {
 // it survivable, so it is asserted rather than left to whoever next edits the wording.
 func TestBandRefusalWarnsTheTokenIsSpent(t *testing.T) {
 	msg := (&Service{}).ceilingRefusal(licence.TierTrial, 2, 2)
+	// ⚠ THE COUNT PLURALISES SEPARATELY FROM THE CEILING. "allows 1 gateway, and 1 are already enrolled"
+	// reached a real screen, because only the ceiling was pluralised.
+	if one := (&Service{}).ceilingRefusal(licence.TierCommunity, 1, 1); !strings.Contains(one, "1 is already enrolled") {
+		t.Errorf("singular count reads wrong:\n%s", one)
+	}
+	if two := (&Service{}).ceilingRefusal(licence.TierTrial, 2, 2); !strings.Contains(two, "2 are already enrolled") {
+		t.Errorf("plural count reads wrong:\n%s", two)
+	}
 	for _, want := range []string{"used up", "mint a new one", "keep working", "upgrade the licence"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the band refusal never says %q:\n%s", want, msg)
