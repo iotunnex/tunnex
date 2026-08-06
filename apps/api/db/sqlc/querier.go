@@ -1226,6 +1226,15 @@ type Querier interface {
 	// gates login, so overwriting it is safe.
 	UpsertUnconfirmedTOTP(ctx context.Context, arg UpsertUnconfirmedTOTPParams) error
 	// Used by the seed with a fixed id; idempotent.
+	//
+	// ⛔ can_create_orgs IS STATED EXPLICITLY, AND IT IS A FIXTURE'S JOB TO STATE IT. It is a DEPLOYMENT fact —
+	// who may bring an organization into existence — and leaving it to the column DEFAULT made the seed silent
+	// about a security property it is responsible for.
+	//
+	// ⚠ AND THE OMISSION WAS INVISIBLE ON ANY RIG THAT ALREADY HAD DATA. Migration 0073 backfills the
+	// capability for existing owners, so a developer's rig grants it retroactively while every FRESH install
+	// runs migrate (matching no rows, since there are no users yet) and then seeds a demo owner with the
+	// column at DEFAULT false — unable to create anything, with no "+ New" in the switcher and no walk.
 	UpsertUser(ctx context.Context, arg UpsertUserParams) (User, error)
 	// lint:cross-org — spans a user's orgs by design: does ANY org the user belongs to enforce MFA?
 	// The D8/D5 enforcement predicate (local-auth users only; SSO is exempt at the login seam).

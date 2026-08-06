@@ -8,10 +8,20 @@ WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: UpsertUser :one
 -- Used by the seed with a fixed id; idempotent.
-INSERT INTO users (id, email, name)
-VALUES ($1, $2, $3)
+--
+-- ⛔ can_create_orgs IS STATED EXPLICITLY, AND IT IS A FIXTURE'S JOB TO STATE IT. It is a DEPLOYMENT fact —
+-- who may bring an organization into existence — and leaving it to the column DEFAULT made the seed silent
+-- about a security property it is responsible for.
+--
+-- ⚠ AND THE OMISSION WAS INVISIBLE ON ANY RIG THAT ALREADY HAD DATA. Migration 0073 backfills the
+-- capability for existing owners, so a developer's rig grants it retroactively while every FRESH install
+-- runs migrate (matching no rows, since there are no users yet) and then seeds a demo owner with the
+-- column at DEFAULT false — unable to create anything, with no "+ New" in the switcher and no walk.
+INSERT INTO users (id, email, name, can_create_orgs)
+VALUES ($1, $2, $3, $4)
 ON CONFLICT (id) DO UPDATE
-    SET email = EXCLUDED.email, name = EXCLUDED.name
+    SET email = EXCLUDED.email, name = EXCLUDED.name,
+        can_create_orgs = EXCLUDED.can_create_orgs
 RETURNING *;
 
 -- name: CreateUser :one

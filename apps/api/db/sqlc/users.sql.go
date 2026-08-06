@@ -145,22 +145,38 @@ func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) er
 }
 
 const upsertUser = `-- name: UpsertUser :one
-INSERT INTO users (id, email, name)
-VALUES ($1, $2, $3)
+INSERT INTO users (id, email, name, can_create_orgs)
+VALUES ($1, $2, $3, $4)
 ON CONFLICT (id) DO UPDATE
-    SET email = EXCLUDED.email, name = EXCLUDED.name
+    SET email = EXCLUDED.email, name = EXCLUDED.name,
+        can_create_orgs = EXCLUDED.can_create_orgs
 RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs
 `
 
 type UpsertUserParams struct {
-	ID    uuid.UUID `json:"id"`
-	Email string    `json:"email"`
-	Name  string    `json:"name"`
+	ID            uuid.UUID `json:"id"`
+	Email         string    `json:"email"`
+	Name          string    `json:"name"`
+	CanCreateOrgs bool      `json:"can_create_orgs"`
 }
 
 // Used by the seed with a fixed id; idempotent.
+//
+// ⛔ can_create_orgs IS STATED EXPLICITLY, AND IT IS A FIXTURE'S JOB TO STATE IT. It is a DEPLOYMENT fact —
+// who may bring an organization into existence — and leaving it to the column DEFAULT made the seed silent
+// about a security property it is responsible for.
+//
+// ⚠ AND THE OMISSION WAS INVISIBLE ON ANY RIG THAT ALREADY HAD DATA. Migration 0073 backfills the
+// capability for existing owners, so a developer's rig grants it retroactively while every FRESH install
+// runs migrate (matching no rows, since there are no users yet) and then seeds a demo owner with the
+// column at DEFAULT false — unable to create anything, with no "+ New" in the switcher and no walk.
 func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (User, error) {
-	row := q.db.QueryRow(ctx, upsertUser, arg.ID, arg.Email, arg.Name)
+	row := q.db.QueryRow(ctx, upsertUser,
+		arg.ID,
+		arg.Email,
+		arg.Name,
+		arg.CanCreateOrgs,
+	)
 	var i User
 	err := row.Scan(
 		&i.ID,
