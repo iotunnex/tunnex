@@ -15,6 +15,7 @@ import { useResendVerification } from "../lib/useResendVerification";
 import { Button } from "./ui";
 import { HealthStatus } from "./HealthStatus";
 import { IdentityBadges } from "./IdentityBadges";
+import { OrgSwitcher } from "./OrgSwitcher";
 import { useLayoutCapability } from "./ComposeGate";
 import { CommandPalette } from "./CommandPalette";
 import { useNavCounts } from "../lib/useNavCounts";
@@ -70,7 +71,11 @@ export const NAV_GROUPS: Array<{
   {
     group: "OBSERVE",
     items: [
-      { to: "/access-events", label: "Access Events", icon: "arrow-right-left" },
+      {
+        to: "/access-events",
+        label: "Access Events",
+        icon: "arrow-right-left",
+      },
       { to: "/audit", label: "Audit Log", icon: "file-text" },
     ],
   },
@@ -154,7 +159,9 @@ function NavGroups({
                   {/* The label is the only thing the rail drops. `title` keeps it reachable to a
                       pointer, and the aria-label keeps it reachable to a screen reader — a rail of
                       unlabelled icons is not a compact nav, it is a quiz. */}
-                  {shows.labels && <span className="truncate">{item.label}</span>}
+                  {shows.labels && (
+                    <span className="truncate">{item.label}</span>
+                  )}
                   {/* ⛔ The badge is RIGHT-ALIGNED and CONDITIONAL; the destination never is. `null` means
                       render nothing — never 0, never a dash (lib/navcounts.ts). */}
                   {(() => {
@@ -362,59 +369,60 @@ export function AppShell() {
       <div className="relative flex min-h-0 flex-1">
         <SidebarNav />
         <div className="flex min-w-0 flex-1 flex-col">
-      <header className="flex h-[56px] shrink-0 items-center justify-end gap-2 border-b border-line px-4">
-        <div className="flex min-w-0 items-center gap-3">
-          {/* The search field IS the command-palette affordance (S14.3 built the palette; this is its
+          <header className="flex h-[56px] shrink-0 items-center justify-end gap-2 border-b border-line px-4">
+            <div className="flex min-w-0 items-center gap-3">
+              {/* The search field IS the command-palette affordance (S14.3 built the palette; this is its
               discoverable entry point, since a shortcut nobody sees is a shortcut nobody uses). */}
-          <button
-            type="button"
-            onClick={() =>
-              window.dispatchEvent(
-                new KeyboardEvent("keydown", {
-                  key: "k",
-                  metaKey: true,
-                  bubbles: true,
-                }),
-              )
-            }
-            className="hidden items-center gap-2 rounded-input border border-line bg-surface-inset px-3 py-[7px] text-cell text-ink-secondary hover:text-ink-body md:flex"
-          >
-            <Icon name="search" size={13} />
-            <span>Search users, devices, gateways, sites…</span>
-            <span className="ml-2 font-mono text-badge text-ink-secondary">
-              ⌘K
-            </span>
-          </button>
-          {/* Badges and the address are IDENTITY CONTEXT, not controls. Below `sm` the row belongs to the
+              <button
+                type="button"
+                onClick={() =>
+                  window.dispatchEvent(
+                    new KeyboardEvent("keydown", {
+                      key: "k",
+                      metaKey: true,
+                      bubbles: true,
+                    }),
+                  )
+                }
+                className="hidden items-center gap-2 rounded-input border border-line bg-surface-inset px-3 py-[7px] text-cell text-ink-secondary hover:text-ink-body md:flex"
+              >
+                <Icon name="search" size={13} />
+                <span>Search users, devices, gateways, sites…</span>
+                <span className="ml-2 font-mono text-badge text-ink-secondary">
+                  ⌘K
+                </span>
+              </button>
+              {/* Badges and the address are IDENTITY CONTEXT, not controls. Below `sm` the row belongs to the
               action, so they step aside rather than squeezing it — the destination is never removed, only the
               decoration around it (S14.2's rule, applied to the top bar). */}
-          <span className="hidden sm:flex">
-            <IdentityBadges />
-          </span>
-          <span className="hidden min-w-0 truncate text-cell text-ink-body sm:block">
-            {email}
-          </span>
-          <Button variant="ghost" className="shrink-0" onClick={onLogout}>
-            Log out
-          </Button>
-        </div>
-      </header>
+              <OrgSwitcher />
+              <span className="hidden sm:flex">
+                <IdentityBadges />
+              </span>
+              <span className="hidden min-w-0 truncate text-cell text-ink-body sm:block">
+                {email}
+              </span>
+              <Button variant="ghost" className="shrink-0" onClick={onLogout}>
+                Log out
+              </Button>
+            </div>
+          </header>
 
-        {/* ⛔ NO max-width. README: "Page body max content width: none — grids fill available width."
+          {/* ⛔ NO max-width. README: "Page body max content width: none — grids fill available width."
             The previous `max-w-3xl` capped EVERY screen at 768px, which is why S14.2's `columns` budget was
             computed, asserted, and never consumable — dormant machinery in our own new code (docs/laws.md).
             Padding and gap are the README's: 20px 24px 28px, flex column, gap 14. */}
-        <main
-          className="tnx-page flex flex-1 flex-col gap-3.5 px-6 pb-[30px] pt-[34px]"
-          data-columns={columns}
-        >
-          {/* data-columns publishes the column BUDGET so a page grid can consume it — which nothing could do
+          <main
+            className="tnx-page flex flex-1 flex-col gap-3.5 px-6 pb-[30px] pt-[34px]"
+            data-columns={columns}
+          >
+            {/* data-columns publishes the column BUDGET so a page grid can consume it — which nothing could do
               while this element capped the width at 768px. */}
-          {state.status === "authed" && !state.user.email_verified && (
-            <VerifyEmailBanner />
-          )}
-          <Outlet />
-        </main>
+            {state.status === "authed" && !state.user.email_verified && (
+              <VerifyEmailBanner />
+            )}
+            <Outlet />
+          </main>
         </div>
       </div>
 

@@ -78,7 +78,8 @@ export function groupGateways(
 ): GatewayGroup[] {
   const rows = nodes.map((n) => toGatewayRow(n, siteNames));
   const degraded = rows.filter(
-    (r) => r.status !== "revoked" && (r.health !== null || r.ovpnHealth !== null),
+    (r) =>
+      r.status !== "revoked" && (r.health !== null || r.ovpnHealth !== null),
   );
   const healthy = rows.filter(
     (r) => r.status !== "revoked" && r.health === null && r.ovpnHealth === null,
@@ -138,7 +139,6 @@ export function applyGatewayFilter(
   return groups.filter((g) => g.key === filter);
 }
 
-
 // ── THE NOTES — the epic's KEEP list, rendered ONCE PER GROUP (S14.6, founder-ruled) ────────────────────
 //
 // ⛔ THE COPY IS THE POINT. The epic's KEEP list names these as its examples of the copy to carry VERBATIM:
@@ -164,11 +164,11 @@ const KIND_NOTES: Record<string, string> = {
     "Pushed and applied policy differ, past the debounce, with fresh reports. The gateway is stuck.",
   "health unknown":
     "Cannot determine: the compile hash is unavailable or the gateway stopped reporting. Unknown is its own state, never healthy.",
-  "syncing…": "A normal push settling. Under the report cadence, so it does not alarm.",
+  "syncing…":
+    "A normal push settling. Under the report cadence, so it does not alarm.",
   "agent too old":
     "The agent refused the compiled policy because its version exceeds what the agent can apply, and went deny-all. The remedy is operator-side: upgrade the agent.",
-  "enforcing a disabled policy":
-    "Enforcing a policy it cannot swap out.",
+  "enforcing a disabled policy": "Enforcing a policy it cannot swap out.",
   "certificate expired, re-enroll this gateway":
     "The client certificate lapsed, so the mTLS channel itself is blocked. Only re-enrolment recovers this.",
   "agent down, still forwarding (restart agent)":
@@ -177,7 +177,8 @@ const KIND_NOTES: Record<string, string> = {
     "Conntrack flush is unavailable, so an expired grant may keep an established flow alive.",
   "no Kubernetes endpoint view (check API access + RBAC)":
     "The VIP DNAT cannot see its backing endpoints.",
-  degraded: "Policy enforcement is degraded. See the gateway's kind for which axis.",
+  degraded:
+    "Policy enforcement is degraded. See the gateway's kind for which axis.",
 };
 
 /**

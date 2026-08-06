@@ -1,12 +1,6 @@
 import { useEffect, useState } from "react";
-import {
-  api,
-  loadOne,
-  type Loaded,
-  type Member,
-  type Meta,
-  type Org,
-} from "../lib/api";
+import { api, loadOne, type Loaded, type Member, type Meta } from "../lib/api";
+import { useOrg } from "../lib/useOrg";
 import { roleFromMembers } from "../lib/policyview";
 import { useAuth } from "../lib/auth";
 import { Badge } from "./ui";
@@ -25,6 +19,7 @@ import { Badge } from "./ui";
 // ROLE reads the resolved role from the roster, which is where Users.tsx already gets it.
 
 export function IdentityBadges() {
+  const { org: currentOrg } = useOrg();
   const { state } = useAuth();
   const myId = state.status === "authed" ? state.user.id : "";
   const [edition, setEdition] = useState<string | null>(null);
@@ -35,13 +30,13 @@ export function IdentityBadges() {
     void (async () => {
       const m = (await loadOne(() => api.GET("/api/v1/meta"))) as Loaded<Meta>;
       if (!cancelled && m.ok) setEdition(m.data.edition);
-      const o = (await loadOne(() =>
-        api.GET("/api/v1/organizations"),
-      )) as Loaded<Org[]>;
-      if (!o.ok || !o.data[0] || cancelled) return;
+      // ⭐ The org-list fetch is gone (S12.5) — and this badge is the reason the seam matters visibly:
+      // it renders YOUR ROLE, which is per-organization. Reading it from index zero meant an owner of the
+      // second org saw the role they hold in the first one, on every screen.
+      if (!currentOrg || cancelled) return;
       const mem = (await loadOne(() =>
         api.GET("/api/v1/organizations/{orgId}/members", {
-          params: { path: { orgId: o.data[0]!.id } },
+          params: { path: { orgId: currentOrg.id } },
         }),
       )) as Loaded<Member[]>;
       const resolved = roleFromMembers(mem, myId);
@@ -51,7 +46,7 @@ export function IdentityBadges() {
     return () => {
       cancelled = true;
     };
-  }, [myId]);
+  }, [myId, currentOrg]);
 
   // ABSENT UNTIL KNOWN, same rule as the nav counts. A badge reading "free" because /meta failed would
   // misstate what the org has paid for — and unlike a count, nobody would think to doubt it.

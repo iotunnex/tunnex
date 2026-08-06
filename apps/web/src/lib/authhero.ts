@@ -27,7 +27,12 @@
  * headline and a qualifier. The first build flattened it to a bulleted string, which is why it read
  * as a feature list rather than as the design's three columns.
  */
-export type TrustBadge = { headline: string; detail: string; text: string; why: string };
+export type TrustBadge = {
+  headline: string;
+  detail: string;
+  text: string;
+  why: string;
+};
 
 /**
  * What the hero may claim. Each entry carries the reason it is TRUE, so a future edit has to

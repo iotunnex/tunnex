@@ -1,4 +1,11 @@
-import { cloneElement, Fragment, isValidElement, useId, useMemo, useState } from "react";
+import {
+  cloneElement,
+  Fragment,
+  isValidElement,
+  useId,
+  useMemo,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import type {
   ButtonHTMLAttributes,
@@ -50,8 +57,7 @@ export function Button({
   size?: "default" | "sm";
 }) {
   const pad = size === "sm" ? "px-2.5 py-1 text-xs" : "px-4 py-2 text-sm";
-  const base =
-    `inline-flex items-center justify-center rounded-md ${pad} font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-400`;
+  const base = `inline-flex items-center justify-center rounded-md ${pad} font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-400`;
   // ⛔ THE PRIMARY BUTTON WAS UNREADABLE, PRODUCT-WIDE, AND THE PALETTE SWAP IS WHY.
   //
   // It was `bg-accent-500 text-white`. In the mono palette `--tnx-accent` is **#C9C9C4** — a LIGHT GREY — so
@@ -384,7 +390,11 @@ export interface ListItemProps {
   className?: string;
 }
 
-export function ListItem({ children, className, "aria-label": ariaLabel }: ListItemProps) {
+export function ListItem({
+  children,
+  className,
+  "aria-label": ariaLabel,
+}: ListItemProps) {
   return (
     <li className={`py-3 ${className ?? ""}`.trim()} aria-label={ariaLabel}>
       {children}
@@ -420,7 +430,6 @@ export interface Column<T> {
    */
   sortValue?: (row: T) => string | number;
 }
-
 
 /**
  * ONE ACTION, DECLARED ONCE, APPLIED TO A SELECTION.
@@ -463,7 +472,10 @@ export interface RowAction<T> {
  * hides how much there is — and "how much is there" is the question a pager exists to answer. Kept as a pure
  * function so the windowing is testable without rendering a table.
  */
-export function pageWindow(current: number, last: number): Array<number | null> {
+export function pageWindow(
+  current: number,
+  last: number,
+): Array<number | null> {
   if (last <= 6) return Array.from({ length: last + 1 }, (_, i) => i);
   const keep = new Set([0, last, current, current - 1, current + 1]);
   const out: Array<number | null> = [];
@@ -644,7 +656,8 @@ export function DataTable<T>({
   // without every call site having to remember a prop.
   const showSelect = selectable || !!rowActions?.length;
   const labelFor = (r: T) =>
-    rowLabel?.(r) ?? (columns[0]?.sortValue ? String(columns[0].sortValue(r)) : rowKey(r));
+    rowLabel?.(r) ??
+    (columns[0]?.sortValue ? String(columns[0].sortValue(r)) : rowKey(r));
 
   const setSel = (next: Set<string>) => {
     setSelected(next);
@@ -656,7 +669,10 @@ export function DataTable<T>({
     const q = query.trim().toLowerCase();
     if (q) {
       out = out.filter((r) =>
-        columns.some((c) => c.sortValue && String(c.sortValue(r)).toLowerCase().includes(q)),
+        columns.some(
+          (c) =>
+            c.sortValue && String(c.sortValue(r)).toLowerCase().includes(q),
+        ),
       );
     }
     if (sort) {
@@ -666,7 +682,8 @@ export function DataTable<T>({
         out = [...out].sort((a, b) => {
           const x = col.sortValue!(a);
           const y = col.sortValue!(b);
-          if (typeof x === "number" && typeof y === "number") return (x - y) * sort.dir;
+          if (typeof x === "number" && typeof y === "number")
+            return (x - y) * sort.dir;
           return String(x).localeCompare(String(y)) * sort.dir;
         });
       }
@@ -681,14 +698,21 @@ export function DataTable<T>({
   //
   // Clamping here rather than in an effect means there is no frame in which the out-of-range value renders.
   const paged = pageSize > 0;
-  const lastPage = paged ? Math.max(0, Math.ceil(visible.length / pageSize) - 1) : 0;
+  const lastPage = paged
+    ? Math.max(0, Math.ceil(visible.length / pageSize) - 1)
+    : 0;
   const safePage = Math.min(page, lastPage);
-  const pageRows = paged ? visible.slice(safePage * pageSize, safePage * pageSize + pageSize) : visible;
-  const pageAllSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(rowKey(r)));
+  const pageRows = paged
+    ? visible.slice(safePage * pageSize, safePage * pageSize + pageSize)
+    : visible;
+  const pageAllSelected =
+    pageRows.length > 0 && pageRows.every((r) => selected.has(rowKey(r)));
   // ⚠ HOW MUCH OF THE SELECTION THE OPERATOR CANNOT SEE. Selection survives paging and filtering on
   // purpose; hiding that it did is what would make the applied set differ from the counted one.
   const visibleKeys = new Set(visible.map(rowKey));
-  const offscreenSelected = [...selected].filter((k) => !visibleKeys.has(k)).length;
+  const offscreenSelected = [...selected].filter(
+    (k) => !visibleKeys.has(k),
+  ).length;
 
   if (failed) return null;
 
@@ -701,12 +725,17 @@ export function DataTable<T>({
   // > exists because of that class. The row count stays visible so the difference is never inferred.
   if (rows.length === 0) return <EmptyState>{empty}</EmptyState>;
 
-  const toggle = (key: string) => (
+  const toggle = (key: string) =>
     // Re-sorting returns to the first page: the row you were looking at is not where it was, and staying on
     // page 3 of a freshly reordered list lands the operator somewhere arbitrary.
-    setPage(0),
-    setSort((s: { key: string; dir: 1 | -1 } | null) => (s && s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }))
-  );
+    (
+      setPage(0),
+      setSort((s: { key: string; dir: 1 | -1 } | null) =>
+        s && s.key === key
+          ? { key, dir: s.dir === 1 ? -1 : 1 }
+          : { key, dir: 1 },
+      )
+    );
 
   return (
     <div>
@@ -738,7 +767,8 @@ export function DataTable<T>({
       {showSelect && (
         <div className="mb-2 flex flex-wrap items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-xs">
           <span className="text-ink-secondary">
-            <span className="tabular-nums text-slate-300">{selected.size}</span> selected
+            <span className="tabular-nums text-slate-300">{selected.size}</span>{" "}
+            selected
             {/* ⛔ THE HALF THAT PREVENTS A SURPRISE. An action applies to the whole selection, including rows
                 a filter or a page turn has hidden. Saying so is the difference between a bulk action the
                 operator authorised and one they merely appeared to. */}
@@ -769,16 +799,23 @@ export function DataTable<T>({
           </span>
           <span className="flex items-center gap-2">
             {selected.size === 0 ? (
-              <span className="text-ink-tertiary">Select one or more rows to act on them</span>
+              <span className="text-ink-tertiary">
+                Select one or more rows to act on them
+              </span>
             ) : (
               <>
                 {rowActions?.map((a) => {
                   const chosen = rows.filter((r) => selected.has(rowKey(r)));
                   const eligible = chosen.filter((r) => !a.unavailable?.(r));
-                  const arityOK = a.arity === "single" ? chosen.length === 1 : chosen.length > 0;
+                  const arityOK =
+                    a.arity === "single"
+                      ? chosen.length === 1
+                      : chosen.length > 0;
                   // ⛔ THE FIRST REASON WINS AND IS SHOWN. A disabled control with no explanation is a
                   // dead end an operator cannot reason about — they cannot tell "not allowed" from "broken".
-                  const reason = chosen.map((r) => a.unavailable?.(r)).find(Boolean) ?? undefined;
+                  const reason =
+                    chosen.map((r) => a.unavailable?.(r)).find(Boolean) ??
+                    undefined;
                   const blocked = !arityOK || eligible.length === 0;
                   return (
                     <span key={a.key} className="flex items-center gap-1">
@@ -823,7 +860,10 @@ export function DataTable<T>({
                 scrolling past it turns every cell into an unlabelled string. */}
             <tr className="sticky top-0 z-10 bg-ink-900 text-[11px] uppercase tracking-wide text-slate-500">
               {showSelect && (
-                <th scope="col" className="w-8 border-b border-white/10 py-1.5 pl-3 pr-2">
+                <th
+                  scope="col"
+                  className="w-8 border-b border-white/10 py-1.5 pl-3 pr-2"
+                >
                   {/* ⛔ THIS BOX SELECTS THE PAGE, AND ITS LABEL SAYS SO. A header checkbox that quietly
                       means "all 500 matches" is how a bulk revoke becomes an outage — the operator sees ten
                       rows and reasons about ten. Selecting everything is offered separately, by a control
@@ -835,11 +875,15 @@ export function DataTable<T>({
                     ref={(el) => {
                       // Indeterminate is a DOM property, not an attribute — a partly-selected page must not
                       // render as either fully selected or untouched.
-                      if (el) el.indeterminate = !pageAllSelected && pageRows.some((r) => selected.has(rowKey(r)));
+                      if (el)
+                        el.indeterminate =
+                          !pageAllSelected &&
+                          pageRows.some((r) => selected.has(rowKey(r)));
                     }}
                     onChange={() => {
                       const next = new Set(selected);
-                      if (pageAllSelected) pageRows.forEach((r) => next.delete(rowKey(r)));
+                      if (pageAllSelected)
+                        pageRows.forEach((r) => next.delete(rowKey(r)));
                       else pageRows.forEach((r) => next.add(rowKey(r)));
                       setSel(next);
                     }}
@@ -853,7 +897,13 @@ export function DataTable<T>({
                   <th
                     key={c.key}
                     scope="col"
-                    aria-sort={active ? (sort!.dir === 1 ? "ascending" : "descending") : undefined}
+                    aria-sort={
+                      active
+                        ? sort!.dir === 1
+                          ? "ascending"
+                          : "descending"
+                        : undefined
+                    }
                     // ⚠ A RIGHT-ALIGNED COLUMN NEEDS PADDING ON ITS *LEFT*, not only its right. `pr-4`
                     // alone pushes a numeric column's content to its own right edge, where it lands flush
                     // against the next column's left edge — "0" and a role select ended up touching, and
@@ -883,8 +933,12 @@ export function DataTable<T>({
                           className={`h-2.5 w-2 shrink-0 ${active ? "text-slate-300" : "text-slate-700"}`}
                           fill="currentColor"
                         >
-                          {(!active || sort!.dir === 1) && <path d="M4 0 L8 5 L0 5 Z" />}
-                          {(!active || sort!.dir === -1) && <path d="M4 12 L0 7 L8 7 Z" />}
+                          {(!active || sort!.dir === 1) && (
+                            <path d="M4 0 L8 5 L0 5 Z" />
+                          )}
+                          {(!active || sort!.dir === -1) && (
+                            <path d="M4 12 L0 7 L8 7 Z" />
+                          )}
                         </svg>
                       </button>
                     ) : (
@@ -908,47 +962,50 @@ export function DataTable<T>({
                 });
               const panel = isOpen ? expandable?.(r) : null;
               return (
-              <Fragment key={key}>
-              <tr
-                {...(rowAttrs?.(r) ?? {})}
-                // Zebra + hover: scanning across a wide row is where the eye loses its line, and this is
-                // presentation only — never the carrier of a state the row needs to announce in words.
-                className={`border-b border-white/5 hover:bg-white/[0.06] ${i % 2 ? "bg-white/[0.02]" : ""}`}
-              >
-                {showSelect && (
-                  <td className="w-8 py-1.5 pl-3 pr-2 align-middle">
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${labelFor(r)}`}
-                      checked={selected.has(rowKey(r))}
-                      onChange={() => {
-                        const next = new Set(selected);
-                        if (next.has(rowKey(r))) next.delete(rowKey(r));
-                        else next.add(rowKey(r));
-                        setSel(next);
-                      }}
-                      className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-slate-400"
-                    />
-                  </td>
-                )}
-                {columns.map((c, i) => (
-                  <td
-                    key={c.key}
-                    className={`py-1.5 pr-4 align-middle ${i === 0 && !showSelect ? "pl-3" : ""} ${c.numeric ? "pl-6 text-right tabular-nums" : ""}`}
+                <Fragment key={key}>
+                  <tr
+                    {...(rowAttrs?.(r) ?? {})}
+                    // Zebra + hover: scanning across a wide row is where the eye loses its line, and this is
+                    // presentation only — never the carrier of a state the row needs to announce in words.
+                    className={`border-b border-white/5 hover:bg-white/[0.06] ${i % 2 ? "bg-white/[0.02]" : ""}`}
                   >
-                    {c.cell(r, { expanded: isOpen, toggle })}
-                  </td>
-                ))}
-              </tr>
-              {/* ⚠ The panel is a row, so it inherits the table's width rather than a column's. */}
-              {panel && (
-                <tr>
-                  <td colSpan={columns.length + (showSelect ? 1 : 0)} className="px-0 pb-3">
-                    {panel}
-                  </td>
-                </tr>
-              )}
-              </Fragment>
+                    {showSelect && (
+                      <td className="w-8 py-1.5 pl-3 pr-2 align-middle">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${labelFor(r)}`}
+                          checked={selected.has(rowKey(r))}
+                          onChange={() => {
+                            const next = new Set(selected);
+                            if (next.has(rowKey(r))) next.delete(rowKey(r));
+                            else next.add(rowKey(r));
+                            setSel(next);
+                          }}
+                          className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-slate-400"
+                        />
+                      </td>
+                    )}
+                    {columns.map((c, i) => (
+                      <td
+                        key={c.key}
+                        className={`py-1.5 pr-4 align-middle ${i === 0 && !showSelect ? "pl-3" : ""} ${c.numeric ? "pl-6 text-right tabular-nums" : ""}`}
+                      >
+                        {c.cell(r, { expanded: isOpen, toggle })}
+                      </td>
+                    ))}
+                  </tr>
+                  {/* ⚠ The panel is a row, so it inherits the table's width rather than a column's. */}
+                  {panel && (
+                    <tr>
+                      <td
+                        colSpan={columns.length + (showSelect ? 1 : 0)}
+                        className="px-0 pb-3"
+                      >
+                        {panel}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>
@@ -969,24 +1026,26 @@ export function DataTable<T>({
               nothing, and a control whose every value produces the same screen teaches that the controls
               here are decorative. */}
           {lastPage > 0 ? (
-          <label className="flex items-center gap-1.5">
-            <span>Rows per page</span>
-            <select
-              aria-label="Rows per page"
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                // Resizing changes what "page 3" means; returning to the first page is the only
-                // interpretation that cannot land the operator past the end.
-                setPage(0);
-              }}
-              className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[11px] text-slate-300 focus:outline-none"
-            >
-              {[10, 25, 50, 100].map((n) => (
-                <option key={n} value={n}>{n}</option>
-              ))}
-            </select>
-          </label>
+            <label className="flex items-center gap-1.5">
+              <span>Rows per page</span>
+              <select
+                aria-label="Rows per page"
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  // Resizing changes what "page 3" means; returning to the first page is the only
+                  // interpretation that cannot land the operator past the end.
+                  setPage(0);
+                }}
+                className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[11px] text-slate-300 focus:outline-none"
+              >
+                {[10, 25, 50, 100].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
           ) : (
             <span />
           )}
@@ -1006,12 +1065,18 @@ export function DataTable<T>({
 
           {lastPage > 0 ? (
             <div className="flex items-center gap-1">
-              <PagerButton label="Previous page" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+              <PagerButton
+                label="Previous page"
+                disabled={safePage === 0}
+                onClick={() => setPage(safePage - 1)}
+              >
                 ‹
               </PagerButton>
               {pageWindow(safePage, lastPage).map((n, i) =>
                 n === null ? (
-                  <span key={`gap-${i}`} className="px-1 text-slate-700">…</span>
+                  <span key={`gap-${i}`} className="px-1 text-slate-700">
+                    …
+                  </span>
                 ) : (
                   <button
                     key={n}
@@ -1029,7 +1094,11 @@ export function DataTable<T>({
                   </button>
                 ),
               )}
-              <PagerButton label="Next page" disabled={safePage >= lastPage} onClick={() => setPage(safePage + 1)}>
+              <PagerButton
+                label="Next page"
+                disabled={safePage >= lastPage}
+                onClick={() => setPage(safePage + 1)}
+              >
                 ›
               </PagerButton>
             </div>
@@ -1042,8 +1111,13 @@ export function DataTable<T>({
       {/* ⛔ THE THIRD EMPTINESS, SAID IN WORDS. Never the `empty` copy — that one claims none exist. */}
       {visible.length === 0 && (
         <p className="py-6 text-center text-xs text-ink-secondary">
-          No {caption.toLowerCase()} match <span className="font-mono text-slate-300">{query}</span>.{" "}
-          <button type="button" onClick={() => setQuery("")} className="underline hover:text-slate-300">
+          No {caption.toLowerCase()} match{" "}
+          <span className="font-mono text-slate-300">{query}</span>.{" "}
+          <button
+            type="button"
+            onClick={() => setQuery("")}
+            className="underline hover:text-slate-300"
+          >
             Clear filter
           </button>{" "}
           to see all {rows.length}.

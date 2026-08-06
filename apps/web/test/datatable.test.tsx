@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, fireEvent, within } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  fireEvent,
+  within,
+} from "@testing-library/react";
 import { DataTable, pageWindow } from "../src/components/ui";
 
 afterEach(cleanup);
@@ -29,7 +35,12 @@ function table(rows: Row[] = ROWS, failed = false) {
           cell: (r) => <span>{r.name}</span>,
         },
         // ⛔ The state's TEXT lives in sortValue because the cell renders it as a styled element.
-        { key: "state", header: "State", sortValue: (r) => r.state, cell: (r) => <em>{r.state}</em> },
+        {
+          key: "state",
+          header: "State",
+          sortValue: (r) => r.state,
+          cell: (r) => <em>{r.state}</em>,
+        },
         { key: "plain", header: "Plain", cell: () => <span>x</span> },
       ]}
     />,
@@ -37,7 +48,10 @@ function table(rows: Row[] = ROWS, failed = false) {
 }
 
 const bodyNames = () =>
-  screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[0].textContent);
+  screen
+    .getAllByRole("row")
+    .slice(1)
+    .map((r) => within(r).getAllByRole("cell")[0].textContent);
 
 describe("DataTable — scannability", () => {
   it("⛔ A SORTABLE HEADER'S NAME IS STILL ITS HEADER", () => {
@@ -46,19 +60,31 @@ describe("DataTable — scannability", () => {
     // was caught: three existing suites went red at once.
     table();
     expect(screen.getByRole("columnheader", { name: "Name" })).toBeTruthy();
-    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent);
     expect(headers).toEqual(["Name", "State", "Plain"]);
   });
 
   it("sorts ascending, then descending, and announces which via aria-sort", () => {
     table();
-    const btn = within(screen.getByRole("columnheader", { name: "Name" })).getByRole("button");
+    const btn = within(
+      screen.getByRole("columnheader", { name: "Name" }),
+    ).getByRole("button");
     fireEvent.click(btn);
     expect(bodyNames()).toEqual(["alpha", "mango", "zebra"]);
-    expect(screen.getByRole("columnheader", { name: "Name" }).getAttribute("aria-sort")).toBe("ascending");
+    expect(
+      screen
+        .getByRole("columnheader", { name: "Name" })
+        .getAttribute("aria-sort"),
+    ).toBe("ascending");
     fireEvent.click(btn);
     expect(bodyNames()).toEqual(["zebra", "mango", "alpha"]);
-    expect(screen.getByRole("columnheader", { name: "Name" }).getAttribute("aria-sort")).toBe("descending");
+    expect(
+      screen
+        .getByRole("columnheader", { name: "Name" })
+        .getAttribute("aria-sort"),
+    ).toBe("descending");
   });
 
   it("⚠ A COLUMN WITHOUT sortValue IS NOT SORTABLE — and is still a real header", () => {
@@ -71,9 +97,12 @@ describe("DataTable — scannability", () => {
 
   it("filters on sortValue, INCLUDING text the cell never shows", () => {
     table();
-    fireEvent.change(screen.getByRole("searchbox", { name: "Filter Widgets" }), {
-      target: { value: "ana@ex.com" },
-    });
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Filter Widgets" }),
+      {
+        target: { value: "ana@ex.com" },
+      },
+    );
     // Two rows share that owner, and neither cell renders it.
     expect(bodyNames()).toEqual(["zebra", "mango"]);
     // ⚠ ONE PAGE: the range is noise ("1–2 of 2"), but the narrowing is not. The count says what was
@@ -83,9 +112,12 @@ describe("DataTable — scannability", () => {
 
   it("⭐ finds a row by a state its cell renders as a styled element, not as plain text", () => {
     table();
-    fireEvent.change(screen.getByRole("searchbox", { name: "Filter Widgets" }), {
-      target: { value: "revoked" },
-    });
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Filter Widgets" }),
+      {
+        target: { value: "revoked" },
+      },
+    );
     expect(bodyNames()).toEqual(["zebra"]);
   });
 
@@ -94,9 +126,12 @@ describe("DataTable — scannability", () => {
     // first tells an operator a resource does not exist when it is one keystroke away — a new way to
     // manufacture the reassuring empty on a component whose `failed` prop exists because of that class.
     table();
-    fireEvent.change(screen.getByRole("searchbox", { name: "Filter Widgets" }), {
-      target: { value: "nothing-matches-this" },
-    });
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Filter Widgets" }),
+      {
+        target: { value: "nothing-matches-this" },
+      },
+    );
     expect(screen.queryByText("No widgets exist.")).toBeNull();
     expect(screen.getByText(/No widgets match/)).toBeTruthy();
     // ⚠ And the way back is offered, with the true total — a dead end would leave the operator believing it.
@@ -127,7 +162,14 @@ describe("DataTable — scannability", () => {
         rowKey={(r) => r.id}
         empty="none"
         defaultSortKey="name"
-        columns={[{ key: "name", header: "Name", sortValue: (r) => r.name, cell: (r) => <span>{r.name}</span> }]}
+        columns={[
+          {
+            key: "name",
+            header: "Name",
+            sortValue: (r) => r.name,
+            cell: (r) => <span>{r.name}</span>,
+          },
+        ]}
       />,
     );
     expect(rows.map((r) => r.name)).toEqual(["zebra", "alpha", "mango"]);
@@ -159,7 +201,12 @@ describe("DataTable — pagination", () => {
         empty="No widgets exist."
         {...(pageSize === undefined ? {} : { pageSize })}
         columns={[
-          { key: "name", header: "Name", sortValue: (r) => `${r.name} ${r.owner}`, cell: (r) => <span>{r.name}</span> },
+          {
+            key: "name",
+            header: "Name",
+            sortValue: (r) => `${r.name} ${r.owner}`,
+            cell: (r) => <span>{r.name}</span>,
+          },
         ]}
       />,
     );
@@ -169,21 +216,41 @@ describe("DataTable — pagination", () => {
     paged(many(60));
     expect(screen.getAllByRole("row")).toHaveLength(26); // 25 + the header
     expect(screen.getByText("1–25 of 60")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Page 1" }).getAttribute("aria-current")).toBe("page");
+    expect(
+      screen
+        .getByRole("button", { name: "Page 1" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
   });
 
   it("pages forward and back, and the boundary buttons are disabled at the boundaries", () => {
     paged(many(60));
-    expect(screen.getByRole("button", { name: "Previous page" }).hasAttribute("disabled")).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: "Previous page" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     expect(bodyNames()[0]).toBe("row-025");
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-    expect(screen.getByRole("button", { name: "Page 3" }).getAttribute("aria-current")).toBe("page");
+    expect(
+      screen
+        .getByRole("button", { name: "Page 3" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
     // ⚠ The last page is SHORT, and that is not an empty page — 60 rows over 25 leaves 10.
     expect(screen.getAllByRole("row")).toHaveLength(11);
-    expect(screen.getByRole("button", { name: "Next page" }).hasAttribute("disabled")).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: "Next page" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
-    expect(screen.getByRole("button", { name: "Page 2" }).getAttribute("aria-current")).toBe("page");
+    expect(
+      screen
+        .getByRole("button", { name: "Page 2" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
   });
 
   it("⭐ FILTERING FROM A DEEP PAGE RETURNS TO PAGE ONE — the operator's own search must not read as empty", () => {
@@ -192,10 +259,17 @@ describe("DataTable — pagination", () => {
     paged(many(60));
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-    expect(screen.getByRole("button", { name: "Page 3" }).getAttribute("aria-current")).toBe("page");
-    fireEvent.change(screen.getByRole("searchbox", { name: "Filter Widgets" }), {
-      target: { value: "ana@ex.com" },
-    });
+    expect(
+      screen
+        .getByRole("button", { name: "Page 3" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Filter Widgets" }),
+      {
+        target: { value: "ana@ex.com" },
+      },
+    );
     expect(bodyNames().length).toBeGreaterThan(0);
     expect(screen.getByText("1–25 of 30 (filtered from 60)")).toBeTruthy();
   });
@@ -206,7 +280,11 @@ describe("DataTable — pagination", () => {
     const { rerender } = paged(many(60));
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-    expect(screen.getByRole("button", { name: "Page 3" }).getAttribute("aria-current")).toBe("page");
+    expect(
+      screen
+        .getByRole("button", { name: "Page 3" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
     rerender(
       <DataTable<Row>
         caption="Widgets"
@@ -215,12 +293,21 @@ describe("DataTable — pagination", () => {
         rowKey={(r) => r.id}
         empty="No widgets exist."
         columns={[
-          { key: "name", header: "Name", sortValue: (r) => r.name, cell: (r) => <span>{r.name}</span> },
+          {
+            key: "name",
+            header: "Name",
+            sortValue: (r) => r.name,
+            cell: (r) => <span>{r.name}</span>,
+          },
         ]}
       />,
     );
     expect(bodyNames().length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "Page 2" }).getAttribute("aria-current")).toBe("page");
+    expect(
+      screen
+        .getByRole("button", { name: "Page 2" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
   });
 
   it("⚠ NO PAGER WHEN EVERYTHING ALREADY FITS — a control that can only no-op implies there is more", () => {
@@ -242,7 +329,9 @@ describe("DataTable — pagination", () => {
     paged(many(60));
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     expect(bodyNames()[0]).toBe("row-025");
-    fireEvent.change(screen.getByRole("combobox", { name: "Rows per page" }), { target: { value: "50" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Rows per page" }), {
+      target: { value: "50" },
+    });
     expect(bodyNames()[0]).toBe("row-000");
     expect(screen.getByText("1–50 of 60")).toBeTruthy();
   });
@@ -274,9 +363,16 @@ describe("DataTable — selection", () => {
         selectable
         pageSize={pageSize}
         onSelectionChange={(k) => seen.push(k)}
-        bulkActions={(keys) => <button type="button">Revoke {keys.length}</button>}
+        bulkActions={(keys) => (
+          <button type="button">Revoke {keys.length}</button>
+        )}
         columns={[
-          { key: "name", header: "Name", sortValue: (r) => `${r.name} ${r.owner}`, cell: (r) => <span>{r.name}</span> },
+          {
+            key: "name",
+            header: "Name",
+            sortValue: (r) => `${r.name} ${r.owner}`,
+            cell: (r) => <span>{r.name}</span>,
+          },
         ]}
       />,
     );
@@ -287,7 +383,9 @@ describe("DataTable — selection", () => {
     // "Select all" meaning 60 invisible rows is how a bulk revoke becomes an outage: the operator sees 25
     // rows and reasons about 25. The label says which it is, so the claim is checkable rather than assumed.
     sel(many(60));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select all 25 on this page" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Select all 25 on this page" }),
+    );
     // Scoped to the selection bar: "25" also appears as a rows-per-page option, and a document-wide match
     // would pass on the wrong element entirely.
     const bar = screen.getByText("selected", { exact: false }).closest("span")!;
@@ -299,20 +397,34 @@ describe("DataTable — selection", () => {
     // Conservative must not mean impossible. The escape hatch exists; it just refuses to be the default,
     // and it states the count in its own label rather than in a tooltip.
     sel(many(60));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select all 25 on this page" }));
-    fireEvent.click(screen.getByRole("button", { name: "Select all 60 matching" }));
-    expect(screen.getByText("selected", { exact: false }).closest("span")!.textContent).toContain("60 selected");
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Select all 25 on this page" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select all 60 matching" }),
+    );
+    expect(
+      screen.getByText("selected", { exact: false }).closest("span")!
+        .textContent,
+    ).toContain("60 selected");
   });
 
   it("⭐ A SELECTION HIDDEN BY A FILTER IS COUNTED AND SAID OUT LOUD", () => {
     // Selection survives filtering on purpose — silently dropping rows would make the APPLIED set differ
     // from the COUNTED set, which is worse than a warning. So the warning has to exist.
     sel(many(60));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select all 25 on this page" }));
-    fireEvent.change(screen.getByRole("searchbox", { name: "Filter Widgets" }), {
-      target: { value: "ana@ex.com" },
-    });
-    expect(screen.getByText(/not visible under the current filter/)).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Select all 25 on this page" }),
+    );
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Filter Widgets" }),
+      {
+        target: { value: "ana@ex.com" },
+      },
+    );
+    expect(
+      screen.getByText(/not visible under the current filter/),
+    ).toBeTruthy();
   });
 
   it("reports the selection to the caller, and Clear empties it", () => {
@@ -325,7 +437,9 @@ describe("DataTable — selection", () => {
 
   it("⚠ THE BAR IS PRESENT AT ZERO — a footer that appears on first click moves the layout under the cursor", () => {
     sel(many(10));
-    expect(screen.getByText("Select one or more rows to act on them")).toBeTruthy();
+    expect(
+      screen.getByText("Select one or more rows to act on them"),
+    ).toBeTruthy();
     // And the bulk action is ABSENT until there is something to act on: an enabled verb over an empty
     // selection is a control that can only fail.
     expect(screen.queryByRole("button", { name: /^Revoke/ })).toBeNull();
@@ -350,7 +464,9 @@ describe("DataTable — selection", () => {
         failed={false}
         rowKey={(r) => r.id}
         empty="none"
-        columns={[{ key: "name", header: "Name", cell: (r) => <span>{r.name}</span> }]}
+        columns={[
+          { key: "name", header: "Name", cell: (r) => <span>{r.name}</span> },
+        ]}
       />,
     );
     expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
@@ -406,26 +522,42 @@ describe("DataTable — row actions in one bar", () => {
         rowKey={(r) => r.id}
         empty="none"
         rowActions={[
-          { key: "edit", label: "Edit", arity: "single", run: (rs) => ran.push(rs.map((r) => r.name)) },
+          {
+            key: "edit",
+            label: "Edit",
+            arity: "single",
+            run: (rs) => ran.push(rs.map((r) => r.name)),
+          },
           {
             key: "del",
             label: "Delete",
             danger: true,
-            unavailable: (r) => (r.state === "locked" ? "This widget is locked." : null),
+            unavailable: (r) =>
+              r.state === "locked" ? "This widget is locked." : null,
             run: (rs) => ran.push(rs.map((r) => r.name)),
           },
         ]}
-        columns={[{ key: "name", header: "Name", sortValue: (r) => r.name, cell: (r) => <span>{r.name}</span> }]}
+        columns={[
+          {
+            key: "name",
+            header: "Name",
+            sortValue: (r) => r.name,
+            cell: (r) => <span>{r.name}</span>,
+          },
+        ]}
       />,
     );
   }
 
-  const pick = (name: string) => fireEvent.click(screen.getByRole("checkbox", { name: `Select ${name}` }));
+  const pick = (name: string) =>
+    fireEvent.click(screen.getByRole("checkbox", { name: `Select ${name}` }));
 
   it("⚠ rowActions IMPLIES selectable — a set of verbs with no way to choose what they act on is not a feature", () => {
     acts();
     expect(screen.getAllByRole("checkbox").length).toBeGreaterThan(0);
-    expect(screen.getByText("Select one or more rows to act on them")).toBeTruthy();
+    expect(
+      screen.getByText("Select one or more rows to act on them"),
+    ).toBeTruthy();
   });
 
   it("⛔ THE ACTION BAR SITS ABOVE THE TABLE, NOT BELOW IT", () => {
@@ -435,16 +567,22 @@ describe("DataTable — row actions in one bar", () => {
     //
     // Asserted on DOM ORDER because CSS cannot be seen from here and a class name is not a position.
     acts();
-    const bar = screen.getByText("Select one or more rows to act on them").closest("div")!;
+    const bar = screen
+      .getByText("Select one or more rows to act on them")
+      .closest("div")!;
     const table = screen.getByRole("table");
     // DOCUMENT_POSITION_FOLLOWING (4) — the table comes AFTER the bar.
-    expect(bar.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      bar.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("a `single` verb is disabled for two rows, and says why", () => {
     acts();
     pick("alpha");
-    expect(screen.getByRole("button", { name: "Edit" }).hasAttribute("disabled")).toBe(false);
+    expect(
+      screen.getByRole("button", { name: "Edit" }).hasAttribute("disabled"),
+    ).toBe(false);
     pick("cocoa");
     const edit = screen.getByRole("button", { name: "Edit" });
     expect(edit.hasAttribute("disabled")).toBe(true);
@@ -458,7 +596,9 @@ describe("DataTable — row actions in one bar", () => {
     pick("alpha");
     pick("bravo"); // locked — ineligible for Delete
     expect(screen.getByText("1 of 2")).toBeTruthy();
-    expect(screen.getByText("1 of 2").getAttribute("title")).toBe("This widget is locked.");
+    expect(screen.getByText("1 of 2").getAttribute("title")).toBe(
+      "This widget is locked.",
+    );
   });
 
   it("⭐ …AND IT RUNS ON EXACTLY THE SET IT COUNTED", () => {
@@ -502,7 +642,10 @@ describe("DataTable — row actions in one bar", () => {
 describe("DataTable — the footer earns its place", () => {
   const rows = (n: number): Row[] =>
     Array.from({ length: n }, (_, i) => ({
-      id: String(i), name: `row-${i}`, owner: i % 2 ? "ana@x.com" : "bo@x.com", state: "active",
+      id: String(i),
+      name: `row-${i}`,
+      owner: i % 2 ? "ana@x.com" : "bo@x.com",
+      state: "active",
     }));
 
   function t(n: number) {
@@ -513,7 +656,14 @@ describe("DataTable — the footer earns its place", () => {
         failed={false}
         rowKey={(r) => r.id}
         empty="none"
-        columns={[{ key: "name", header: "Name", sortValue: (r) => `${r.name} ${r.owner}`, cell: (r) => <span>{r.name}</span> }]}
+        columns={[
+          {
+            key: "name",
+            header: "Name",
+            sortValue: (r) => `${r.name} ${r.owner}`,
+            cell: (r) => <span>{r.name}</span>,
+          },
+        ]}
       />,
     );
   }
@@ -531,9 +681,12 @@ describe("DataTable — the footer earns its place", () => {
     // The narrowing is the one fact a single page still owes the operator: without it a filtered view is
     // indistinguishable from a short one.
     t(5);
-    fireEvent.change(screen.getByRole("searchbox", { name: "Filter Widgets" }), {
-      target: { value: "ana@x.com" },
-    });
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Filter Widgets" }),
+      {
+        target: { value: "ana@x.com" },
+      },
+    );
     expect(screen.getByText("2 of 5")).toBeTruthy();
     // Still no paging controls — narrowing did not create a second page.
     expect(screen.queryByLabelText("Rows per page")).toBeNull();
@@ -572,7 +725,9 @@ describe("DataTable — the footer earns its place", () => {
         empty="none"
         failed={false}
         selectable
-        columns={[{ key: "name", header: "Name", cell: (r) => <span>{r.name}</span> }]}
+        columns={[
+          { key: "name", header: "Name", cell: (r) => <span>{r.name}</span> },
+        ]}
       />,
     );
     const cells = screen.getAllByRole("row")[1].querySelectorAll("td");

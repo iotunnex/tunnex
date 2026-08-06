@@ -67,6 +67,7 @@ vi.mock("../src/lib/api", async () => {
   };
 });
 
+import { OrgProvider } from "../src/lib/useOrg";
 import { policyHealthBadge } from "../src/lib/healthview";
 import Kubernetes from "../src/pages/Kubernetes";
 import { AuthProvider } from "../src/lib/auth";
@@ -75,7 +76,14 @@ import { AuthProvider } from "../src/lib/auth";
 // the context would put the test's copy of the gate under assertion instead of the product's — the
 // fixture-restates-production trap this branch already caught once (docs/laws.md).
 const withAuth = (ui: React.ReactElement) =>
-  render(<AuthProvider>{ui}</AuthProvider>);
+  // ⛔ THE ORG PROVIDER IS PART OF THE AUTHENTICATED SHELL (S12.5), so it is part of the harness that
+  // stands in for it. A page rendered without it throws — deliberately: `useOrg()` refuses to guess, and a
+  // test that quietly rendered without an org would be exercising a state production never reaches.
+  render(
+    <AuthProvider>
+      <OrgProvider>{ui}</OrgProvider>
+    </AuthProvider>,
+  );
 
 beforeEach(() => {
   clustersFail = false;

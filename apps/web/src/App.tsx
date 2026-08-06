@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "./lib/auth";
 import { AuthLayout } from "./components/AuthLayout";
 import { MfaSettings } from "./components/MfaSettings";
 import { AppShell } from "./components/AppShell";
+import { OrgProvider } from "./lib/useOrg";
 import VisualGallery from "./pages/VisualGallery";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
@@ -108,15 +109,21 @@ export default function App() {
           <Route
             element={
               <RequireOrg>
-                <AppShell />
+                {/* ⛔ THE PROVIDER SITS INSIDE RequireOrg, DELIBERATELY. RequireOrg answers "do you have any
+                    organization at all" and routes a user with none into the create-org funnel. Mounting the
+                    org context above it would make every page's org seam load for users who are being sent
+                    away from every page. */}
+                <OrgProvider>
+                  <AppShell />
+                </OrgProvider>
               </RequireOrg>
             }
           >
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/devices" element={<Devices />} />
             <Route path="/gateways" element={<Gateways />} />
-          <Route path="/sites" element={<Sites />} />
-          <Route path="/routed-ranges" element={<RoutedRanges />} />
+            <Route path="/sites" element={<Sites />} />
+            <Route path="/routed-ranges" element={<RoutedRanges />} />
             <Route path="/kubernetes" element={<Kubernetes />} />
             <Route path="/agents" element={<Agents />} />
             <Route path="/access" element={<Access />} />
@@ -230,9 +237,15 @@ function RequireNoOrg({ children }: { children: React.ReactNode }) {
 // caller already has >=1 org and lands straight in the shell.
 //
 // This runs one GET /organizations per shell entry (the layout route stays mounted
-// across page navigations, so it does NOT refetch on every nav). Each page still
-// fetches its own org — a deliberate small duplication until the deferred
-// useCurrentOrg hook (org-switcher story) lifts org context app-wide.
+// across page navigations, so it does NOT refetch on every nav).
+//
+// ⭐ THE "deliberate small duplication" THIS COMMENT USED TO NAME IS GONE (S12.5). Every page fetched its
+// own org list and took index zero; they now read `useOrg()`, which the OrgProvider below this guard
+// supplies once. The deferred `useCurrentOrg` hook this comment was waiting for is `lib/useOrg.tsx`.
+//
+// ⚠ THIS GUARD'S OWN FETCH STAYS, and is not the duplication that was removed. It asks a different
+// question — "any org at all", answered BEFORE the provider mounts — and folding it into the provider
+// would put the funnel's routing decision downstream of the context it gates.
 //
 // The create-org → /dashboard handoff assumes read-your-writes: after a 201 the
 // remounted RequireOrg refetches and must see the new org. That holds for the

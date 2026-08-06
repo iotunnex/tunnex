@@ -22,7 +22,13 @@ type Status = {
  * ⛔ AND "unlicensed" IS NOT AN ERROR STATE. A deployment with no key is a complete, supported Community
  * deployment. Rendering it as a problem would be a false claim about a working product.
  */
-export function LicenceCard({ orgId, canManage }: { orgId: string; canManage: boolean }) {
+export function LicenceCard({
+  orgId,
+  canManage,
+}: {
+  orgId: string;
+  canManage: boolean;
+}) {
   const [status, setStatus] = useState<Status | null>(null);
   const [key, setKey] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -41,15 +47,21 @@ export function LicenceCard({ orgId, canManage }: { orgId: string; canManage: bo
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const { data, error: err } = await api.POST("/api/v1/organizations/{orgId}/license", {
-      params: { path: { orgId } },
-      body: { key: key.trim() },
-    });
+    const { data, error: err } = await api.POST(
+      "/api/v1/organizations/{orgId}/license",
+      {
+        params: { path: { orgId } },
+        body: { key: key.trim() },
+      },
+    );
     setBusy(false);
     if (err) {
       // ⚠ The server's message names WHICH half was wrong and what to do — a truncated key and a key for
       // another deployment need opposite actions. Surfacing it verbatim rather than "invalid key".
-      setError((err as { error?: { message?: string } }).error?.message ?? "That key was not accepted.");
+      setError(
+        (err as { error?: { message?: string } }).error?.message ??
+          "That key was not accepted.",
+      );
       return;
     }
     if (data) {
@@ -58,7 +70,8 @@ export function LicenceCard({ orgId, canManage }: { orgId: string; canManage: bo
     }
   }
 
-  const ceiling = (n: number | null | undefined) => (n === null || n === undefined ? "unlimited" : String(n));
+  const ceiling = (n: number | null | undefined) =>
+    n === null || n === undefined ? "unlimited" : String(n);
 
   return (
     <Card>
@@ -75,7 +88,9 @@ export function LicenceCard({ orgId, canManage }: { orgId: string; canManage: bo
           {status.expires_at && (
             <>
               <dt className="text-ink-tertiary">Expires</dt>
-              <dd className="text-ink-body">{status.expires_at.slice(0, 10)}</dd>
+              <dd className="text-ink-body">
+                {status.expires_at.slice(0, 10)}
+              </dd>
             </>
           )}
         </dl>
@@ -84,25 +99,31 @@ export function LicenceCard({ orgId, canManage }: { orgId: string; canManage: bo
       {/* ⛔ EXPIRED IS NOT LAPSED, AND THE COPY MUST NOT CONFLATE THEM. Nothing stops at expiry. */}
       {status?.state === "expired" && (
         <p className="mt-3 text-explainer text-warn">
-          This licence expired{status.grace_ends_at ? ` and its grace period ends ${status.grace_ends_at.slice(0, 10)}` : ""}.
-          Nothing has stopped — everything keeps working until then.
+          This licence expired
+          {status.grace_ends_at
+            ? ` and its grace period ends ${status.grace_ends_at.slice(0, 10)}`
+            : ""}
+          . Nothing has stopped — everything keeps working until then.
         </p>
       )}
       {status?.state === "lapsed" && (
         <p className="mt-3 text-explainer text-warn">
-          The grace period has ended, so this deployment is back to Community limits. Gateways and
-          organizations already running are unaffected — only enrolling new ones is.
+          The grace period has ended, so this deployment is back to Community
+          limits. Gateways and organizations already running are unaffected —
+          only enrolling new ones is.
         </p>
       )}
       {status?.state === "unlicensed" && (
         <p className="mt-3 text-explainer text-ink-tertiary">
-          No licence installed. This is the complete product on one gateway and one organization.
+          No licence installed. This is the complete product on one gateway and
+          one organization.
         </p>
       )}
       {status?.clock_went_backwards && (
         <p className="mt-2 text-explainer text-warn">
-          This server's clock moved backwards. Licence dates may read incorrectly until it is corrected —
-          nothing has been refused because of it.
+          This server's clock moved backwards. Licence dates may read
+          incorrectly until it is corrected — nothing has been refused because
+          of it.
         </p>
       )}
 
@@ -116,7 +137,9 @@ export function LicenceCard({ orgId, canManage }: { orgId: string; canManage: bo
           />
           {error && <ErrorText>{error}</ErrorText>}
           {/* ⚠ Says the thing an operator most needs to know before pasting into a live system. */}
-          <p className="text-explainer text-ink-tertiary">Takes effect immediately. No restart.</p>
+          <p className="text-explainer text-ink-tertiary">
+            Takes effect immediately. No restart.
+          </p>
           <Button type="submit" disabled={busy || !key.trim()}>
             {busy ? "Installing…" : "Install licence"}
           </Button>

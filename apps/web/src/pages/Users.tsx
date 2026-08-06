@@ -14,6 +14,7 @@ import {
   type Org,
   type Role,
 } from "../lib/api";
+import { useOrg } from "../lib/useOrg";
 import { can, canManageMembership } from "../lib/rbac";
 import { useAuth } from "../lib/auth";
 import {
@@ -56,6 +57,9 @@ const selectCls =
   "rounded-md border border-white/10 bg-ink-900 px-2 py-1 text-sm text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-400 disabled:opacity-50";
 
 export default function Users() {
+  // ⛔ THE ORG COMES FROM THE SEAM (S12.5) — the page no longer picks index zero out of a list it
+  // fetched itself, which is what made a second organization unreachable.
+  const { org: currentOrg, loading: orgLoading, failed: orgFailed } = useOrg();
   const { state } = useAuth();
   const myId = state.status === "authed" ? state.user.id : "";
   // The server gates every MUTATING permission on the actor's verified email
@@ -124,17 +128,31 @@ export default function Users() {
         const { data: meta } = await api.GET("/api/v1/meta");
         if (cancelled) return;
         setIsEnterprise(meta?.edition === "enterprise");
-        const { data: orgs, error: orgErr } = await api.GET(
-          "/api/v1/organizations",
-        );
+        // ⭐ THE ORG-LIST FETCH IS GONE FROM THIS PAGE (S12.5). It existed only to be indexed at zero.
+        // OrgProvider reads the list once for the whole shell; a page that re-fetched it would not merely
+        // waste a request, it would pick an org the switcher has no way to change.
+        const orgErr = null;
         if (cancelled) return;
         if (orgErr)
           return setError(
             apiErrorMessage(orgErr, "Could not load your organizations."),
           );
-        const first = orgs?.[0];
+        // ⛔ LOADING IS NOT ABSENCE (S12.5). The provider resolves the org list asynchronously, so this
+        // effect runs once with currentOrg === null before the answer exists. Treating that as "you have no
+        // organization" renders a confident, false statement — and because the second pass only sets the
+        // data, the stale error stayed on screen BESIDE the correct org name.
+        //
+        // ⚠ THREE STATES, NOT TWO: still loading (say nothing), the read failed (say THAT), genuinely no
+        // membership (say that). Collapsing the first into the third is how a slow network becomes an
+        // accusation that the user does not belong here.
+        if (orgLoading) return;
+        const first = currentOrg;
         if (!first)
-          return setError("You are not a member of any organization yet.");
+          return setError(
+            orgFailed
+              ? "Could not load your organizations."
+              : "You are not a member of any organization yet.",
+          );
         setOrg(first);
         if (!cancelled) await loadMembers(first.id);
       } catch {
@@ -144,7 +162,15 @@ export default function Users() {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // ⛔ currentOrg IS A DEPENDENCY, AND ITS ABSENCE WAS A REAL BUG THE TESTS CAUGHT (S12.5).
+    //
+    // The provider resolves the org list ASYNCHRONOUSLY, so on this effect's first run `currentOrg` is still
+    // null. With `[]` deps the effect never ran again: the page rendered "You are not a member of any
+    // organization yet" — a confident, wrong statement — and stayed there forever, for every user.
+    //
+    // ⚠ THE SAME DEPENDENCY ALSO MAKES THE SWITCHER WORK. One line, two properties: without it the page
+    // either never loads at all, or loads once and then lies about which tenant it is showing.
+  }, [currentOrg]);
 
   // ⛔ THE TWO GATED READS ARE NOT ISSUED WHEN THEIR GATE FAILS. Firing them anyway would put a 403 into the
   // page's single error surface, so a member's ordinary, correct page load would show an error — and the gate
@@ -278,7 +304,11 @@ export default function Users() {
       canManageMembership(myRole, m.role, "") &&
       m.user_id !== myId,
   );
-  const groupAccess = groupAccessState({ isEnterprise, role: myRole, groupCount });
+  const groupAccess = groupAccessState({
+    isEnterprise,
+    role: myRole,
+    groupCount,
+  });
   // The table filters now, so the page hands it the whole roster.
   const shown = members;
 
@@ -395,46 +425,49 @@ export default function Users() {
                 // The primary label falls back to the email; the secondary line then has nothing to add.
                 const primary = m.name || m.email;
                 return (
-                // ⛔ CAPPED AND TRUNCATED. One member with a 70-character address
-                // (oluwaseun.adebayo-contractor.external@a-very-long-subdomain…) stretched the Member
-                // column across half the table and pushed STATE, DEVICES and ROLE into a huddle at the far
-                // right — every other row then read as mostly empty space. A column sized by its worst row
-                // is a column sized by an outlier.
-                //
-                // ⛔ IT WRAPS, IT DOES NOT TRUNCATE — and that is a ruling, not a preference. A doubled
-                // string HIDES behind an ellipsis: the second copy clips out of view and reads as one copy,
-                // which is the exact defect this cell was fixed for and which its test still guards. So the
-                // column is capped and the address WRAPS onto a second line, where it stays fully readable
-                // and a duplicate would still be visible.
-                //
-                // ⚠ STACKED, NOT INLINE: name over email spends the width twice instead of end to end.
-                <span className="flex max-w-[24rem] flex-col">
-                  <span className="break-all text-sm text-white">
-                    {primary}
-                    {m.user_id === myId && (
-                      <span className="ml-2 text-xs text-slate-500">(you)</span>
-                    )}
-                  </span>
-                  {/* ⛔ THE EMAIL IS THE SECONDARY LINE ONLY WHEN A NAME TOOK THE PRIMARY ONE. Unconditionally
+                  // ⛔ CAPPED AND TRUNCATED. One member with a 70-character address
+                  // (oluwaseun.adebayo-contractor.external@a-very-long-subdomain…) stretched the Member
+                  // column across half the table and pushed STATE, DEVICES and ROLE into a huddle at the far
+                  // right — every other row then read as mostly empty space. A column sized by its worst row
+                  // is a column sized by an outlier.
+                  //
+                  // ⛔ IT WRAPS, IT DOES NOT TRUNCATE — and that is a ruling, not a preference. A doubled
+                  // string HIDES behind an ellipsis: the second copy clips out of view and reads as one copy,
+                  // which is the exact defect this cell was fixed for and which its test still guards. So the
+                  // column is capped and the address WRAPS onto a second line, where it stays fully readable
+                  // and a duplicate would still be visible.
+                  //
+                  // ⚠ STACKED, NOT INLINE: name over email spends the width twice instead of end to end.
+                  <span className="flex max-w-[24rem] flex-col">
+                    <span className="break-all text-sm text-white">
+                      {primary}
+                      {m.user_id === myId && (
+                        <span className="ml-2 text-xs text-slate-500">
+                          (you)
+                        </span>
+                      )}
+                    </span>
+                    {/* ⛔ THE EMAIL IS THE SECONDARY LINE ONLY WHEN A NAME TOOK THE PRIMARY ONE. Unconditionally
                       it rendered the address TWICE for a nameless member — and that is not a corner case:
                       `users.name` is `NOT NULL DEFAULT ''` and `acceptInvitation.name` is OPTIONAL, so 144 of
                       241 users in the review database have an empty name.
                       Found because a MOCK omitted `name` while every seeded member had one — the fixture was
                       LESS representative than the double. The inverse of S14.10, where the double was more
                       permissive than the substrate; the lesson is the same one from the other side. */}
-                  {primary !== m.email && (
-                    <span className="break-all font-mono text-[11px] text-slate-500">
-                      {m.email}
-                    </span>
-                  )}
-                </span>
+                    {primary !== m.email && (
+                      <span className="break-all font-mono text-[11px] text-slate-500">
+                        {m.email}
+                      </span>
+                    )}
+                  </span>
                 );
               },
             },
             {
               key: "state",
               header: "State",
-              sortValue: (m) => (m.status === "deactivated" ? "deactivated" : "active"),
+              sortValue: (m) =>
+                m.status === "deactivated" ? "deactivated" : "active",
               cell: (m) => (
                 <>
                   {m.status === "deactivated" && (
@@ -527,29 +560,31 @@ export default function Users() {
           ]}
         />
 
-      {/* ⚠ CONTEXT, BELOW THE SUBJECT, AND SIDE BY SIDE — two short cards stacked full-width were a screen
+        {/* ⚠ CONTEXT, BELOW THE SUBJECT, AND SIDE BY SIDE — two short cards stacked full-width were a screen
           of scrolling to reach a roster. Columns, so a wider display adds a column rather than stretching
           either card. */}
-      <div className="mt-6 grid items-start gap-3.5 lg:grid-cols-2">
-      {/* ── Pending invitations ───────────────────────────────────────────────────────────────────────────
+        <div className="mt-6 grid items-start gap-3.5 lg:grid-cols-2">
+          {/* ── Pending invitations ───────────────────────────────────────────────────────────────────────────
           ⛔ THE ONLY WRITE-ONLY STATE IN THE PRODUCT THAT IS ITSELF AN ACCESS GRANT. `resendInvitation` and
           `revokeInvitation` are keyed by EMAIL and nothing served the addresses, so an invitation could be
           created and then never seen, resent or revoked — while remaining redeemable into a membership.
           The other write-only items are CONFIGURATION whose effect shows up elsewhere; this one has no
           observable effect until the moment it becomes a member. */}
-      {invites !== null && inviteGate(myRole).kind === "ready" && (
-        <div className="mt-6">
-          <Card>
-            <div className="flex flex-wrap items-center gap-3">
-              <h2 className="text-sm font-semibold text-white">Invitations</h2>
-              {/* The count names OUTSTANDING rows only — pending plus expired. An accepted invitation is a
+          {invites !== null && inviteGate(myRole).kind === "ready" && (
+            <div className="mt-6">
+              <Card>
+                <div className="flex flex-wrap items-center gap-3">
+                  <h2 className="text-sm font-semibold text-white">
+                    Invitations
+                  </h2>
+                  {/* The count names OUTSTANDING rows only — pending plus expired. An accepted invitation is a
                   member now and is already counted on the roster; counting it here would overstate how many
                   people have a live path into the org, which is the number this panel exists to show. */}
-              <span className="text-xs text-slate-400">
-                {outstandingCount(invites, new Date())} outstanding
-              </span>
-            </div>
-            {/* ⛔ A TABLE, BECAUSE THE ROW WAS WRAPPING. Email + badge + role + inviter + two buttons on
+                  <span className="text-xs text-slate-400">
+                    {outstandingCount(invites, new Date())} outstanding
+                  </span>
+                </div>
+                {/* ⛔ A TABLE, BECAUSE THE ROW WAS WRAPPING. Email + badge + role + inviter + two buttons on
                   one flex line meant a long address pushed Resend/Revoke onto a second row for SOME
                   invitations and not others — the controls sat in a different place on every row, which is
                   the one thing a list of identical actions must not do.
@@ -557,148 +592,170 @@ export default function Users() {
                   ⚠ EVERY STATE STILL RENDERS, including accepted and revoked. They are the audit trail of
                   who was let in and who was withdrawn, and the "N outstanding" count above already keeps
                   them from inflating the number that matters. */}
-              <div className="mt-3">
-                <DataTable<Invitation>
-                  caption="Invitations"
-                  rows={orderInvitations(invites, new Date())}
-                  rowKey={(inv) => inv.id}
-                  rowAttrs={(inv) => ({
-                    "data-testid": `invite-${inv.id}`,
-                    "data-state": invitationState(inv, new Date()),
-                  })}
-                  failed={false}
-                  pageSize={10}
-                  empty="No invitations have been created for this organization."
-                  // ⛔ CONTROLS APPEAR ONLY WHERE THE SERVER WOULD ACT. Revoke matches
-                  // `accepted_at IS NULL AND revoked_at IS NULL`, so on a terminal row it would change
-                  // nothing and report success — worse than absent. `unavailable` now says WHICH, where the
-                  // old design just omitted the button and left the operator to infer it.
-                  rowActions={[
-                    {
-                      key: "resend",
-                      // ⚠ THE IN-FLIGHT STATE SURVIVED THE MOVE. The per-row button read "Resending…" while
-                      // the request was open; a bar button that stays enabled and silent invites a second
-                      // click and a second email to the same person.
-                      label: inviteBusy?.endsWith("resend") ? "Resending…" : "Resend",
-                      arity: "single",
-                      unavailable: (inv) =>
-                        inviteBusy === inv.email + "resend"
+                <div className="mt-3">
+                  <DataTable<Invitation>
+                    caption="Invitations"
+                    rows={orderInvitations(invites, new Date())}
+                    rowKey={(inv) => inv.id}
+                    rowAttrs={(inv) => ({
+                      "data-testid": `invite-${inv.id}`,
+                      "data-state": invitationState(inv, new Date()),
+                    })}
+                    failed={false}
+                    pageSize={10}
+                    empty="No invitations have been created for this organization."
+                    // ⛔ CONTROLS APPEAR ONLY WHERE THE SERVER WOULD ACT. Revoke matches
+                    // `accepted_at IS NULL AND revoked_at IS NULL`, so on a terminal row it would change
+                    // nothing and report success — worse than absent. `unavailable` now says WHICH, where the
+                    // old design just omitted the button and left the operator to infer it.
+                    rowActions={[
+                      {
+                        key: "resend",
+                        // ⚠ THE IN-FLIGHT STATE SURVIVED THE MOVE. The per-row button read "Resending…" while
+                        // the request was open; a bar button that stays enabled and silent invites a second
+                        // click and a second email to the same person.
+                        label: inviteBusy?.endsWith("resend")
                           ? "Resending…"
-                          : canResend(invitationState(inv, new Date()))
-                            ? null
-                            : "Only a pending or expired invitation can be resent.",
-                      run: (is) => void inviteAction("resend", is[0].email),
-                    },
-                    {
-                      key: "revoke",
-                      label: inviteBusy?.endsWith("revoke") ? "Revoking…" : "Revoke",
-                      danger: true,
-                      arity: "single",
-                      unavailable: (inv) =>
-                        inviteBusy === inv.email + "revoke"
-                          ? "Revoking…"
-                          : canRevoke(invitationState(inv, new Date()))
-                            ? null
-                            : "This invitation is already accepted or revoked.",
-                      run: (is) => void inviteAction("revoke", is[0].email),
-                    },
-                  ]}
-                  columns={[
-                    {
-                      key: "email",
-                      header: "Invitee",
-                      sortValue: (inv) => inv.email,
-                      cell: (inv) => (
-                        <span className="block max-w-[22rem] truncate text-slate-200" title={inv.email}>
-                          {inv.email}
-                        </span>
-                      ),
-                    },
-                    {
-                      key: "state",
-                      header: "State",
-                      sortValue: (inv) => stateLabel(invitationState(inv, new Date())),
-                      cell: (inv) => {
-                        const st = invitationState(inv, new Date());
-                        return (
-                          <span
-                            className={
-                              "rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold " +
-                              (st === "pending"
-                                ? "border-accent-500/40 bg-accent-500/10 text-accent-400"
-                                : st === "expired"
-                                  ? "border-warn/40 bg-warn/10 text-warn"
-                                  : "border-slate-700 bg-slate-900 text-slate-500")
-                            }
-                          >
-                            {stateLabel(st)}
-                          </span>
-                        );
+                          : "Resend",
+                        arity: "single",
+                        unavailable: (inv) =>
+                          inviteBusy === inv.email + "resend"
+                            ? "Resending…"
+                            : canResend(invitationState(inv, new Date()))
+                              ? null
+                              : "Only a pending or expired invitation can be resent.",
+                        run: (is) => void inviteAction("resend", is[0].email),
                       },
-                    },
-                    {
-                      key: "role",
-                      header: "Role",
-                      sortValue: (inv) => inv.role,
-                      cell: (inv) => <span className="text-xs text-slate-500">{inv.role}</span>,
-                    },
-                    {
-                      key: "inviter",
-                      header: "Invited by",
-                      // The inviter can be GONE — invited_by_user_id is ON DELETE SET NULL, and the LEFT
-                      // JOIN keeps the row rather than hiding an outstanding invitation because its sender
-                      // left.
-                      sortValue: (inv) => inviterLabel(inv),
-                      cell: (inv) => (
-                        <span className="text-xs text-slate-600">{inviterLabel(inv)}</span>
-                      ),
-                    },
-                  ]}
-                />
-              </div>
-            {/* A revocation the operator may not have performed — SupersedePendingInvites clears pending
+                      {
+                        key: "revoke",
+                        label: inviteBusy?.endsWith("revoke")
+                          ? "Revoking…"
+                          : "Revoke",
+                        danger: true,
+                        arity: "single",
+                        unavailable: (inv) =>
+                          inviteBusy === inv.email + "revoke"
+                            ? "Revoking…"
+                            : canRevoke(invitationState(inv, new Date()))
+                              ? null
+                              : "This invitation is already accepted or revoked.",
+                        run: (is) => void inviteAction("revoke", is[0].email),
+                      },
+                    ]}
+                    columns={[
+                      {
+                        key: "email",
+                        header: "Invitee",
+                        sortValue: (inv) => inv.email,
+                        cell: (inv) => (
+                          <span
+                            className="block max-w-[22rem] truncate text-slate-200"
+                            title={inv.email}
+                          >
+                            {inv.email}
+                          </span>
+                        ),
+                      },
+                      {
+                        key: "state",
+                        header: "State",
+                        sortValue: (inv) =>
+                          stateLabel(invitationState(inv, new Date())),
+                        cell: (inv) => {
+                          const st = invitationState(inv, new Date());
+                          return (
+                            <span
+                              className={
+                                "rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold " +
+                                (st === "pending"
+                                  ? "border-accent-500/40 bg-accent-500/10 text-accent-400"
+                                  : st === "expired"
+                                    ? "border-warn/40 bg-warn/10 text-warn"
+                                    : "border-slate-700 bg-slate-900 text-slate-500")
+                              }
+                            >
+                              {stateLabel(st)}
+                            </span>
+                          );
+                        },
+                      },
+                      {
+                        key: "role",
+                        header: "Role",
+                        sortValue: (inv) => inv.role,
+                        cell: (inv) => (
+                          <span className="text-xs text-slate-500">
+                            {inv.role}
+                          </span>
+                        ),
+                      },
+                      {
+                        key: "inviter",
+                        header: "Invited by",
+                        // The inviter can be GONE — invited_by_user_id is ON DELETE SET NULL, and the LEFT
+                        // JOIN keeps the row rather than hiding an outstanding invitation because its sender
+                        // left.
+                        sortValue: (inv) => inviterLabel(inv),
+                        cell: (inv) => (
+                          <span className="text-xs text-slate-600">
+                            {inviterLabel(inv)}
+                          </span>
+                        ),
+                      },
+                    ]}
+                  />
+                </div>
+                {/* A revocation the operator may not have performed — SupersedePendingInvites clears pending
                 invites on a domain-capture JIT join, and the table records no cause. Named, not claimed. */}
-            {invites.some((i) => i.revoked_at) && (
-              <p className="mt-3 text-xs text-slate-600">{REVOKED_CAUSE_NOTE}</p>
-            )}
-            <ErrorText>{inviteErr}</ErrorText>
-          </Card>
-        </div>
-      )}
+                {invites.some((i) => i.revoked_at) && (
+                  <p className="mt-3 text-xs text-slate-600">
+                    {REVOKED_CAUSE_NOTE}
+                  </p>
+                )}
+                <ErrorText>{inviteErr}</ErrorText>
+              </Card>
+            </div>
+          )}
 
-      {/* ── Access posture ────────────────────────────────────────────────────────────────────────────────
+          {/* ── Access posture ────────────────────────────────────────────────────────────────────────────────
           The wireframe's subtitle promises `role hierarchy · MFA coverage · authentication sources` and the
           product projects ONE of the three. This panel ships that one and NAMES the two it does not have,
           rather than printing a subtitle that promises all three. `MFA enrolled 5/7` in particular is a
           NUMBER, and a reader trusts a number more than prose. */}
-      <div className="mt-6">
-        <Card>
-          <h2 className="text-sm font-semibold text-white">Access posture</h2>
-          {/* ⛔ STATES WHAT IS COUNTED. The first version read "Role hierarchy across N members", which claims
+          <div className="mt-6">
+            <Card>
+              <h2 className="text-sm font-semibold text-white">
+                Access posture
+              </h2>
+              {/* ⛔ STATES WHAT IS COUNTED. The first version read "Role hierarchy across N members", which claims
               WHO CAN ACT — and the tally counts accounts on the roster, deactivated included. A roster of 7
               with 1 deactivated is TWO FACTS, NOT ONE NUMBER. */}
-          <p className="mt-1 text-xs text-slate-400">{rosterSubtitle(members)}</p>
-          <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
-            {roleDistribution(members).map((t) => (
-              <div key={t.role}>
-                {/* The zero is rendered, not dropped: an omitted role reads as a role that does not exist. */}
-                <dt className="text-xs uppercase tracking-wide text-slate-500">
-                  {t.role}
-                  {t.n === 1 ? "" : "s"}
-                </dt>
-                <dd className="text-lg font-semibold text-white">{t.n}</dd>
-                {/* The split, per role, only where it exists — so "1 owner" cannot hide a deactivated one. */}
-                {t.deactivated > 0 && (
-                  <dd className="text-xs text-warn">{t.deactivated} deactivated</dd>
-                )}
-                <span className="sr-only">{roleTallyLabel(t)}</span>
-              </div>
-            ))}
-          </dl>
-          {/* ⛔ THE TWO MISSING FACTS ARE NAMED, NOT OMITTED. Silence here would read as "this org has no MFA
+              <p className="mt-1 text-xs text-slate-400">
+                {rosterSubtitle(members)}
+              </p>
+              <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
+                {roleDistribution(members).map((t) => (
+                  <div key={t.role}>
+                    {/* The zero is rendered, not dropped: an omitted role reads as a role that does not exist. */}
+                    <dt className="text-xs uppercase tracking-wide text-slate-500">
+                      {t.role}
+                      {t.n === 1 ? "" : "s"}
+                    </dt>
+                    <dd className="text-lg font-semibold text-white">{t.n}</dd>
+                    {/* The split, per role, only where it exists — so "1 owner" cannot hide a deactivated one. */}
+                    {t.deactivated > 0 && (
+                      <dd className="text-xs text-warn">
+                        {t.deactivated} deactivated
+                      </dd>
+                    )}
+                    <span className="sr-only">{roleTallyLabel(t)}</span>
+                  </div>
+                ))}
+              </dl>
+              {/* ⛔ THE TWO MISSING FACTS ARE NAMED, NOT OMITTED. Silence here would read as "this org has no MFA
               story", which is false — MFA is enforced and enrollable, it is the per-member PROJECTION that
               does not exist (D1), as with authentication sources (D1b). */}
-          {/* ── Groups: OUT OF THE STAT ROW, and registered as a DELIBERATE ADDITION ─────────────────────
+              {/* ── Groups: OUT OF THE STAT ROW, and registered as a DELIBERATE ADDITION ─────────────────────
               ⛔ THE WIREFRAME HAS NO GROUPS STAT. Its Access posture panel is:
                    title · "role hierarchy · MFA coverage · authentication sources" · {{ teamMap }}
                    · legend (role tiers, MFA enrolled 5/7) · the last-owner copy
@@ -713,28 +770,28 @@ export default function Users() {
               thing on this screen that renders the edition/permission seam — the four-gate shape the section
               exists to demonstrate. So it keeps its own line, named as standing in for teamMap.
               Registered: docs/DEFERRAL-REGISTER.md. */}
-          <p className="mt-3 border-t border-white/5 pt-3 text-xs text-slate-400">
-            <span className="text-slate-500">Group membership</span>{" "}
-            {groupAccess.kind === "edges"
-              ? `— ${groupAccessLabel(groupAccess)} in this organization.`
-              : `— ${groupAccessLabel(groupAccess)}.`}{" "}
-            <span className="text-slate-500">
-              The role-and-group map is not built yet; this stands in for it.
-            </span>
-          </p>
-          <p className="mt-2 text-xs text-slate-500">
-            MFA coverage and authentication sources are not shown per member yet:
-            both are enforced by the server but not carried on the roster
-            response. Two-factor can still be reset per member from the row
-            actions.
-          </p>
-          {shape.gateNote && (
-            <p className="mt-2 text-xs text-slate-400">{shape.gateNote}</p>
-          )}
-        </Card>
-      </div>
-
-      </div>
+              <p className="mt-3 border-t border-white/5 pt-3 text-xs text-slate-400">
+                <span className="text-slate-500">Group membership</span>{" "}
+                {groupAccess.kind === "edges"
+                  ? `— ${groupAccessLabel(groupAccess)} in this organization.`
+                  : `— ${groupAccessLabel(groupAccess)}.`}{" "}
+                <span className="text-slate-500">
+                  The role-and-group map is not built yet; this stands in for
+                  it.
+                </span>
+              </p>
+              <p className="mt-2 text-xs text-slate-500">
+                MFA coverage and authentication sources are not shown per member
+                yet: both are enforced by the server but not carried on the
+                roster response. Two-factor can still be reset per member from
+                the row actions.
+              </p>
+              {shape.gateNote && (
+                <p className="mt-2 text-xs text-slate-400">{shape.gateNote}</p>
+              )}
+            </Card>
+          </div>
+        </div>
 
         {/* ⛔ §2.5 OF THE COMMIT-ONE SAID "NO CLIENT-SIDE OWNER COUNT" AND THE SCREEN ALREADY HAD ONE, with a
             written rationale (see isSoleOwner). I ruled on this screen's behaviour without reading the screen

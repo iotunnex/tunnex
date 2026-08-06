@@ -120,8 +120,7 @@ export function rosterShape(input: {
   isEnterprise: boolean;
 }): RosterShape {
   const showDeviceCount = can(input.role, "member:manage");
-  const showGroupDerived =
-    input.isEnterprise && can(input.role, "policy:view");
+  const showGroupDerived = input.isEnterprise && can(input.role, "policy:view");
 
   // ⛔ THE NOTE NAMES THE REASON, AND THE TWO REASONS ARE NOT INTERCHANGEABLE. "You cannot see this" and "this
   // edition does not have it" send an operator to completely different places — an admin and a purchase
@@ -190,7 +189,9 @@ export function groupAccessState(input: {
   if (!can(input.role, "policy:view")) return { kind: "forbidden" };
   if (!input.isEnterprise) return { kind: "edition" };
   if (input.groupCount === null) return { kind: "failed" };
-  return input.groupCount === 0 ? { kind: "none" } : { kind: "edges", n: input.groupCount };
+  return input.groupCount === 0
+    ? { kind: "none" }
+    : { kind: "edges", n: input.groupCount };
 }
 
 export function groupAccessLabel(s: GroupAccessState): string {
@@ -247,7 +248,9 @@ export function roleDistribution(members: Member[]): RoleTally[] {
   return order.map((role) => ({
     role,
     n: members.filter((m) => m.role === role).length,
-    deactivated: members.filter((m) => m.role === role && m.status === "deactivated").length,
+    deactivated: members.filter(
+      (m) => m.role === role && m.status === "deactivated",
+    ).length,
   }));
 }
 

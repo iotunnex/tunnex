@@ -6,6 +6,7 @@ import {
   type Member,
   type Org,
 } from "../lib/api";
+import { useOrg } from "../lib/useOrg";
 import { relativeAge } from "../lib/format";
 import {
   UNATTRIBUTED_NOTE,
@@ -36,6 +37,9 @@ const dayStart = (d: string) => new Date(`${d}T00:00:00`).toISOString();
 const dayEnd = (d: string) => new Date(`${d}T23:59:59.999`).toISOString();
 
 export default function AuditLog() {
+  // ⛔ THE ORG COMES FROM THE SEAM (S12.5) — the page no longer picks index zero out of a list it
+  // fetched itself, which is what made a second organization unreachable.
+  const { org: currentOrg, loading: orgLoading, failed: orgFailed } = useOrg();
   const [org, setOrg] = useState<Org | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [entries, setEntries] = useState<AuditLogEntry[]>([]);
@@ -91,17 +95,31 @@ export default function AuditLog() {
     reqSeq.current++; // invalidate any in-flight fetch on unmount
     let cancelled = false;
     (async () => {
-      const { data: orgs, error: orgErr } = await api.GET(
-        "/api/v1/organizations",
-      );
+      // ⭐ THE ORG-LIST FETCH IS GONE FROM THIS PAGE (S12.5). It existed only to be indexed at zero.
+      // OrgProvider reads the list once for the whole shell; a page that re-fetched it would not merely
+      // waste a request, it would pick an org the switcher has no way to change.
+      const orgErr = null;
       if (cancelled) return;
       if (orgErr)
         return setError(
           apiErrorMessage(orgErr, "Could not load your organizations."),
         );
-      const first = orgs?.[0];
+      // ⛔ LOADING IS NOT ABSENCE (S12.5). The provider resolves the org list asynchronously, so this
+      // effect runs once with currentOrg === null before the answer exists. Treating that as "you have no
+      // organization" renders a confident, false statement — and because the second pass only sets the
+      // data, the stale error stayed on screen BESIDE the correct org name.
+      //
+      // ⚠ THREE STATES, NOT TWO: still loading (say nothing), the read failed (say THAT), genuinely no
+      // membership (say that). Collapsing the first into the third is how a slow network becomes an
+      // accusation that the user does not belong here.
+      if (orgLoading) return;
+      const first = currentOrg;
       if (!first)
-        return setError("You are not a member of any organization yet.");
+        return setError(
+          orgFailed
+            ? "Could not load your organizations."
+            : "You are not a member of any organization yet.",
+        );
       setOrg(first);
       // Actor filter is org-scoped BY CONSTRUCTION: the dropdown offers only this
       // org's members (the server enforces org-scoping too).
@@ -116,7 +134,15 @@ export default function AuditLog() {
       cancelled = true;
       reqSeq.current++; // discard a fetchPage response that resolves post-unmount
     };
-  }, []);
+    // ⛔ currentOrg IS A DEPENDENCY, AND ITS ABSENCE WAS A REAL BUG THE TESTS CAUGHT (S12.5).
+    //
+    // The provider resolves the org list ASYNCHRONOUSLY, so on this effect's first run `currentOrg` is still
+    // null. With `[]` deps the effect never ran again: the page rendered "You are not a member of any
+    // organization yet" — a confident, wrong statement — and stayed there forever, for every user.
+    //
+    // ⚠ THE SAME DEPENDENCY ALSO MAKES THE SWITCHER WORK. One line, two properties: without it the page
+    // either never loads at all, or loads once and then lies about which tenant it is showing.
+  }, [currentOrg]);
 
   function applyFilters(e: FormEvent) {
     e.preventDefault();
@@ -200,8 +226,8 @@ export default function AuditLog() {
           fixed this screen must surface it rather than hide it. */}
       {unattributedCount(entries) > 0 && (
         <p className="mt-4 text-xs text-warn">
-          {unattributedCount(entries)} of {entries.length} events on this page have no
-          recorded actor. {UNATTRIBUTED_NOTE}
+          {unattributedCount(entries)} of {entries.length} events on this page
+          have no recorded actor. {UNATTRIBUTED_NOTE}
         </p>
       )}
 
@@ -211,7 +237,7 @@ export default function AuditLog() {
                 operator cannot see without advancing a second pager, and the count then describes neither
                 the fetch nor the view. The server's cursor is the one that must win, because it is the one
                 that bounds the query. */}
-            {/* ⛔ TWO PAGERS, AND THEY ARE NOT RIVALS ONCE THEY ARE NAMED. This page pages SERVER-SIDE with a
+        {/* ⛔ TWO PAGERS, AND THEY ARE NOT RIVALS ONCE THEY ARE NAMED. This page pages SERVER-SIDE with a
                 keyset cursor; the table pages the rows already FETCHED. I first disabled the client pager to
                 avoid the collision, which meant this screen dumped everything loaded at once — the one thing
                 the pager exists to stop, and the founder saw it immediately.
@@ -219,16 +245,16 @@ export default function AuditLog() {
                 They compose as long as each says which set it is talking about: the table's count reads
                 "of N" where N is what has been LOADED, and the server control says so on its face. Silence
                 about which set a number describes is what makes two pagers contradict each other. */}
-            <DataTable
-              // ⛔ NO CLIENT PAGER: THIS SURFACE'S PAGING PROOF COUNTS DOM ROWS. The e2e asserts 51 rows,
-              // then 54 after "Load more", to prove the keyset cursor stitches pages with NO OVERLAP and NO
-              // GAP — a re-served or skipped row changes the count. A client pager renders 25 of whatever is
-              // fetched, so the count stops meaning what the proof needs it to mean.
-              //
-              // ⚠ Restored deliberately after the founder asked these surfaces to paginate. The server
-              // ALREADY bounds them at 50 per fetch, so "everything at once" is 50 rows, not unbounded —
-              // and re-expressing a paging proof is a decide-item, not a fold.
-              pageSize={0}
+        <DataTable
+          // ⛔ NO CLIENT PAGER: THIS SURFACE'S PAGING PROOF COUNTS DOM ROWS. The e2e asserts 51 rows,
+          // then 54 after "Load more", to prove the keyset cursor stitches pages with NO OVERLAP and NO
+          // GAP — a re-served or skipped row changes the count. A client pager renders 25 of whatever is
+          // fetched, so the count stops meaning what the proof needs it to mean.
+          //
+          // ⚠ Restored deliberately after the founder asked these surfaces to paginate. The server
+          // ALREADY bounds them at 50 per fetch, so "everything at once" is 50 rows, not unbounded —
+          // and re-expressing a paging proof is a decide-item, not a fold.
+          pageSize={0}
           caption="Audit events"
           rows={entries}
           rowKey={(a) => a.id}
@@ -320,4 +346,3 @@ export default function AuditLog() {
     </div>
   );
 }
-

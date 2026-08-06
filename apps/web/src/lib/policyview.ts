@@ -742,13 +742,19 @@ export function rulesEmptyState(i: {
 }
 
 /** The sentence each arm renders. `loud` drives the alarming treatment — TRUE only for the state that earns it. */
-export function rulesEmptyCopy(s: RulesEmptyState): { text: string; loud: boolean } {
+export function rulesEmptyCopy(s: RulesEmptyState): {
+  text: string;
+  loud: boolean;
+} {
   switch (s.kind) {
     case "rows":
       return { text: "", loud: false };
     case "failed":
       // Never "No rules". The screen did not read them.
-      return { text: "Rules could not be loaded. refresh to try again.", loud: false };
+      return {
+        text: "Rules could not be loaded. refresh to try again.",
+        loud: false,
+      };
     case "enforcing_empty":
       return {
         text: "0 rules while enforcing. every device-to-device connection is denied by default.",
@@ -795,10 +801,18 @@ export function flowGraphState(
 ): FlowGraphState {
   if (ruleCount === 0) return { kind: "withheld_empty" };
   if (ruleCount > FLOW_GRAPH_MAX_RULES)
-    return { kind: "withheld_too_many", rules: ruleCount, max: FLOW_GRAPH_MAX_RULES };
+    return {
+      kind: "withheld_too_many",
+      rules: ruleCount,
+      max: FLOW_GRAPH_MAX_RULES,
+    };
   // The coverage gate runs only when a caller supplies what the layout actually drew.
   if (drawnCount !== undefined && drawnCount / ruleCount < FLOW_MIN_COVERAGE)
-    return { kind: "withheld_unrepresentative", rules: ruleCount, drawn: drawnCount };
+    return {
+      kind: "withheld_unrepresentative",
+      rules: ruleCount,
+      drawn: drawnCount,
+    };
   return { kind: "draw", rules: ruleCount };
 }
 
@@ -848,7 +862,8 @@ export const FLOW_MIN_COVERAGE = 0.5;
 // rows. So the fixture added one slice earlier made the guess match everything.
 //   A WRONG TYPE TAG IS NOT STYLING. It is a FALSE CLAIM ABOUT WHAT A RULE POINTS AT.
 // `policy_rules` already enforces the union in two CHECK constraints; read it instead of inferring it.
-export type FlowKind = "group" | "user" | "site" | "cidr" | "resource" | "k8s_service";
+export type FlowKind =
+  "group" | "user" | "site" | "cidr" | "resource" | "k8s_service";
 export interface FlowEdge {
   id: string;
   src: string;
@@ -861,12 +876,18 @@ export interface FlowEdge {
 /** Single letter in the glyph circle. Every arm of BOTH unions, exhaustively. */
 export function flowGlyph(k: FlowKind): string {
   switch (k) {
-    case "group": return "G";
-    case "user": return "U";
-    case "site": return "S";
-    case "cidr": return "C";
-    case "resource": return "R";
-    case "k8s_service": return "K";
+    case "group":
+      return "G";
+    case "user":
+      return "U";
+    case "site":
+      return "S";
+    case "cidr":
+      return "C";
+    case "resource":
+      return "R";
+    case "k8s_service":
+      return "K";
   }
 }
 
@@ -874,7 +895,10 @@ export function flowGlyph(k: FlowKind): string {
 export function flowTag(k: FlowKind): string {
   return k === "k8s_service" ? "K8S SERVICE" : k.toUpperCase();
 }
-export interface FlowNode { label: string; kind: FlowKind }
+export interface FlowNode {
+  label: string;
+  kind: FlowKind;
+}
 export interface FlowLayout {
   srcs: FlowNode[];
   dsts: FlowNode[];
@@ -890,8 +914,12 @@ export interface FlowLayout {
  * in slot 3 precisely so `oncall-grp` fans up one row instead of across. Ordering is the fix, not the curve —
  * a bezier over an unordered set would look deliberate.
  */
-export function flowLayout(edges: FlowEdge[], cap = FLOW_COLUMN_CAP): FlowLayout {
-  const deg = (l: string, k: "src" | "dst") => edges.filter((e) => e[k] === l).length;
+export function flowLayout(
+  edges: FlowEdge[],
+  cap = FLOW_COLUMN_CAP,
+): FlowLayout {
+  const deg = (l: string, k: "src" | "dst") =>
+    edges.filter((e) => e[k] === l).length;
   const kindOfSrc = new Map(edges.map((e) => [e.src, e.srcKind]));
   const kindOfDst = new Map(edges.map((e) => [e.dst, e.dstKind]));
   let srcLabels = [...new Set(edges.map((e) => e.src))]
@@ -918,15 +946,23 @@ export function flowLayout(edges: FlowEdge[], cap = FLOW_COLUMN_CAP): FlowLayout
       .filter((e) => e[side] === label)
       .map((e) => other.indexOf(side === "src" ? e.dst : e.src))
       .filter((i) => i >= 0);
-    return idx.length ? idx.reduce((a, b) => a + b, 0) / idx.length : Number.MAX_SAFE_INTEGER;
+    return idx.length
+      ? idx.reduce((a, b) => a + b, 0) / idx.length
+      : Number.MAX_SAFE_INTEGER;
   };
   for (let pass = 0; pass < 4; pass++) {
-    dstLabels = [...dstLabels].sort((a, b) => meanOf(a, "dst", srcOrder) - meanOf(b, "dst", srcOrder));
-    srcOrder = [...srcOrder].sort((a, b) => meanOf(a, "src", dstLabels) - meanOf(b, "src", dstLabels));
+    dstLabels = [...dstLabels].sort(
+      (a, b) => meanOf(a, "dst", srcOrder) - meanOf(b, "dst", srcOrder),
+    );
+    srcOrder = [...srcOrder].sort(
+      (a, b) => meanOf(a, "src", dstLabels) - meanOf(b, "src", dstLabels),
+    );
   }
   srcLabels = srcOrder;
 
-  const shown = edges.filter((e) => si(e.src) >= 0 && dstLabels.indexOf(e.dst) >= 0);
+  const shown = edges.filter(
+    (e) => si(e.src) >= 0 && dstLabels.indexOf(e.dst) >= 0,
+  );
   return {
     srcs: srcLabels.map((l) => ({ label: l, kind: kindOfSrc.get(l)! })),
     dsts: dstLabels.map((l) => ({ label: l, kind: kindOfDst.get(l)! })),
@@ -942,7 +978,8 @@ export function flowCrossings(l: FlowLayout): number {
   let n = 0;
   for (let i = 0; i < l.shown.length; i++)
     for (let j = i + 1; j < l.shown.length; j++) {
-      const a = l.shown[i], b = l.shown[j];
+      const a = l.shown[i],
+        b = l.shown[j];
       if ((si(a.src) - si(b.src)) * (di(a.dst) - di(b.dst)) < 0) n++;
     }
   return n;
@@ -972,7 +1009,9 @@ export function flowCrossings(l: FlowLayout): number {
 // broken, which is the false-zero defect one level over.
 export type GroupEmptyWarn = "empty" | "populated" | "unknown";
 
-export function srcGroupEmptyWarn(memberCount: number | null | undefined): GroupEmptyWarn {
+export function srcGroupEmptyWarn(
+  memberCount: number | null | undefined,
+): GroupEmptyWarn {
   if (memberCount === null || memberCount === undefined) return "unknown"; // not fetched, or the read failed
   return memberCount === 0 ? "empty" : "populated";
 }
@@ -1009,13 +1048,17 @@ export function srcGroupEmptyExplain(w: GroupEmptyWarn): string | null {
 //
 // So: state the RISK, which is certain, and omit the NUMBER, which we do not own. Registered: a server
 // cascade-preview endpoint, after which this copy names counts the server itself computed.
-export function cascadeConfirmCopy(kind: "group" | "resource", name: string): {
+export function cascadeConfirmCopy(
+  kind: "group" | "resource",
+  name: string,
+): {
   title: string;
   body: string;
   typeToConfirm: string;
 } {
   const what = kind === "group" ? "group" : "resource";
-  const role = kind === "group" ? "a rule source or destination" : "a rule destination";
+  const role =
+    kind === "group" ? "a rule source or destination" : "a rule destination";
   return {
     title: `Delete ${what} “${name}”?`,
     body:
@@ -1085,7 +1128,13 @@ export function sourceOptions(i: {
   dstSite: string;
 }): RuleOption[] {
   return [
-    ...i.groups.map((g) => ({ value: g.id, kind: "group", tag: "group", label: g.name, section: "People" })),
+    ...i.groups.map((g) => ({
+      value: g.id,
+      kind: "group",
+      tag: "group",
+      label: g.name,
+      section: "People",
+    })),
     ...i.members.map((m) => ({
       value: m.user_id,
       kind: "user",
@@ -1103,7 +1152,9 @@ export function sourceOptions(i: {
       label: s.name,
       section: "Networks",
       unavailable:
-        i.dstKind === "site" && i.dstSite === s.id ? SELF_SITE_REASON : undefined,
+        i.dstKind === "site" && i.dstSite === s.id
+          ? SELF_SITE_REASON
+          : undefined,
     })),
     ...i.agents.map((a) => ({
       value: a.device_id,
@@ -1129,12 +1180,26 @@ export function destinationOptions(i: {
   return [
     // ⛔ SERVICES FIRST, because they are the port-scoped ones and the ones an operator usually wants.
     ...i.resources.map((r) => ({
-      value: r.id, kind: "resource", tag: "resource", label: r.name, section: DST_SCOPED,
+      value: r.id,
+      kind: "resource",
+      tag: "resource",
+      label: r.name,
+      section: DST_SCOPED,
     })),
     ...i.services.map((s) => ({
-      value: s.id, kind: "k8s_service", tag: "k8s", label: s.name, section: DST_SCOPED,
+      value: s.id,
+      kind: "k8s_service",
+      tag: "k8s",
+      label: s.name,
+      section: DST_SCOPED,
     })),
-    ...i.groups.map((g) => ({ value: g.id, kind: "group", tag: "group", label: g.name, section: DST_WIDE })),
+    ...i.groups.map((g) => ({
+      value: g.id,
+      kind: "group",
+      tag: "group",
+      label: g.name,
+      section: DST_WIDE,
+    })),
     ...i.sites.map((s) => ({
       value: s.id,
       kind: "site",
@@ -1142,7 +1207,9 @@ export function destinationOptions(i: {
       label: s.name,
       section: DST_WIDE,
       unavailable:
-        i.srcKind === "site" && i.srcSite === s.id ? SELF_SITE_REASON : undefined,
+        i.srcKind === "site" && i.srcSite === s.id
+          ? SELF_SITE_REASON
+          : undefined,
     })),
   ];
 }
@@ -1209,7 +1276,10 @@ export function ruleEffectSummary(i: {
  * intent: an agent normally needs SERVICES, which are port-scoped. Said as a question about intent, not as a
  * verdict about safety, because the grant is legitimate when it is deliberate.
  */
-export function ruleEffectCaution(srcKind: string, dstKind: string): string | null {
+export function ruleEffectCaution(
+  srcKind: string,
+  dstKind: string,
+): string | null {
   if (srcKind === "agent" && (dstKind === "group" || dstKind === "site")) {
     return "This gives a machine principal unrestricted access to people's own devices. If the agent needs a service, name that service as the destination instead — a resource is port-scoped, a group is not.";
   }

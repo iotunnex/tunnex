@@ -128,7 +128,10 @@ export function attributeRanges(
           siteName: siteName.get(siteId) ?? siteId,
         },
       };
-    return { range, attribution: { kind: anyFailed ? "unknown" : "unmatched" } };
+    return {
+      range,
+      attribution: { kind: anyFailed ? "unknown" : "unmatched" },
+    };
   });
 }
 
@@ -240,9 +243,33 @@ export type Block = {
 // A SHAPE CHOSEN AT N=3 IS NOT A SHAPE THAT SURVIVES N=8. Square (16x16) puts the grid's aspect ratio in the
 // same family as the list's, so the two columns stay level as the list grows.
 export const BLOCKS: Block[] = [
-  { key: "10", label: "10.0.0.0/8", base: 0x0a000000, prefix: 8, cellPrefix: 16, cells: 256, cols: 16 },
-  { key: "172", label: "172.16.0.0/12", base: 0xac100000, prefix: 12, cellPrefix: 16, cells: 16, cols: 4 },
-  { key: "192", label: "192.168.0.0/16", base: 0xc0a80000, prefix: 16, cellPrefix: 24, cells: 256, cols: 16 },
+  {
+    key: "10",
+    label: "10.0.0.0/8",
+    base: 0x0a000000,
+    prefix: 8,
+    cellPrefix: 16,
+    cells: 256,
+    cols: 16,
+  },
+  {
+    key: "172",
+    label: "172.16.0.0/12",
+    base: 0xac100000,
+    prefix: 12,
+    cellPrefix: 16,
+    cells: 16,
+    cols: 4,
+  },
+  {
+    key: "192",
+    label: "192.168.0.0/16",
+    base: 0xc0a80000,
+    prefix: 16,
+    cellPrefix: 24,
+    cells: 256,
+    cols: 16,
+  },
 ];
 
 export type CellState = "partial" | "full";
@@ -274,7 +301,9 @@ const KIND_RANK: Record<AllocKind, number> = {
   pending: 1,
 };
 
-export function parseCidr(raw: string): { addr: number; prefix: number } | null {
+export function parseCidr(
+  raw: string,
+): { addr: number; prefix: number } | null {
   const canonical = canonicalCidr(raw);
   if (canonical === null) return null;
   const [host, prefixText] = canonical.split("/");
@@ -289,8 +318,9 @@ const size = (prefix: number) => Math.pow(2, 32 - prefix);
 
 function inBlock(addr: number, prefix: number, block: Block): boolean {
   if (prefix < block.prefix) return false;
-  const mask = block.prefix === 0 ? 0 : (0xffffffff << (32 - block.prefix)) >>> 0;
-  return ((addr & mask) >>> 0) === block.base;
+  const mask =
+    block.prefix === 0 ? 0 : (0xffffffff << (32 - block.prefix)) >>> 0;
+  return (addr & mask) >>> 0 === block.base;
 }
 
 export function mapAddressSpace(allocations: Allocation[]): {
@@ -302,7 +332,12 @@ export function mapAddressSpace(allocations: Allocation[]): {
   const unparseable: Allocation[] = [];
   const acc = new Map<
     string,
-    { cells: Map<number, Cell>; routedAddrs: number; claimedAddrs: number; counts: Record<AllocKind, number> }
+    {
+      cells: Map<number, Cell>;
+      routedAddrs: number;
+      claimedAddrs: number;
+      counts: Record<AllocKind, number>;
+    }
   >();
 
   for (const alloc of allocations) {
@@ -332,7 +367,9 @@ export function mapAddressSpace(allocations: Allocation[]): {
     // traffic, so folding them in would overstate what actually goes down the tunnel.
     if (alloc.kind === "approved") entry.routedAddrs += size(parsed.prefix);
 
-    const first = Math.floor((parsed.addr - block.base) / size(block.cellPrefix));
+    const first = Math.floor(
+      (parsed.addr - block.base) / size(block.cellPrefix),
+    );
     if (parsed.prefix > block.cellPrefix) {
       upsert(entry.cells, first, "partial", alloc);
       continue;
@@ -370,7 +407,8 @@ function upsert(
   }
   existing.allocs.push(alloc);
   if (state === "full") existing.state = "full";
-  if (KIND_RANK[alloc.kind] > KIND_RANK[existing.kind]) existing.kind = alloc.kind;
+  if (KIND_RANK[alloc.kind] > KIND_RANK[existing.kind])
+    existing.kind = alloc.kind;
 }
 
 // ── "WHAT DO I USE NEXT" ────────────────────────────────────────────────────────────────────────────────
@@ -418,7 +456,10 @@ export function nextFreeRange(
   // Walk the gaps, snapping each candidate UP to its own alignment — a CIDR must start on a multiple of its
   // own size, so the first free address is usually not a legal network address.
   let cursor = block.base;
-  for (const [lo, hi] of [...merged, [blockEnd, blockEnd] as [number, number]]) {
+  for (const [lo, hi] of [
+    ...merged,
+    [blockEnd, blockEnd] as [number, number],
+  ]) {
     const candidate = Math.ceil(cursor / want) * want;
     if (candidate + want <= lo && candidate + want <= blockEnd)
       return `${toDotted(candidate)}/${prefix}`;

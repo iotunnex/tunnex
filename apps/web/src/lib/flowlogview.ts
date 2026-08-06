@@ -15,7 +15,8 @@
 // a lease that may have moved, and naming the wrong person in a security feed is worse than naming
 // nobody. We render what the server attributes and say why the rest is absent.
 
-export type Decision = "allow" | "deny" | "deny_aggregate" | "terminated" | "gap";
+export type Decision =
+  "allow" | "deny" | "deny_aggregate" | "terminated" | "gap";
 
 export type AccessEvent = {
   id: string;

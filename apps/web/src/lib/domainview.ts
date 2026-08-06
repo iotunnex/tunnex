@@ -81,7 +81,8 @@ export function normalizeDomain(domain: string): string {
  * Reversed, an open-edition MEMBER is told to buy enterprise for a capability they would
  * still not be allowed to use. That exact inversion shipped twice this epic.
  */
-export type DomainGate = { kind: "hidden" } | { kind: "upsell" } | { kind: "ready" };
+export type DomainGate =
+  { kind: "hidden" } | { kind: "upsell" } | { kind: "ready" };
 
 export function domainGate(i: {
   role: Role | null;

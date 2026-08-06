@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useOrg } from "../lib/useOrg";
 import {
   api,
   loadOne,
@@ -61,14 +62,40 @@ import {
 
 // Legend rows, in the same order the eye meets them on the grid.
 const LEGEND = [
-  { text: "routed, pushed to devices", tone: "var(--tnx-ok)", small: false, dashed: false },
-  { text: "part of a cell (finer than the grid)", tone: "var(--tnx-ok)", small: true, dashed: false },
-  { text: "pending, withheld until approved on Sites", tone: "var(--tnx-warn)", small: false, dashed: true },
-  { text: "device pool", tone: "var(--tnx-accent)", small: false, dashed: false },
-  { text: "cluster VIP range", tone: "var(--tnx-neutral)", small: false, dashed: false },
+  {
+    text: "routed, pushed to devices",
+    tone: "var(--tnx-ok)",
+    small: false,
+    dashed: false,
+  },
+  {
+    text: "part of a cell (finer than the grid)",
+    tone: "var(--tnx-ok)",
+    small: true,
+    dashed: false,
+  },
+  {
+    text: "pending, withheld until approved on Sites",
+    tone: "var(--tnx-warn)",
+    small: false,
+    dashed: true,
+  },
+  {
+    text: "device pool",
+    tone: "var(--tnx-accent)",
+    small: false,
+    dashed: false,
+  },
+  {
+    text: "cluster VIP range",
+    tone: "var(--tnx-neutral)",
+    small: false,
+    dashed: false,
+  },
 ];
 
 export default function RoutedRangesPage() {
+  const { org: currentOrg, loading: orgLoading, failed: orgFailed } = useOrg();
   const [org, setOrg] = useState<Org | null>(null);
   const [ranges, setRanges] = useState<string[] | null>(null);
   const [forwards, setForwards] = useState<DNSForward[] | null>(null);
@@ -80,18 +107,29 @@ export default function RoutedRangesPage() {
   // K8s VIP RANGES (its fourth class, `reserved`, is measured DEAD — `WithReserved` has no callers). A map
   // that draws only site subnets renders the pool's cell DARK, i.e. "yours to take", and the server refuses
   // it. `null` = not yet known, which is why "free" is qualified until every class has answered.
-  const [vipRanges, setVipRanges] = useState<Array<{ cidr: string; label: string }> | null>(null);
+  const [vipRanges, setVipRanges] = useState<Array<{
+    cidr: string;
+    label: string;
+  }> | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setLoadError(null);
     setFanOut(null);
 
-    const oRes = await loadOne(() => api.GET("/api/v1/organizations"));
-    if (!oRes.ok) return setLoadError(oRes.error);
-    const first = (oRes.data as Org[])[0];
+    // ⛔ THE ORG COMES FROM THE SEAM, NOT FROM INDEX ZERO (S12.5). This used to fetch the org list here and
+    // take `[0]`, which meant a user in two organizations could reach only one of them and the switcher in
+    // the header would have had nothing to switch.
+    // ⛔ LOADING IS NOT ABSENCE (S12.5). See the note in Dashboard.tsx — three states, not two: still
+    // loading (say nothing), the read failed (say THAT), genuinely no membership (say that).
+    if (orgLoading) return;
+    const first = currentOrg;
     if (!first)
-      return setLoadError("You are not a member of any organization yet.");
+      return setLoadError(
+        orgFailed
+          ? "Could not load your organizations."
+          : "You are not a member of any organization yet.",
+      );
     setOrg(first);
 
     // ⛔ A FAILED READ IS NOT AN EMPTY ROUTING TABLE. On the screen that answers "does my LAN traffic go down
@@ -150,10 +188,16 @@ export default function RoutedRangesPage() {
     )) as Loaded<Array<{ name: string; vip_range: string }>>;
     setVipRanges(
       kRes.ok
-        ? kRes.data.map((c) => ({ cidr: c.vip_range, label: `${c.name} cluster VIPs` }))
+        ? kRes.data.map((c) => ({
+            cidr: c.vip_range,
+            label: `${c.name} cluster VIPs`,
+          }))
         : null,
     );
-  }, []);
+    // ⚠ currentOrg IS A DEPENDENCY, AND THAT IS THE HALF THAT MAKES THE SWITCHER WORK. Without it the
+    // page keeps rendering the org it mounted with — the control moves, the data does not, and the user is
+    // looking at one tenant's screen labelled with another's name.
+  }, [currentOrg, orgLoading, orgFailed]);
 
   useEffect(() => {
     void reload();
@@ -271,9 +315,7 @@ export default function RoutedRangesPage() {
           <h1 className="text-[22px] font-semibold text-ink-heading">
             Routed ranges
           </h1>
-          <p className="text-cell text-ink-tertiary">
-            {org ? org.name : "…"}
-          </p>
+          <p className="text-cell text-ink-tertiary">{org ? org.name : "…"}</p>
         </div>
       </div>
 

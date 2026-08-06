@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { useOrg } from "./useOrg";
 import {
   api,
   loadOne,
   type Loaded,
   type Node,
-  type Org,
   type Site,
   type Device,
 } from "./api";
@@ -34,14 +34,13 @@ const isOnline = (n: Node) => {
 };
 
 export function useNavCounts(): NavCounts {
+  const { org: currentOrg } = useOrg();
   const [counts, setCounts] = useState<NavCounts>(INITIAL_NAV_COUNTS);
   const location = useLocation();
 
   const refresh = useCallback(async () => {
-    const orgRes = (await loadOne(() =>
-      api.GET("/api/v1/organizations"),
-    )) as Loaded<Org[]>;
-    if (!orgRes.ok || !orgRes.data[0]) {
+    // ⭐ The org-list fetch is gone (S12.5); the seam supplies it.
+    if (!currentOrg) {
       // No org, or the org list failed: every count is UNKNOWN. Not zero — we did not learn that there are
       // none, we failed to learn anything.
       setCounts({
@@ -52,7 +51,7 @@ export function useNavCounts(): NavCounts {
       });
       return;
     }
-    const orgId = orgRes.data[0].id;
+    const orgId = currentOrg.id;
 
     const [nodes, sites, devices] = await Promise.all([
       loadOne(() =>
@@ -78,7 +77,9 @@ export function useNavCounts(): NavCounts {
       sites: countFrom(sites, (r) => r.length),
       devices: countFrom(devices, (r) => r.length),
     });
-  }, []);
+    // ⚠ currentOrg IS A DEPENDENCY — the sidebar counts belong to ONE organization, and a switch that left
+    // them stale would put another tenant's numbers beside this tenant's name.
+  }, [currentOrg]);
 
   // Refresh on ROUTE CHANGE — the case that actually matters, because the user just did something and moved.
   useEffect(() => {

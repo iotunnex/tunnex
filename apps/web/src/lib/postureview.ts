@@ -231,7 +231,6 @@ export function checkModeOf(
   return row ? row.mode : "off";
 }
 
-
 // ── S14.10 ITEM 2 — THE ADDRESS CELL ────────────────────────────────────────────────────────────────────
 //
 // ⛔ THE EM-DASH SWEEP DELETED A PLACEHOLDER INSTEAD OF REPLACING IT. `d.assigned_ip ?? "—"` became
@@ -268,7 +267,9 @@ export function addressLabel(assignedIp: string | undefined | null): string {
  * ⛔ THERE IS NO `protocol` FIELD ON `Device` — measured. This is a derivation from a REQUIRED field, which is
  * why it is safe: `public_key` cannot go absent without the schema changing.
  */
-export function deviceProtocol(publicKey: string | undefined): "WireGuard" | "OpenVPN" {
+export function deviceProtocol(
+  publicKey: string | undefined,
+): "WireGuard" | "OpenVPN" {
   return publicKey && publicKey.length > 0 ? "WireGuard" : "OpenVPN";
 }
 
@@ -301,7 +302,9 @@ const NON_REPORTING: Record<string, true> = {
   linux: true, // the CLI and the node agent run here; no posture-reporting desktop client does
 };
 
-export function posturePlatformSupported(platform: string | undefined): boolean {
+export function posturePlatformSupported(
+  platform: string | undefined,
+): boolean {
   if (!platform) return true;
   const p = platform.toLowerCase();
   if (REPORTING_ALIASES[p]) return true;
@@ -332,7 +335,10 @@ export type DeviceFilter = "all" | "attention" | "revoked";
  * on a device that cannot come back, which is the same defect as showing it a re-export badge.
  */
 export function needsAttention(
-  d: Pick<Device, "status" | "health_blocked" | "health_state" | "needs_reexport">,
+  d: Pick<
+    Device,
+    "status" | "health_blocked" | "health_state" | "needs_reexport"
+  >,
 ): boolean {
   if (d.status === "revoked") return false;
   return (
@@ -344,7 +350,10 @@ export function needsAttention(
 }
 
 export function applyDeviceFilter<
-  T extends Pick<Device, "status" | "health_blocked" | "health_state" | "needs_reexport">,
+  T extends Pick<
+    Device,
+    "status" | "health_blocked" | "health_state" | "needs_reexport"
+  >,
 >(devices: T[], f: DeviceFilter): T[] {
   if (f === "attention") return devices.filter(needsAttention);
   if (f === "revoked") return devices.filter((d) => d.status === "revoked");
@@ -356,7 +365,10 @@ export function applyDeviceFilter<
  * `attention + revoked < all` — arithmetic that reads as a bug unless the screen says why.
  */
 export function deviceFilterCounts<
-  T extends Pick<Device, "status" | "health_blocked" | "health_state" | "needs_reexport">,
+  T extends Pick<
+    Device,
+    "status" | "health_blocked" | "health_state" | "needs_reexport"
+  >,
 >(devices: T[]): { all: number; attention: number; revoked: number } {
   return {
     all: devices.length,

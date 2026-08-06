@@ -52,6 +52,7 @@ vi.mock("../src/lib/api", async () => {
 });
 
 import { MemoryRouter } from "react-router-dom";
+import { OrgProvider } from "../src/lib/useOrg";
 import { AppShell, NAV_DESTINATIONS } from "../src/components/AppShell";
 import { LayoutCapabilityProvider } from "../src/components/ComposeGate";
 import { capabilityFor, type LayoutIntent } from "../src/lib/layout";
@@ -65,7 +66,9 @@ function renderShell(intent: LayoutIntent) {
     <MemoryRouter initialEntries={["/dashboard"]}>
       <LayoutCapabilityProvider value={capabilityFor(intent)}>
         <AuthProvider>
-          <AppShell />
+          <OrgProvider>
+            <AppShell />
+          </OrgProvider>
         </AuthProvider>
       </LayoutCapabilityProvider>
     </MemoryRouter>,
@@ -161,11 +164,13 @@ describe("COMPOSITION IS ABSENT BELOW THE FLOOR — asserted BY ROLE, so `displa
   function renderAccess(intent: LayoutIntent) {
     return render(
       <MemoryRouter>
+        <OrgProvider>
         <LayoutCapabilityProvider value={capabilityFor(intent)}>
           <AuthProvider>
             <Access />
           </AuthProvider>
         </LayoutCapabilityProvider>
+      </OrgProvider>
       </MemoryRouter>,
     );
   }

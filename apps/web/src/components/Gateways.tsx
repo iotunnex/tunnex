@@ -278,7 +278,9 @@ export function Gateways({
         },
       );
       if (e) {
-        setError(apiErrorMessage(e, "Could not restore this gateway's devices."));
+        setError(
+          apiErrorMessage(e, "Could not restore this gateway's devices."),
+        );
         return;
       }
       const restored = data?.restored ?? 0;
@@ -366,27 +368,27 @@ export function Gateways({
       <ErrorText>{error}</ErrorText>
 
       {renderList && (
-      <ul className="mt-3 space-y-2">
-        {nodes.map((n) => (
-          <li
-            key={n.id}
-            className="flex items-center justify-between rounded-lg border border-white/5 bg-ink-900 px-4 py-2.5"
-          >
-            <div>
-              <span className="text-sm text-white">{n.name}</span>
-              <span className="ml-2 font-mono text-xs text-slate-500">
-                {n.agent_version}
-              </span>
-              {n.status === "revoked" && (
-                <span className="ml-2 text-xs text-rose-400">revoked</span>
-              )}
-              {/* WF-S11-10: no health badge on a revoked gateway — `revoked` IS its state, and a degradation
+        <ul className="mt-3 space-y-2">
+          {nodes.map((n) => (
+            <li
+              key={n.id}
+              className="flex items-center justify-between rounded-lg border border-white/5 bg-ink-900 px-4 py-2.5"
+            >
+              <div>
+                <span className="text-sm text-white">{n.name}</span>
+                <span className="ml-2 font-mono text-xs text-slate-500">
+                  {n.agent_version}
+                </span>
+                {n.status === "revoked" && (
+                  <span className="ml-2 text-xs text-rose-400">revoked</span>
+                )}
+                {/* WF-S11-10: no health badge on a revoked gateway — `revoked` IS its state, and a degradation
                   badge beside it describes a gateway that is no longer meant to work. Matches the same
                   suppression Devices.tsx has always applied to device rows; this list never had it, which stayed
                   invisible only while the badges were vague ("degraded") rather than instructional. */}
-              {/* S14.21: `n.status !== "revoked" &&` removed — policyHealthBadge now refuses a verdict
+                {/* S14.21: `n.status !== "revoked" &&` removed — policyHealthBadge now refuses a verdict
                   for a revoked node itself, so restating it here implied the callee does not. */}
-              {(() => {
+                {(() => {
                   const b = policyHealthBadge(n);
                   return b ? (
                     <span className={`ml-2 text-xs ${badgeClass(b.tone)}`}>
@@ -394,127 +396,129 @@ export function Gateways({
                     </span>
                   ) : null;
                 })()}
-              {/* S9.1 4d: OpenVPN refuse-loudly surfaced (a different axis from policy health) — an
+                {/* S9.1 4d: OpenVPN refuse-loudly surfaced (a different axis from policy health) — an
                   OVPN-enabled gateway missing its material/binary shows WHY, and keeps serving WireGuard. */}
-              {n.ovpn_health && (
-                <span
-                  className="ml-2 text-xs text-amber-400"
-                  title="This gateway has OpenVPN enabled but is not serving it. Resolves on its own once the material, binary or config is corrected."
-                >
-                  {n.ovpn_health === "ovpn_binary_absent"
-                    ? "OpenVPN: binary missing"
-                    : n.ovpn_health === "ovpn_transit_conflict"
-                      ? "OpenVPN: address conflict"
-                      : "OpenVPN: certs missing"}
+                {n.ovpn_health && (
+                  <span
+                    className="ml-2 text-xs text-amber-400"
+                    title="This gateway has OpenVPN enabled but is not serving it. Resolves on its own once the material, binary or config is corrected."
+                  >
+                    {n.ovpn_health === "ovpn_binary_absent"
+                      ? "OpenVPN: binary missing"
+                      : n.ovpn_health === "ovpn_transit_conflict"
+                        ? "OpenVPN: address conflict"
+                        : "OpenVPN: certs missing"}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-500">
+                  {n.last_seen_at
+                    ? `last seen ${relativeAge(n.last_seen_at)}`
+                    : "never connected"}
                 </span>
-              )}
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-slate-500">
-                {n.last_seen_at
-                  ? `last seen ${relativeAge(n.last_seen_at)}`
-                  : "never connected"}
-              </span>
-              {/* WF-S11-9. Two-step, because this is irreversible AND wider than it looks: revoking a gateway
+                {/* WF-S11-9. Two-step, because this is irreversible AND wider than it looks: revoking a gateway
                   refuses its cert renewal, so every device homed there loses its tunnel and any site transit
                   through it stops. A one-click danger button next to a "last seen" label is a misclick away
                   from an outage. */}
-              {n.status === "active" &&
-                (confirmRevoke === n.id ? (
-                  <span className="flex items-center gap-2">
-                    <span className="text-xs text-rose-300">
-                      Revoke {n.name}? Devices homed here lose their tunnel.
-                      This cannot be undone.
+                {n.status === "active" &&
+                  (confirmRevoke === n.id ? (
+                    <span className="flex items-center gap-2">
+                      <span className="text-xs text-rose-300">
+                        Revoke {n.name}? Devices homed here lose their tunnel.
+                        This cannot be undone.
+                      </span>
+                      <Button
+                        variant="danger"
+                        onClick={() => revoke(n.id)}
+                        disabled={revoking === n.id}
+                      >
+                        {revoking === n.id ? "Revoking…" : "Confirm revoke"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => setConfirmRevoke(null)}
+                        disabled={revoking === n.id}
+                      >
+                        Cancel
+                      </Button>
                     </span>
-                    <Button
-                      variant="danger"
-                      onClick={() => revoke(n.id)}
-                      disabled={revoking === n.id}
-                    >
-                      {revoking === n.id ? "Revoking…" : "Confirm revoke"}
-                    </Button>
+                  ) : (
                     <Button
                       variant="ghost"
-                      onClick={() => setConfirmRevoke(null)}
-                      disabled={revoking === n.id}
+                      onClick={() => setConfirmRevoke(n.id)}
                     >
-                      Cancel
+                      Revoke
                     </Button>
-                  </span>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    onClick={() => setConfirmRevoke(n.id)}
-                  >
-                    Revoke
-                  </Button>
-                ))}
-              {/* S13.1 Slice 7 — only on a REVOKED gateway, because that is the only state whose devices are
+                  ))}
+                {/* S13.1 Slice 7 — only on a REVOKED gateway, because that is the only state whose devices are
                   stranded: re-key brings back a gateway that expired, and D3 refuses to re-key one that was
                   revoked. Withheld entirely when there is no live gateway to restore onto, rather than offered
                   and then refused. */}
-              {n.status === "revoked" &&
-                liveGateways.length > 0 &&
-                (restoreFrom === n.id ? (
-                  <span className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400">Restore its devices onto</span>
-                    <select
-                      className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-200"
-                      value={restoreTarget}
-                      onChange={(e) => setRestoreTarget(e.target.value)}
-                      aria-label="Replacement gateway"
-                    >
-                      <option value="">Choose a gateway…</option>
-                      {liveGateways.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                    <Button
-                      variant="primary"
-                      onClick={() => restoreDevices(n.id)}
-                      disabled={restoring || restoreTarget === ""}
-                    >
-                      {restoring ? "Restoring…" : "Restore devices"}
-                    </Button>
+                {n.status === "revoked" &&
+                  liveGateways.length > 0 &&
+                  (restoreFrom === n.id ? (
+                    <span className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400">
+                        Restore its devices onto
+                      </span>
+                      <select
+                        className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-200"
+                        value={restoreTarget}
+                        onChange={(e) => setRestoreTarget(e.target.value)}
+                        aria-label="Replacement gateway"
+                      >
+                        <option value="">Choose a gateway…</option>
+                        {liveGateways.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        variant="primary"
+                        onClick={() => restoreDevices(n.id)}
+                        disabled={restoring || restoreTarget === ""}
+                      >
+                        {restoring ? "Restoring…" : "Restore devices"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setRestoreFrom(null);
+                          setRestoreTarget("");
+                        }}
+                        disabled={restoring}
+                      >
+                        Cancel
+                      </Button>
+                    </span>
+                  ) : (
                     <Button
                       variant="ghost"
                       onClick={() => {
-                        setRestoreFrom(null);
-                        setRestoreTarget("");
+                        setRestoreResult(null);
+                        setRestoreFrom(n.id);
                       }}
-                      disabled={restoring}
                     >
-                      Cancel
+                      Restore devices
                     </Button>
-                  </span>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      setRestoreResult(null);
-                      setRestoreFrom(n.id);
-                    }}
-                  >
-                    Restore devices
-                  </Button>
-                ))}
-            </div>
-          </li>
-        ))}
-        {restoreResult && (
-          <li className="text-xs text-emerald-300" role="status">
-            {restoreResult}
-          </li>
-        )}
-        {nodes.length === 0 && (
-          <li className="text-sm text-slate-500">
-            No gateway enrolled yet. Enroll one to start serving WireGuard
-            peers.
-          </li>
-        )}
-      </ul>
+                  ))}
+              </div>
+            </li>
+          ))}
+          {restoreResult && (
+            <li className="text-xs text-emerald-300" role="status">
+              {restoreResult}
+            </li>
+          )}
+          {nodes.length === 0 && (
+            <li className="text-sm text-slate-500">
+              No gateway enrolled yet. Enroll one to start serving WireGuard
+              peers.
+            </li>
+          )}
+        </ul>
       )}
 
       {/* One-time join-token CEREMONY — the token authenticates a new agent on its

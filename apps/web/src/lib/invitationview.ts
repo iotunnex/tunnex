@@ -71,7 +71,9 @@ export function canRevoke(s: InvitationState): boolean {
 export type InviteGate = { kind: "hidden" } | { kind: "ready" };
 
 export function inviteGate(role: Role | null | undefined): InviteGate {
-  return role && can(role, "member:invite") ? { kind: "ready" } : { kind: "hidden" };
+  return role && can(role, "member:invite")
+    ? { kind: "ready" }
+    : { kind: "hidden" };
 }
 
 export function stateLabel(s: InvitationState): string {
@@ -122,16 +124,11 @@ const RANK: Record<InvitationState, number> = {
   accepted: 3,
 };
 
-export function orderInvitations(
-  rows: Invitation[],
-  now: Date,
-): Invitation[] {
+export function orderInvitations(rows: Invitation[], now: Date): Invitation[] {
   return [...rows].sort((a, b) => {
     const d = RANK[invitationState(a, now)] - RANK[invitationState(b, now)];
     if (d !== 0) return d;
-    return (
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 }
 

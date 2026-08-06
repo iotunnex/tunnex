@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  cleanup,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 // THE FIRST COMPONENT TEST IN THIS REPO, and it exists for a gap the pure tier cannot close.
@@ -25,29 +31,43 @@ vi.mock("../src/lib/api", () => ({
   apiErrorMessage: (_e: unknown, fallback: string) => fallback,
   api: {
     GET: vi.fn(async (path: string) => {
-      if (path === "/api/v1/organizations") return { data: [{ id: "org-1", name: "Acme" }] };
+      if (path === "/api/v1/organizations")
+        return { data: [{ id: "org-1", name: "Acme" }] };
       if (path.endsWith("/nodes")) {
         return {
           data: [
             // REVOKED and FIRST — ListNodes orders by created_at, so this is what `nodes[0]` used to select.
-            { id: "revoked-oldest", name: "aws-gw-1", status: "revoked", agent_version: "0.1.0" },
-            { id: "live-gateway", name: "aws-gw-2", status: "active", agent_version: "0.1.0" },
+            {
+              id: "revoked-oldest",
+              name: "aws-gw-1",
+              status: "revoked",
+              agent_version: "0.1.0",
+            },
+            {
+              id: "live-gateway",
+              name: "aws-gw-2",
+              status: "active",
+              agent_version: "0.1.0",
+            },
           ],
         };
       }
       return { data: [] };
     }),
-    POST: vi.fn(async (path: string, opts: { body: Record<string, unknown> }) => {
-      posts.push({ path, body: opts.body });
-      if (createFails) return { error: { error: { message: "refused" } } };
-      return { data: { device: { status: "active" }, config: "wg-conf" } };
-    }),
+    POST: vi.fn(
+      async (path: string, opts: { body: Record<string, unknown> }) => {
+        posts.push({ path, body: opts.body });
+        if (createFails) return { error: { error: { message: "refused" } } };
+        return { data: { device: { status: "active" }, config: "wg-conf" } };
+      },
+    ),
   },
 }));
 
 // qrcode.react pulls a canvas-ish dependency chain that jsdom does not need for this assertion.
 vi.mock("qrcode.react", () => ({ QRCodeSVG: () => null }));
 
+import { OrgProvider } from "../src/lib/useOrg";
 import Devices from "../src/pages/Devices";
 
 // ⚠ NO CLEANUP EXISTED IN THIS FILE. That was survivable while every test rendered once; the moment two
@@ -66,7 +86,9 @@ describe("device creation homes on an ACTIVE gateway (S13.1 Slice 3 — the wiri
     // reason that has nothing to do with what it asserts. The assertion below is untouched.
     render(
       <MemoryRouter>
-        <Devices />
+        <OrgProvider>
+          <Devices />
+        </OrgProvider>
       </MemoryRouter>,
     );
 
@@ -74,7 +96,9 @@ describe("device creation homes on an ACTIVE gateway (S13.1 Slice 3 — the wiri
     // ⚠ The create form is a MODAL now (matching Add rule), so it has to be opened before its fields
     // exist. The subject of this test is unchanged: which gateway id the POST carries.
     fireEvent.click(await screen.findByRole("button", { name: "Add device" }));
-    const nameInput = await waitFor(() => screen.getByPlaceholderText("my-laptop"));
+    const nameInput = await waitFor(() =>
+      screen.getByPlaceholderText("my-laptop"),
+    );
     fireEvent.change(nameInput, { target: { value: "test-laptop" } });
     fireEvent.click(screen.getByRole("button", { name: /create device/i }));
 
@@ -98,12 +122,24 @@ describe("device creation homes on an ACTIVE gateway (S13.1 Slice 3 — the wiri
  */
 describe("Devices — creation is a dialog, not a permanent form", () => {
   const open = async () => {
-    render(<MemoryRouter><Devices /></MemoryRouter>);
+    render(
+      <MemoryRouter>
+        <OrgProvider>
+          <Devices />
+        </OrgProvider>
+      </MemoryRouter>,
+    );
     const btn = await screen.findByRole("button", { name: "Add device" });
     fireEvent.click(btn);
   };
   it("⛔ THE FORM IS ABSENT UNTIL ASKED FOR", async () => {
-    render(<MemoryRouter><Devices /></MemoryRouter>);
+    render(
+      <MemoryRouter>
+        <OrgProvider>
+          <Devices />
+        </OrgProvider>
+      </MemoryRouter>,
+    );
     const trigger = await screen.findByRole("button", { name: "Add device" });
     // Nothing of the form is on the page…
     expect(screen.queryByPlaceholderText("my-laptop")).toBeNull();
@@ -118,12 +154,24 @@ describe("Devices — creation is a dialog, not a permanent form", () => {
     // The first attempt kept the form's own button AND added one to the modal's action row, so two controls
     // claimed the same verb. Playwright and testing-library both call that ambiguous; an operator would too.
     await open();
-    expect(screen.getAllByRole("button", { name: /create device|export openvpn profile/i })).toHaveLength(1);
+    expect(
+      screen.getAllByRole("button", {
+        name: /create device|export openvpn profile/i,
+      }),
+    ).toHaveLength(1);
   });
 
   it("⛔ THE MIGRATION BANNER IS GONE — a first-time reader is not owed a note about where something USED to be", () => {
-    render(<MemoryRouter><Devices /></MemoryRouter>);
-    expect(screen.queryByText(/Gateways moved to their own screen/i)).toBeNull();
+    render(
+      <MemoryRouter>
+        <OrgProvider>
+          <Devices />
+        </OrgProvider>
+      </MemoryRouter>,
+    );
+    expect(
+      screen.queryByText(/Gateways moved to their own screen/i),
+    ).toBeNull();
   });
 });
 
@@ -139,18 +187,34 @@ describe("Devices — a create failure is readable where it happened", () => {
   it("⛔ THE ERROR RENDERS INSIDE THE DIALOG, AND THE DIALOG STAYS OPEN", async () => {
     createFails = true;
     try {
-    render(<MemoryRouter><Devices /></MemoryRouter>);
-    fireEvent.click(await screen.findByRole("button", { name: "Add device" }));
-    fireEvent.change(screen.getByPlaceholderText("my-laptop"), { target: { value: "x" } });
-    fireEvent.click(screen.getByRole("button", { name: /create device|export openvpn profile/i }));
+      render(
+        <MemoryRouter>
+          <OrgProvider>
+            <Devices />
+          </OrgProvider>
+        </MemoryRouter>,
+      );
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Add device" }),
+      );
+      fireEvent.change(screen.getByPlaceholderText("my-laptop"), {
+        target: { value: "x" },
+      });
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: /create device|export openvpn profile/i,
+        }),
+      );
 
-    // ⚠ The mock's apiErrorMessage returns the FALLBACK, so this asserts the string the component renders.
-    // The claim is unchanged: the refusal is readable without dismissing the thing that caused it.
-    const msg = await screen.findByText(/Could not create the device/i);
-    expect(msg).toBeTruthy();
-    // ⛔ And the dialog is STILL OPEN with the typed name intact: dismissing on error would discard the
-    // operator's input and hide the message explaining why.
-    expect((screen.getByPlaceholderText("my-laptop") as HTMLInputElement).value).toBe("x");
+      // ⚠ The mock's apiErrorMessage returns the FALLBACK, so this asserts the string the component renders.
+      // The claim is unchanged: the refusal is readable without dismissing the thing that caused it.
+      const msg = await screen.findByText(/Could not create the device/i);
+      expect(msg).toBeTruthy();
+      // ⛔ And the dialog is STILL OPEN with the typed name intact: dismissing on error would discard the
+      // operator's input and hide the message explaining why.
+      expect(
+        (screen.getByPlaceholderText("my-laptop") as HTMLInputElement).value,
+      ).toBe("x");
     } finally {
       createFails = false; // a module-level switch left set would fail every later test in this file
     }

@@ -11,6 +11,7 @@ import {
   type UserGroup,
   type ResizeConflict,
 } from "../lib/api";
+import { useOrg } from "../lib/useOrg";
 import { relativeAge } from "../lib/format";
 import { can } from "../lib/rbac";
 import {
@@ -63,6 +64,9 @@ type Provider = (typeof PROVIDERS)[number];
 type SsoView = SsoConfigView;
 
 export default function Settings() {
+  // ⛔ THE ORG COMES FROM THE SEAM (S12.5) — the page no longer picks index zero out of a list it
+  // fetched itself, which is what made a second organization unreachable.
+  const { org: currentOrg, loading: orgLoading, failed: orgFailed } = useOrg();
   const { state } = useAuth();
   const myId = state.status === "authed" ? state.user.id : "";
   const emailVerified = state.status === "authed" && state.user.email_verified;
@@ -79,19 +83,33 @@ export default function Settings() {
     let cancelled = false;
     (async () => {
       try {
-        const [{ data: m }, { data: orgs, error: orgErr }] = await Promise.all([
-          api.GET("/api/v1/meta"),
-          api.GET("/api/v1/organizations"),
-        ]);
+        // ⭐ THE ORG-LIST FETCH IS GONE FROM THIS PAGE (S12.5). It existed only to be indexed at zero.
+        // OrgProvider reads the list once for the whole shell; a page that re-fetched it would not merely
+        // waste a request, it would pick an org the switcher has no way to change.
+        const orgErr = null;
+        const { data: m } = await api.GET("/api/v1/meta");
         if (cancelled) return;
         if (m) setMeta(m);
         if (orgErr)
           return setError(
             apiErrorMessage(orgErr, "Could not load your organizations."),
           );
-        const first = orgs?.[0];
+        // ⛔ LOADING IS NOT ABSENCE (S12.5). The provider resolves the org list asynchronously, so this
+        // effect runs once with currentOrg === null before the answer exists. Treating that as "you have no
+        // organization" renders a confident, false statement — and because the second pass only sets the
+        // data, the stale error stayed on screen BESIDE the correct org name.
+        //
+        // ⚠ THREE STATES, NOT TWO: still loading (say nothing), the read failed (say THAT), genuinely no
+        // membership (say that). Collapsing the first into the third is how a slow network becomes an
+        // accusation that the user does not belong here.
+        if (orgLoading) return;
+        const first = currentOrg;
         if (!first)
-          return setError("You are not a member of any organization yet.");
+          return setError(
+            orgFailed
+              ? "Could not load your organizations."
+              : "You are not a member of any organization yet.",
+          );
         setOrg(first);
         // My role comes from my own row in the roster (no dedicated endpoint yet).
         const { data: members } = await api.GET(
@@ -112,7 +130,11 @@ export default function Settings() {
     return () => {
       cancelled = true;
     };
-  }, [myId]);
+    // ⛔ currentOrg IS A DEPENDENCY, AND ITS ABSENCE WAS A REAL BUG (S12.5). The provider resolves the org
+    // list asynchronously, so on this effect's first run currentOrg is still null. Without the dependency
+    // the effect never ran again and the page rendered "You are not a member of any organization yet" — a
+    // confident, wrong statement — permanently, for every user. The same line is what makes the switcher work.
+  }, [myId, currentOrg]);
 
   const isAdmin = can(myRole, "org:update");
   const canMachines = can(myRole, "machine:manage"); // owner-only — the GitOps operator credential panel
@@ -158,11 +180,11 @@ export default function Settings() {
             <LicenceCard orgId={org.id} canManage={myRole === "owner"} />
           </div>
         )}
-<div className="mb-3.5 break-inside-avoid">
+        <div className="mb-3.5 break-inside-avoid">
           <MfaSettings />
         </div>
 
-      {/* Directory sync renders OUTSIDE the `isAdmin` block, on purpose but NOT because of a
+        {/* Directory sync renders OUTSIDE the `isAdmin` block, on purpose but NOT because of a
           live defect — the honest version, after a mutation survivor sent me to measure.
           Settings gates its org panels on `org:update`; every idp-sync handler gates on
           `policy:manage`. Today those are held by the same user-assignable roles (owner, admin),
@@ -172,87 +194,105 @@ export default function Settings() {
           It is out here so the panel is governed by ONE gate — its own, matching the server —
           rather than silently ANDed with a different permission that merely happens to coincide.
           `idpGate` is the authority; a test pins the coincidence so a divergence is loud. */}
-      {org && (
-        <>
-          {PROVIDERS.map((pv) => (
-            <div key={pv} className="mb-3.5 break-inside-avoid">
-            <IdpSyncSection
-              orgId={org.id}
-              provider={pv}
-              role={myRole}
-              isEnterprise={meta?.edition === "enterprise"}
-              canEdit={emailVerified}
-            />
-            </div>
-          ))}
-        </>
-      )}
+        {org && (
+          <>
+            {PROVIDERS.map((pv) => (
+              <div key={pv} className="mb-3.5 break-inside-avoid">
+                <IdpSyncSection
+                  orgId={org.id}
+                  provider={pv}
+                  role={myRole}
+                  isEnterprise={meta?.edition === "enterprise"}
+                  canEdit={emailVerified}
+                />
+              </div>
+            ))}
+          </>
+        )}
 
-      {org && !isAdmin && (
-        <Card className="mt-6">
-          <p className="text-sm text-slate-400">
-            Organization settings are managed by owners and admins.
-          </p>
-        </Card>
-      )}
+        {org && !isAdmin && (
+          <Card className="mt-6">
+            <p className="text-sm text-slate-400">
+              Organization settings are managed by owners and admins.
+            </p>
+          </Card>
+        )}
 
-      {org && isAdmin && (
-        <>
-<div className="mb-3.5 break-inside-avoid">
-            <OrgSection org={org} canEdit={emailVerified} onSaved={(o) => setOrg(o)} />
-          </div>
-<div className="mb-3.5 break-inside-avoid">
-            <PoolSection org={org} canEdit={emailVerified} onResized={(o) => setOrg(o)} />
-          </div>
-          {/* SSO config is enterprise-only; hidden in the open edition per /meta
-              (watch-item b), with a muted note rather than a dead form. */}
-          {meta?.edition === "enterprise" ? (
+        {org && isAdmin && (
+          <>
             <div className="mb-3.5 break-inside-avoid">
-              <SsoSettings orgId={org.id} canEdit={emailVerified} />
+              <OrgSection
+                org={org}
+                canEdit={emailVerified}
+                onSaved={(o) => setOrg(o)}
+              />
             </div>
-          ) : (
-            <div className="mb-3.5 break-inside-avoid"><Card>
-              <h2 className="text-sm font-semibold text-slate-300">
-                Single sign-on
-              </h2>
-              <p className="mt-1 text-xs text-slate-500">
-                SSO (Google / Microsoft) is a Tunnex Enterprise feature.
-              </p>
-            </Card></div>
-          )}
-          {/* Domain capture. The gate is PERMISSION-then-EDITION (domainGate), matching
+            <div className="mb-3.5 break-inside-avoid">
+              <PoolSection
+                org={org}
+                canEdit={emailVerified}
+                onResized={(o) => setOrg(o)}
+              />
+            </div>
+            {/* SSO config is enterprise-only; hidden in the open edition per /meta
+              (watch-item b), with a muted note rather than a dead form. */}
+            {meta?.edition === "enterprise" ? (
+              <div className="mb-3.5 break-inside-avoid">
+                <SsoSettings orgId={org.id} canEdit={emailVerified} />
+              </div>
+            ) : (
+              <div className="mb-3.5 break-inside-avoid">
+                <Card>
+                  <h2 className="text-sm font-semibold text-slate-300">
+                    Single sign-on
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    SSO (Google / Microsoft) is a Tunnex Enterprise feature.
+                  </p>
+                </Card>
+              </div>
+            )}
+            {/* Domain capture. The gate is PERMISSION-then-EDITION (domainGate), matching
               CreateDomainClaim's own ordering — authorize at sso_handlers.go:180, edition at :183. */}
-<div className="mb-3.5 break-inside-avoid">
-            <DomainSection
-              orgId={org.id}
-              role={myRole}
-              isEnterprise={meta?.edition === "enterprise"}
-              canEdit={emailVerified}
-              myEmail={myEmail}
-            />
-          </div>
-          {meta?.edition === "enterprise" ? (
-<div className="mb-3.5 break-inside-avoid"><OrgMfaEnforce orgId={org.id} canEdit={emailVerified} /></div>
-          ) : (
-            <div className="mb-3.5 break-inside-avoid"><Card>
-              <h2 className="text-sm font-semibold text-slate-300">
-                Require two-factor authentication
-              </h2>
-              <p className="mt-1 text-xs text-slate-500">
-                Org-wide MFA enforcement is a Tunnex Enterprise feature.
-              </p>
-            </Card></div>
-          )}
-          {/* OpenVPN is OPEN (every edition) but OFF by default — unlock-then-opt-in (D-S9.5-OPTIN). */}
-<div className="mb-3.5 break-inside-avoid">
-            <OrgOVPNToggle org={org} canEdit={emailVerified} onSaved={(o) => setOrg(o)} />
-          </div>
-          {/* ⛔ FULL WIDTH, BECAUSE IT CONTAINS A TABLE. A data table in a 24rem column is a data table with
+            <div className="mb-3.5 break-inside-avoid">
+              <DomainSection
+                orgId={org.id}
+                role={myRole}
+                isEnterprise={meta?.edition === "enterprise"}
+                canEdit={emailVerified}
+                myEmail={myEmail}
+              />
+            </div>
+            {meta?.edition === "enterprise" ? (
+              <div className="mb-3.5 break-inside-avoid">
+                <OrgMfaEnforce orgId={org.id} canEdit={emailVerified} />
+              </div>
+            ) : (
+              <div className="mb-3.5 break-inside-avoid">
+                <Card>
+                  <h2 className="text-sm font-semibold text-slate-300">
+                    Require two-factor authentication
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Org-wide MFA enforcement is a Tunnex Enterprise feature.
+                  </p>
+                </Card>
+              </div>
+            )}
+            {/* OpenVPN is OPEN (every edition) but OFF by default — unlock-then-opt-in (D-S9.5-OPTIN). */}
+            <div className="mb-3.5 break-inside-avoid">
+              <OrgOVPNToggle
+                org={org}
+                canEdit={emailVerified}
+                onSaved={(o) => setOrg(o)}
+              />
+            </div>
+            {/* ⛔ FULL WIDTH, BECAUSE IT CONTAINS A TABLE. A data table in a 24rem column is a data table with
               every column truncated — the one section whose content genuinely needs the row. `col-span-full`
               keeps it in the same grid rather than breaking it out into a second layout that would then
               drift from this one. */}
-        </>
-      )}
+          </>
+        )}
       </div>
 
       {/* ⛔ OUTSIDE THE COLUMNS, BECAUSE A TABLE CANNOT LIVE IN ONE. Multi-column flow has no equivalent of
@@ -610,10 +650,9 @@ function IdpSyncSection({
         health: (data as IdpHealth | undefined) ?? null,
       }),
     );
-    const { data: gs } = await api.GET(
-      "/api/v1/organizations/{orgId}/groups",
-      { params: { path: { orgId } } },
-    );
+    const { data: gs } = await api.GET("/api/v1/organizations/{orgId}/groups", {
+      params: { path: { orgId } },
+    });
     if (!isCancelled() && gs) setGroups(gs as UserGroup[]);
   };
 
@@ -642,9 +681,7 @@ function IdpSyncSection({
     );
 
   const mapped = mappedGroups(groups, provider);
-  const emptyManual = groups.filter(
-    (g) => (g.origin ?? "manual") === "manual",
-  );
+  const emptyManual = groups.filter((g) => (g.origin ?? "manual") === "manual");
 
   async function saveConfig(e: FormEvent) {
     e.preventDefault();
@@ -1118,7 +1155,10 @@ function DomainSection({
 
       <p className="mt-1 text-xs text-slate-500">{CAPTURE_EFFECT}</p>
 
-      <form onSubmit={submitClaim} className="mt-3 flex flex-wrap items-end gap-3">
+      <form
+        onSubmit={submitClaim}
+        className="mt-3 flex flex-wrap items-end gap-3"
+      >
         <div className="min-w-[12rem] flex-1">
           <Field label="Domain">
             <Input
@@ -1389,12 +1429,15 @@ function SsoProvider({
     return (
       <Card>
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-white capitalize">{provider}</h3>
+          <h3 className="text-sm font-medium text-white capitalize">
+            {provider}
+          </h3>
           <span className="text-xs text-warn">status unknown</span>
         </div>
         <p className="mt-2 text-xs text-slate-400">
-          The current {providerName} SSO settings could not be read, so this shows neither “configured” nor
-          “not configured”. Refresh to try again — reconfiguring from here could overwrite a live setup.
+          The current {providerName} SSO settings could not be read, so this
+          shows neither “configured” nor “not configured”. Refresh to try again
+          — reconfiguring from here could overwrite a live setup.
         </p>
         <div className="mt-3">
           <Button variant="ghost" onClick={() => void load(() => false)}>

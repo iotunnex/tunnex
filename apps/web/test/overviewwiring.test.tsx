@@ -93,6 +93,7 @@ vi.mock("../src/lib/api", async () => {
 });
 
 import { MemoryRouter } from "react-router-dom";
+import { OrgProvider } from "../src/lib/useOrg";
 import Dashboard from "../src/pages/Dashboard";
 import { AuthProvider } from "../src/lib/auth";
 
@@ -102,9 +103,11 @@ import { AuthProvider } from "../src/lib/auth";
 const show = () =>
   render(
     <MemoryRouter>
-      <AuthProvider>
-        <Dashboard />
-      </AuthProvider>
+      <OrgProvider>
+        <AuthProvider>
+          <Dashboard />
+        </AuthProvider>
+      </OrgProvider>
     </MemoryRouter>,
   );
 
@@ -295,14 +298,18 @@ describe("HA Hub Set un-reporting member rendering", () => {
     show();
     await waitFor(() => expect(screen.getByText("HA Hub Set")).toBeTruthy());
     // Query Rule One: Query listitem by role and single-truth accessible name
-    const listItems = screen.getAllByRole("listitem", { name: /not reporting/i });
+    const listItems = screen.getAllByRole("listitem", {
+      name: /not reporting/i,
+    });
     expect(listItems.length).toEqual(1);
     expect(
-      screen.getByRole("listitem", { name: /gw-a \(primary\): not reporting/i })
+      screen.getByRole("listitem", {
+        name: /gw-a \(primary\): not reporting/i,
+      }),
     ).toBeTruthy();
     // Absence assertion: paired with positive role query above
     expect(
-      screen.queryByRole("listitem", { name: /gw-a \(primary\): hs n\/a/i })
+      screen.queryByRole("listitem", { name: /gw-a \(primary\): hs n\/a/i }),
     ).toBeNull();
   });
 });

@@ -90,13 +90,21 @@ vi.mock("../src/lib/api", async () => {
   };
 });
 
+import { OrgProvider } from "../src/lib/useOrg";
 import Access from "../src/pages/Access";
 import { AuthProvider } from "../src/lib/auth";
 
 // The REAL AuthProvider. Stubbing the context would put the TEST's copy of the role gate under assertion
 // instead of the PRODUCT's — fixture-restates-production at the seam that most invites it (docs/laws.md).
 const withAuth = (ui: React.ReactElement) =>
-  render(<AuthProvider>{ui}</AuthProvider>);
+  // ⛔ THE ORG PROVIDER IS PART OF THE AUTHENTICATED SHELL (S12.5), so it is part of the harness that
+  // stands in for it. A page rendered without it throws — deliberately: `useOrg()` refuses to guess, and a
+  // test that quietly rendered without an org would be exercising a state production never reaches.
+  render(
+    <AuthProvider>
+      <OrgProvider>{ui}</OrgProvider>
+    </AuthProvider>,
+  );
 
 beforeEach(() => {
   mode = "enforcing";
@@ -111,7 +119,11 @@ describe("Access — wiring: the screen must not claim enforcement it does not h
     // The gap in direction (a): two rules exist and are listed, but nothing is enforcing them. The screen has
     // to say so, or an admin reads a rule list as an access-control posture that the gateway is not applying.
     await waitFor(() =>
-      expect(screen.getByText("Policy not enforced. Open mesh: every device reaches every device.")).toBeTruthy(),
+      expect(
+        screen.getByText(
+          "Policy not enforced. Open mesh: every device reaches every device.",
+        ),
+      ).toBeTruthy(),
     );
     expect(screen.queryByText(/Default-deny active/)).toBeNull();
   });
@@ -154,7 +166,9 @@ describe("Access — failure path: the most consequential one in the product", (
     rulesFail = true;
     withAuth(<Access />);
     await waitFor(() =>
-      expect(screen.getByText("Rules could not be loaded. refresh to try again.")).toBeTruthy(),
+      expect(
+        screen.getByText("Rules could not be loaded. refresh to try again."),
+      ).toBeTruthy(),
     );
     // ⚠ And it must never be the table's own emptiness, which claims none EXIST.
     expect(screen.queryByText(/No rules yet/)).toBeNull();
@@ -216,7 +230,9 @@ describe("Access flow panel — the geometry contract and the type tags", () => 
       if (!el) throw new Error("flow SVG not rendered");
       return el;
     });
-    const texts = Array.from(svg.querySelectorAll("text")).map((t) => t.textContent);
+    const texts = Array.from(svg.querySelectorAll("text")).map(
+      (t) => t.textContent,
+    );
     // The fixture's rules are group -> resource, so both arms must be present and neither may be USER.
     expect(texts).toContain("RESOURCE");
     expect(texts).toContain("GROUP");
@@ -236,13 +252,17 @@ describe("Access flow panel — the geometry contract and the type tags", () => 
       return el;
     });
     const paths = Array.from(svg.querySelectorAll("path"));
-    const dashed = paths.filter((p) => p.getAttribute("stroke-dasharray") === "5 6");
+    const dashed = paths.filter(
+      (p) => p.getAttribute("stroke-dasharray") === "5 6",
+    );
     const solid = paths.filter((p) => !p.getAttribute("stroke-dasharray"));
     // BOTH arms: the fixture has a temporary rule and permanent ones, so each encoding must appear.
     expect(dashed.length).toBeGreaterThan(0);
     expect(solid.length).toBeGreaterThan(0);
     // And no path may carry the animation's old dasharray, which is what did the overriding.
-    expect(paths.some((p) => p.getAttribute("stroke-dasharray") === "1600")).toBe(false);
+    expect(
+      paths.some((p) => p.getAttribute("stroke-dasharray") === "1600"),
+    ).toBe(false);
     // The reveal lives on the GROUP, on a property nothing else encodes.
     expect(svg.querySelector("g.tnx-flow-edges")).toBeTruthy();
   });

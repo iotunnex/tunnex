@@ -32,7 +32,9 @@ export type NavCollapse = "open" | "closed";
  * storage disabled, gets the full sidebar rather than a mystery icon rail they never chose — the
  * same absent-until-known rule the nav counts and the edition seam follow.
  */
-export function readNavCollapse(store: Pick<Storage, "getItem"> | null): NavCollapse {
+export function readNavCollapse(
+  store: Pick<Storage, "getItem"> | null,
+): NavCollapse {
   try {
     return store?.getItem(NAV_STORAGE_KEY) === "closed" ? "closed" : "open";
   } catch {

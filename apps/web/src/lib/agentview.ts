@@ -1,4 +1,3 @@
-
 /**
  * The AI-agent surface's view model — S15.3.
  *
@@ -65,7 +64,8 @@ export interface AgentRow {
  * ⚠ `unknown` OUTRANKS `offline`, ALWAYS. Rendering a confident "offline" while the reporter is silent
  * blames the agent for the gateway's fault and sends an operator to debug the wrong box.
  */
-export type AgentLiveness = "revoked" | "online" | "offline" | "never" | "unknown" | "not-issued";
+export type AgentLiveness =
+  "revoked" | "online" | "offline" | "never" | "unknown" | "not-issued";
 
 export function agentLiveness(a: AgentRow): AgentLiveness {
   // ⛔ REVOKED OUTRANKS EVERY OTHER STATE, AND GETTING THIS ORDER WRONG PRODUCED THE WORST STRING ON THE
@@ -96,7 +96,11 @@ export function agentLiveness(a: AgentRow): AgentLiveness {
 export function livenessLabel(
   a: AgentRow,
   now: Date = new Date(),
-): { label: string; tone: "ok" | "warn" | "unknown" | "neutral"; detail: string } {
+): {
+  label: string;
+  tone: "ok" | "warn" | "unknown" | "neutral";
+  detail: string;
+} {
   switch (agentLiveness(a)) {
     case "revoked":
       return {
@@ -151,7 +155,10 @@ export function livenessLabel(
 /** Coarse recency, matching the Devices page's honest-precision convention. */
 function relAge(at: string | null | undefined, now: Date): string {
   if (!at) return "never";
-  const secs = Math.max(0, Math.floor((now.getTime() - new Date(at).getTime()) / 1000));
+  const secs = Math.max(
+    0,
+    Math.floor((now.getTime() - new Date(at).getTime()) / 1000),
+  );
   if (secs < 60) return `${secs}s ago`;
   if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
   if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
@@ -159,7 +166,10 @@ function relAge(at: string | null | undefined, now: Date): string {
 }
 
 /** Bytes as the operator reads them. Null stays null — an unreported counter is not zero. */
-export function formatTraffic(rx?: number | null, tx?: number | null): string | null {
+export function formatTraffic(
+  rx?: number | null,
+  tx?: number | null,
+): string | null {
   if (rx == null && tx == null) return null;
   const h = (n: number) => {
     const u = ["B", "KB", "MB", "GB", "TB"];
@@ -183,7 +193,9 @@ export function sortAgents(rows: AgentRow[]): AgentRow[] {
   // ⚠ UNATTRIBUTABLE FIRST, and it must not depend on a name — it is the one state an operator cannot
   // learn anywhere else.
   return [...rows].sort(
-    (a, b) => Number(b.unattributable) - Number(a.unattributable) || a.name.localeCompare(b.name),
+    (a, b) =>
+      Number(b.unattributable) - Number(a.unattributable) ||
+      a.name.localeCompare(b.name),
   );
 }
 
@@ -215,7 +227,6 @@ export function attributionNote(
 export const NO_AGENTS =
   "No AI agents are enrolled in this organization. An agent is enrolled with a join token, the same way a gateway is — it then appears here with the person who authorised it.";
 
-
 /**
  * ⛔ THE UNDETERMINED STATE — ITS WORDS ARE RULED, AND THEY ARE PINNED LIKE THE RENDER FLOOR.
  *
@@ -245,7 +256,9 @@ export const UNDETERMINED_DETAIL =
  */
 export type EnrolmentKind = "agent" | "gateway" | "undetermined";
 
-export function enrolmentKind(n: { enrolled_kind?: string | null }): EnrolmentKind {
+export function enrolmentKind(n: {
+  enrolled_kind?: string | null;
+}): EnrolmentKind {
   if (n.enrolled_kind === "agent") return "agent";
   if (n.enrolled_kind === "gateway") return "gateway";
   return "undetermined";
@@ -293,7 +306,10 @@ export function agentSummary(rows: Pick<AgentRow, "unattributable">[]): {
  * The heredoc is quoted ('TUNNEXEOF') so the shell performs NO expansion on the key material — an unquoted
  * heredoc would mangle any `$` in a base64 key.
  */
-export function agentConnectCommand(conf: string, ifaceName = "tunnex"): string {
+export function agentConnectCommand(
+  conf: string,
+  ifaceName = "tunnex",
+): string {
   return [
     `sudo mkdir -p /etc/wireguard && sudo tee /etc/wireguard/${ifaceName}.conf >/dev/null <<'TUNNEXEOF'`,
     conf.trim(),

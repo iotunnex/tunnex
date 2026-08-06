@@ -263,9 +263,24 @@ export default function VisualGallery() {
               failed={false}
               nodes={[
                 { id: "h", label: "hub", kind: "hub", sub: "· us-east" },
-                { id: "a", label: "eu-lan", kind: "spoke", sub: "· 10.2.0.0/16" },
-                { id: "b", label: "ap-lan", kind: "spoke", sub: "· 10.3.0.0/16" },
-                { id: "c", label: "sa-lan", kind: "spoke", sub: "· 10.4.0.0/16" },
+                {
+                  id: "a",
+                  label: "eu-lan",
+                  kind: "spoke",
+                  sub: "· 10.2.0.0/16",
+                },
+                {
+                  id: "b",
+                  label: "ap-lan",
+                  kind: "spoke",
+                  sub: "· 10.3.0.0/16",
+                },
+                {
+                  id: "c",
+                  label: "sa-lan",
+                  kind: "spoke",
+                  sub: "· 10.4.0.0/16",
+                },
               ]}
               links={[
                 { from: "h", to: "a", tone: "linked" },
@@ -346,15 +361,51 @@ export default function VisualGallery() {
             source={{ endpoint: "/x" }}
             failed={false}
             nodes={[
-              { id: "h", label: "us-east hub", kind: "hub", sub: "· transit hub" },
-              { id: "a", label: "eu-lan", kind: "spoke", sub: "· 10.2.0.0/16", value: 2, tone: "linked" },
-              { id: "b", label: "ap-lan", kind: "spoke", sub: "· 10.3.0.0/16", value: 1, tone: "degraded" },
-              { id: "c", label: "sa-lan", kind: "spoke", sub: "· 10.4.0.0/16", value: 1, tone: "down" },
+              {
+                id: "h",
+                label: "us-east hub",
+                kind: "hub",
+                sub: "· transit hub",
+              },
+              {
+                id: "a",
+                label: "eu-lan",
+                kind: "spoke",
+                sub: "· 10.2.0.0/16",
+                value: 2,
+                tone: "linked",
+              },
+              {
+                id: "b",
+                label: "ap-lan",
+                kind: "spoke",
+                sub: "· 10.3.0.0/16",
+                value: 1,
+                tone: "degraded",
+              },
+              {
+                id: "c",
+                label: "sa-lan",
+                kind: "spoke",
+                sub: "· 10.4.0.0/16",
+                value: 1,
+                tone: "down",
+              },
             ]}
             links={[
               { from: "h", to: "a", tone: "linked" },
-              { from: "h", to: "b", tone: "degraded", note: "subnet unreachable" },
-              { from: "h", to: "c", tone: "down", note: "no fresh handshake to the hub" },
+              {
+                from: "h",
+                to: "b",
+                tone: "degraded",
+                note: "subnet unreachable",
+              },
+              {
+                from: "h",
+                to: "c",
+                tone: "down",
+                note: "no fresh handshake to the hub",
+              },
             ]}
             empty="none"
           />

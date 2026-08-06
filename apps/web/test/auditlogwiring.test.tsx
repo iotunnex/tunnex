@@ -98,11 +98,19 @@ vi.mock("../src/lib/api", async () => {
   };
 });
 
+import { OrgProvider } from "../src/lib/useOrg";
 import AuditLog from "../src/pages/AuditLog";
 import { AuthProvider } from "../src/lib/auth";
 
 const withAuth = (ui: React.ReactElement) =>
-  render(<AuthProvider>{ui}</AuthProvider>);
+  // ⛔ THE ORG PROVIDER IS PART OF THE AUTHENTICATED SHELL (S12.5), so it is part of the harness that
+  // stands in for it. A page rendered without it throws — deliberately: `useOrg()` refuses to guess, and a
+  // test that quietly rendered without an org would be exercising a state production never reaches.
+  render(
+    <AuthProvider>
+      <OrgProvider>{ui}</OrgProvider>
+    </AuthProvider>,
+  );
 
 beforeEach(() => {
   queries.length = 0;
@@ -163,10 +171,16 @@ describe("AuditLog — failure path", () => {
 describe("AuditLog — the actor column names the human", () => {
   it("⛔ renders the ACTOR'S NAME for a human-actor row, not 'system'", async () => {
     withAuth(<AuditLog />);
-    const table = await waitFor(() => screen.getByRole("table", { name: /audit|activity/i }));
+    const table = await waitFor(() =>
+      screen.getByRole("table", { name: /audit|activity/i }),
+    );
     // The roster resolves u1 -> "Ada Auditor". If `actor_id` is ever renamed or dropped from the mock again,
     // this goes red instead of silently falling back.
-    await waitFor(() => expect(within(table).getAllByText("Ada Auditor").length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(within(table).getAllByText("Ada Auditor").length).toBeGreaterThan(
+        0,
+      ),
+    );
 
     // AND the fallback must NOT be what these rows render. Both halves: a name present, the fallback absent.
     const firstRow = within(table)
@@ -206,7 +220,9 @@ describe("AuditLog — the server is its pager", () => {
     // 50 body rows + 1 header. The precise number matters: "at least some" would also pass on a component
     // that rendered one row, which is a different defect wearing the same result.
     withAuth(<AuditLog />);
-    const table = await waitFor(() => screen.getByRole("table", { name: "Audit events" }));
+    const table = await waitFor(() =>
+      screen.getByRole("table", { name: "Audit events" }),
+    );
     expect(within(table).getAllByRole("row")).toHaveLength(51);
   });
 
@@ -215,7 +231,9 @@ describe("AuditLog — the server is its pager", () => {
     // controls on one screen that disagree about which set they describe.
     withAuth(<AuditLog />);
     await waitFor(() => screen.getByRole("table", { name: "Audit events" }));
-    expect(screen.getByRole("button", { name: "Load more from server" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Load more from server" }),
+    ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Next page" })).toBeNull();
     expect(screen.queryByLabelText("Rows per page")).toBeNull();
   });

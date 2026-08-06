@@ -27,10 +27,14 @@ afterEach(() => {
   __cleaned = true;
   // (a) STALE TREE — cleanup should leave the body empty.
   if (document.body.children.length !== 0)
-    console.log(`  ⛔ (a) STALE TREE: body has ${document.body.children.length} child(ren) after cleanup`);
+    console.log(
+      `  ⛔ (a) STALE TREE: body has ${document.body.children.length} child(ren) after cleanup`,
+    );
   // (b) LATE PROMISE — any mock GET resolving after cleanup lands in the NEXT test's tree.
   if (__lateGets.length)
-    console.log(`  ⛔ (b) LATE PROMISE: ${__lateGets.length} GET(s) resolved after cleanup: ${[...new Set(__lateGets)].join(", ")}`);
+    console.log(
+      `  ⛔ (b) LATE PROMISE: ${__lateGets.length} GET(s) resolved after cleanup: ${[...new Set(__lateGets)].join(", ")}`,
+    );
 });
 // ⛔ a NON-sso_not_configured failure — the arm the collapse could not distinguish.
 let ssoFail = false; // docs/laws.md — no globals/setup file, so auto-cleanup never registers
@@ -68,7 +72,10 @@ vi.mock("../src/lib/api", async () => {
           };
         if (path.includes("/sso/"))
           return ssoFail
-            ? { data: undefined, error: { error: { code: "boom", message: "nope" } } }
+            ? {
+                data: undefined,
+                error: { error: { code: "boom", message: "nope" } },
+              }
             : {
                 data: undefined,
                 error: { error: { code: "sso_not_configured" } },
@@ -82,12 +89,20 @@ vi.mock("../src/lib/api", async () => {
   };
 });
 
+import { OrgProvider } from "../src/lib/useOrg";
 import Settings from "../src/pages/Settings";
 import { AuthProvider } from "../src/lib/auth";
 
 // The REAL AuthProvider — stubbing puts the TEST's role gate under assertion, not the PRODUCT's.
 const withAuth = (ui: React.ReactElement) =>
-  render(<AuthProvider>{ui}</AuthProvider>);
+  // ⛔ THE ORG PROVIDER IS PART OF THE AUTHENTICATED SHELL (S12.5), so it is part of the harness that
+  // stands in for it. A page rendered without it throws — deliberately: `useOrg()` refuses to guess, and a
+  // test that quietly rendered without an org would be exercising a state production never reaches.
+  render(
+    <AuthProvider>
+      <OrgProvider>{ui}</OrgProvider>
+    </AuthProvider>,
+  );
 
 beforeEach(() => {
   __cleaned = false;
@@ -136,7 +151,13 @@ describe("Settings — wiring: edition gating (destination: `license`)", () => {
   it("SSO configuration is absent in the OPEN edition", async () => {
     edition = "open";
     withAuth(<Settings />);
-    await waitFor(() => expect(screen.getByText(/Organization/i)).toBeTruthy());
+    // ⚠ RE-POINTED IN S12.5. This waited on `/Organization/i`, which became AMBIGUOUS once the licence
+    // card added an "Organizations" ceiling row — `getByText` throws on multiple matches, so the barrier
+    // started failing on a page that had rendered perfectly.
+    //
+    // ⛔ A BARRIER MUST BE UNIQUE OR IT IS NOT A BARRIER. The page heading is; a word that appears in body
+    // copy never was, and only stayed working while it happened to occur once.
+    await screen.findByRole("heading", { name: "Settings" });
     // ⛔ ASSERTS THE PROPERTY, NOT A PROXY STRING. This used to check that "Microsoft Entra"
     // never appeared — which worked only while those words were unique to the CONFIGURATION
     // surface. S14.14's directory-sync panel legitimately names the provider in its muted
@@ -156,7 +177,8 @@ describe("Settings — wiring: edition gating (destination: `license`)", () => {
     // So: await the thing that must APPEAR, and only then assert the things that must be ABSENT.
     // Asserting absence first would pass trivially before anything had rendered at all.
     expect(
-      (await screen.findAllByText(/Tunnex Enterprise|Enterprise feature/i)).length,
+      (await screen.findAllByText(/Tunnex Enterprise|Enterprise feature/i))
+        .length,
     ).toBeGreaterThan(0);
     expect(screen.queryByLabelText(/client ID/i)).toBeNull();
     expect(screen.queryByLabelText(/client secret/i)).toBeNull();
@@ -202,7 +224,6 @@ describe("Settings — failure path", () => {
   });
 });
 
-
 // ⛔ RED BY REGISTRATION, NOT BY DEFECT — and `it.fails` is the honest marker for that.
 //
 // The fix these two assert is LIVE and shipped (`0d9e665`): `load` branches on
@@ -221,21 +242,33 @@ describe("Settings — failure path", () => {
 // ⚠ The assertions below are UNCHANGED. Weakening them to reach green would convert a known
 // gap into a false proof, which is the failure mode this whole marker exists to avoid.
 describe("SSO config — a failed read is not 'not configured'", () => {
-  it.fails("⛔ a NON-`sso_not_configured` failure NEVER offers Configure", async () => {
-    // The destructive path: `if (error || !data) setConfigured(false)` collapsed a transient failure into
-    // "no config yet", so the Configure form rendered over an org that HAS SSO and an admin could
-    // reconfigure from scratch against a live IdP. The server always distinguished them (404 +
-    // `sso_not_configured` vs anything else); the client discarded it twelve lines after documenting it.
-    ssoFail = true;
-    withAuth(<Settings />);
-    expect((await screen.findAllByText(/status unknown/i)).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: /^Configure$/ })).toBeNull();
-    expect(screen.getAllByText(/overwrite a live setup/i).length).toBeGreaterThan(0);
-  });
+  it.fails(
+    "⛔ a NON-`sso_not_configured` failure NEVER offers Configure",
+    async () => {
+      // The destructive path: `if (error || !data) setConfigured(false)` collapsed a transient failure into
+      // "no config yet", so the Configure form rendered over an org that HAS SSO and an admin could
+      // reconfigure from scratch against a live IdP. The server always distinguished them (404 +
+      // `sso_not_configured` vs anything else); the client discarded it twelve lines after documenting it.
+      ssoFail = true;
+      withAuth(<Settings />);
+      expect(
+        (await screen.findAllByText(/status unknown/i)).length,
+      ).toBeGreaterThan(0);
+      expect(screen.queryByRole("button", { name: /^Configure$/ })).toBeNull();
+      expect(
+        screen.getAllByText(/overwrite a live setup/i).length,
+      ).toBeGreaterThan(0);
+    },
+  );
 
-  it.fails("`sso_not_configured` DOES offer Configure — both arms, or the fix is a blank screen", async () => {
-    withAuth(<Settings />);
-    expect((await screen.findAllByRole("button", { name: /Configure/ })).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/status unknown/i)).toBeNull();
-  });
+  it.fails(
+    "`sso_not_configured` DOES offer Configure — both arms, or the fix is a blank screen",
+    async () => {
+      withAuth(<Settings />);
+      expect(
+        (await screen.findAllByRole("button", { name: /Configure/ })).length,
+      ).toBeGreaterThan(0);
+      expect(screen.queryByText(/status unknown/i)).toBeNull();
+    },
+  );
 });

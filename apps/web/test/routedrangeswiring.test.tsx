@@ -7,6 +7,8 @@ import {
   within,
 } from "@testing-library/react";
 
+import { OrgProvider } from "../src/lib/useOrg";
+
 afterEach(cleanup);
 
 // ── S14.7 — ROUTED RANGES, THE WIRING TIER ──────────────────────────────────────────────────────────────
@@ -114,7 +116,11 @@ describe("RoutedRanges — the attribution join", () => {
       ranges: ["10.20.0.0/24"],
       subnets: { s1: [approved("s1", "10.20.0.0/24")] },
     });
-    render(<RoutedRanges />);
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
     expect(await screen.findByText("Sydney")).toBeTruthy();
   });
 
@@ -128,7 +134,11 @@ describe("RoutedRanges — the attribution join", () => {
       subnets: { s1: [approved("s1", "10.20.0.0/24")] },
       holdSubnets: gate.promise,
     });
-    render(<RoutedRanges />);
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
 
     // The RANGE is already in the table — proving we are past the first request and genuinely mid-fan-out,
     // rather than asserting against a page that has not rendered at all (which would pass vacuously).
@@ -149,7 +159,11 @@ describe("RoutedRanges — the attribution join", () => {
       ranges: ["10.99.0.0/24"],
       subnets: { s1: [], s2: "fail" },
     });
-    render(<RoutedRanges />);
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
     await screen.findByRole("table", { name: /approved routed ranges/i });
     await waitFor(() =>
       expect(inTable().getByText(/could not load/i)).toBeTruthy(),
@@ -163,19 +177,28 @@ describe("RoutedRanges — the attribution join", () => {
       ranges: ["10.99.0.0/24"],
       subnets: { s1: [], s2: "fail" },
     });
-    render(<RoutedRanges />);
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
     // Without this line a reader sees some rows attributed and some not, and concludes the difference is in
     // the data rather than in the read.
-    expect(
-      await screen.findByText(/1 site could not be read/i),
-    ).toBeTruthy();
+    expect(await screen.findByText(/1 site could not be read/i)).toBeTruthy();
   });
 
   it("DOES say 'no site advertises this' when every site answered and none matched", async () => {
     // The inverse of the two tests above, and the reason they are not just asserting a constant: with a
     // complete census the screen is ALLOWED to make the negative claim, and must.
-    handler = backend({ ranges: ["10.99.0.0/24"], subnets: { s1: [], s2: [] } });
-    render(<RoutedRanges />);
+    handler = backend({
+      ranges: ["10.99.0.0/24"],
+      subnets: { s1: [], s2: [] },
+    });
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
     await screen.findByRole("table", { name: /approved routed ranges/i });
     await waitFor(() =>
       expect(inTable().getByText(/no site advertises this/i)).toBeTruthy(),
@@ -193,7 +216,11 @@ describe("RoutedRanges — the attribution join", () => {
         s1: [{ ...approved("s1", "10.20.0.0/24"), status: "pending" }],
       },
     });
-    render(<RoutedRanges />);
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
     await screen.findByRole("table", { name: /approved routed ranges/i });
     await waitFor(() =>
       expect(inTable().getByText(/no site advertises this/i)).toBeTruthy(),
@@ -210,16 +237,22 @@ describe("RoutedRanges — failure and emptiness", () => {
       path === "/api/v1/organizations"
         ? { data: ORG }
         : { error: { error: { message: "ranges down" } } };
-    render(<RoutedRanges />);
-    expect(
-      await screen.findByRole("button", { name: /retry/i }),
-    ).toBeTruthy();
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
+    expect(await screen.findByRole("button", { name: /retry/i })).toBeTruthy();
     expect(screen.queryByText(/no lan ranges are routed/i)).toBeNull();
   });
 
   it("an empty range list names the PRECONDITION, and is distinct from a failure", async () => {
     handler = backend({ ranges: [] });
-    render(<RoutedRanges />);
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
     // Empty is a first-class answer from this endpoint and the common case for a fresh org, so the copy has
     // to teach what produces a range rather than reading as something being broken.
     const empty = await screen.findByText(/no lan ranges are routed/i);
@@ -231,7 +264,11 @@ describe("RoutedRanges — failure and emptiness", () => {
     // Attribution is second-class: the rows are already correct and already rendered. Losing the enrichment
     // must not lose the subject.
     handler = backend({ ranges: ["10.20.0.0/24"], sites: "fail" });
-    render(<RoutedRanges />);
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
     await screen.findByRole("table", { name: /approved routed ranges/i });
     expect(inTable().getByText("10.20.0.0/24")).toBeTruthy();
     expect(inTable().getByText(/could not load/i)).toBeTruthy();
@@ -244,7 +281,11 @@ describe("RoutedRanges — the DNS forward gate", () => {
     // The gate is the subtlety: a forward is withheld when its resolver sits outside every routed range.
     // "None configured" sends an admin to create one that already exists.
     handler = backend({ ranges: ["10.20.0.0/24"], forwards: [] });
-    render(<RoutedRanges />);
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
     const empty = await screen.findByText(/no forwarded zones are currently/i);
     expect(empty.textContent).toMatch(/reachable/i);
     expect(empty.textContent).not.toMatch(
@@ -260,7 +301,11 @@ describe("RoutedRanges — the DNS forward gate", () => {
       ranges: ["10.20.0.0/24"],
       forwards: [{ domain: "corp.local", resolver_ip: "10.20.0.53" }],
     });
-    render(<RoutedRanges />);
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
     expect(await screen.findByText("corp.local")).toBeTruthy();
     expect(
       screen.getByText(/only when its resolver falls inside a routed range/i),
@@ -282,7 +327,11 @@ describe("RoutedRanges — the address-space map", () => {
         ],
       },
     });
-    render(<RoutedRanges />);
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
     expect(
       await screen.findByText(/pending, withheld until approved on Sites/i),
     ).toBeTruthy();
@@ -293,15 +342,27 @@ describe("RoutedRanges — the address-space map", () => {
 
   it("⛔ a 192.168 range is DRAWN — the handoff's fixed 10/8 grid would have hidden it", async () => {
     handler = backend({ ranges: ["10.10.0.0/16", "192.168.4.0/24"] });
-    render(<RoutedRanges />);
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
     // Two grids, each labelled, rather than one grid silently missing half the data.
-    expect(await screen.findByRole("img", { name: /^10\.0\.0\.0\/8/ })).toBeTruthy();
-    expect(screen.getByRole("img", { name: /^192\.168\.0\.0\/16/ })).toBeTruthy();
+    expect(
+      await screen.findByRole("img", { name: /^10\.0\.0\.0\/8/ }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("img", { name: /^192\.168\.0\.0\/16/ }),
+    ).toBeTruthy();
   });
 
   it("⛔ a range outside every private block is NAMED, not silently undrawn", async () => {
     handler = backend({ ranges: ["10.10.0.0/16", "203.0.113.0/24"] });
-    render(<RoutedRanges />);
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
     const note = await screen.findByText(/outside the private blocks/i);
     expect(note.textContent).toContain("203.0.113.0/24");
     // And it must not read as "not routed" — it is routed identically; only the drawing cannot place it.
@@ -310,7 +371,11 @@ describe("RoutedRanges — the address-space map", () => {
 
   it("renders NO map panel at all when nothing is routed, rather than an empty grid", async () => {
     handler = backend({ ranges: [] });
-    render(<RoutedRanges />);
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
     await screen.findByText(/no lan ranges are routed/i);
     expect(screen.queryByRole("img", { name: /address space/i })).toBeNull();
   });
@@ -319,7 +384,11 @@ describe("RoutedRanges — the address-space map", () => {
     // An SVG is unreadable to a screen reader and unqueryable by this tier. Same three-failures-one-cause the
     // Donut avoids. Every number the drawing carries is asserted here through its accessible name.
     handler = backend({ ranges: ["10.10.0.0/16"] });
-    render(<RoutedRanges />);
+    render(
+      <OrgProvider>
+        <RoutedRanges />
+      </OrgProvider>,
+    );
     const svg = await screen.findByRole("img", { name: /^10\.0\.0\.0\/8/ });
     const name = svg.getAttribute("aria-label") ?? "";
     expect(name).toContain("1 routed");

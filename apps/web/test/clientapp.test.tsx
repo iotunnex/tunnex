@@ -1,5 +1,11 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { ClientApp } from "../src/client/ClientApp";
 
 // ⛔ THE CLIENT SURFACE HAD NO TEST AT ALL, AND THAT IS HOW THE CONNECT BUTTON GOT INTO A STATE
@@ -41,7 +47,11 @@ function fakeBridge(over: {
       exportLog: vi.fn().mockResolvedValue("/tmp/export.txt"),
       appInfo: vi.fn().mockResolvedValue({
         version: "0.1.0",
-        update: { kind: "disabled", reason: "Automatic updates are off in this build.", detail: "not signed yet" },
+        update: {
+          kind: "disabled",
+          reason: "Automatic updates are off in this build.",
+          detail: "not signed yet",
+        },
       }),
     },
     config: {
@@ -53,7 +63,9 @@ function fakeBridge(over: {
       down: vi.fn().mockResolvedValue(undefined),
       status: vi.fn().mockResolvedValue({ state: "down" }),
       onStatusChanged: vi.fn().mockReturnValue(() => {}),
-      importConfig: vi.fn().mockResolvedValue({ address: "10.99.0.7/32", fullTunnel: false }),
+      importConfig: vi
+        .fn()
+        .mockResolvedValue({ address: "10.99.0.7/32", fullTunnel: false }),
       importedInfo: vi.fn().mockResolvedValue(null),
       forgetImported: vi.fn().mockResolvedValue(undefined),
     },
@@ -77,10 +89,16 @@ describe("the client asks the SESSION, not only the tunnel", () => {
   it("⛔ no credential renders Not signed in — never a Connect button that can only throw", async () => {
     window.tunnex = fakeBridge({ loggedIn: false });
     render(<ClientApp />);
-    await waitFor(() => expect(screen.getByRole("heading").textContent).toContain("Not signed in"));
+    await waitFor(() =>
+      expect(screen.getByRole("heading").textContent).toContain(
+        "Not signed in",
+      ),
+    );
     // The verb is browser re-auth. It must NOT be "Connect", and it must NOT collect a password:
     // the wireframe's own rule is that MFA touches the client only via browser re-auth.
-    const btn = screen.getByRole("button", { name: /sign in with your browser/i });
+    const btn = screen.getByRole("button", {
+      name: /sign in with your browser/i,
+    });
     expect(btn).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
     expect(document.querySelector('input[type="password"]')).toBeNull();
@@ -89,13 +107,19 @@ describe("the client asks the SESSION, not only the tunnel", () => {
   it("a valid session shows the tunnel state, so auth does not mask a working client", async () => {
     window.tunnex = fakeBridge({ loggedIn: true });
     render(<ClientApp />);
-    await waitFor(() => expect(screen.getByRole("heading").textContent).toContain("Disconnected"));
+    await waitFor(() =>
+      expect(screen.getByRole("heading").textContent).toContain("Disconnected"),
+    );
   });
 
   it("an EXPIRED session is the design's own state, not signed-out", async () => {
     window.tunnex = fakeBridge({ loggedIn: true, expired: true });
     render(<ClientApp />);
-    await waitFor(() => expect(screen.getByRole("heading").textContent).toContain("Session expired"));
+    await waitFor(() =>
+      expect(screen.getByRole("heading").textContent).toContain(
+        "Session expired",
+      ),
+    );
   });
 
   it("⛔ a not_authenticated rejection becomes a STATE — the exact error that reached the log", async () => {
@@ -105,18 +129,31 @@ describe("the client asks the SESSION, not only the tunnel", () => {
     const up = vi.fn().mockRejectedValue(new Error("not_authenticated"));
     window.tunnex = fakeBridge({ loggedIn: true, up });
     render(<ClientApp />);
-    await waitFor(() => expect(screen.getByRole("heading").textContent).toContain("Disconnected"));
+    await waitFor(() =>
+      expect(screen.getByRole("heading").textContent).toContain("Disconnected"),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await waitFor(() => expect(screen.getByRole("heading").textContent).toContain("Not signed in"));
+    await waitFor(() =>
+      expect(screen.getByRole("heading").textContent).toContain(
+        "Not signed in",
+      ),
+    );
   });
 
   it("any OTHER failure is shown verbatim rather than swallowed", async () => {
     const up = vi.fn().mockRejectedValue(new Error("helper_unreachable"));
     window.tunnex = fakeBridge({ loggedIn: true, up });
     render(<ClientApp />);
-    await waitFor(() => expect((screen.getByRole("button", { name: "Connect" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Connect" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await waitFor(() => expect(screen.getByText(/helper_unreachable/)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/helper_unreachable/)).toBeTruthy(),
+    );
   });
 
   it("⛔ sign-out is REACHABLE — the step-3 flip left it only in the web dashboard", async () => {
@@ -199,7 +236,9 @@ describe("routing mode and the server, both reachable and both unambiguous", () 
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
     expect(container.querySelector('input[type="checkbox"]')).toBeNull();
     // Two NAMED options; neither requires inferring meaning from a tick.
-    const radios = container.querySelectorAll('input[type="radio"][name="routing"]');
+    const radios = container.querySelectorAll(
+      'input[type="radio"][name="routing"]',
+    );
     expect(radios).toHaveLength(2);
     expect(screen.getByText(/All traffic/)).toBeTruthy();
     expect(screen.getByText(/Only Tunnex routes/)).toBeTruthy();
@@ -209,7 +248,9 @@ describe("routing mode and the server, both reachable and both unambiguous", () 
     window.tunnex = fakeBridge({ loggedIn: true });
     render(<ClientApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    await waitFor(() => expect(screen.getByText(/including your normal browsing/i)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/including your normal browsing/i)).toBeTruthy(),
+    );
     expect(screen.getByText(/uses your normal connection/i)).toBeTruthy();
   });
 
@@ -218,25 +259,38 @@ describe("routing mode and the server, both reachable and both unambiguous", () 
     // web dashboard, nothing called it: changing control plane meant deleting the app-data
     // directory by hand. A documented capability with no way to reach it.
     const b = fakeBridge({ loggedIn: true });
-    b.config.setServerUrl = vi.fn().mockResolvedValue({ url: "https://b.example.com", reloginRequired: true });
+    b.config.setServerUrl = vi.fn().mockResolvedValue({
+      url: "https://b.example.com",
+      reloginRequired: true,
+    });
     window.tunnex = b;
     render(<ClientApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    fireEvent.click(await screen.findByRole("button", { name: /change server/i }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /change server/i }),
+    );
     const input = await screen.findByLabelText(/control-plane url/i);
     fireEvent.change(input, { target: { value: "https://b.example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /switch server/i }));
-    await waitFor(() => expect(b.config.setServerUrl).toHaveBeenCalledWith("https://b.example.com"));
+    await waitFor(() =>
+      expect(b.config.setServerUrl).toHaveBeenCalledWith(
+        "https://b.example.com",
+      ),
+    );
   });
 
   it("⛔ the sign-out cost is stated BEFORE the switch, not discovered after", async () => {
     window.tunnex = fakeBridge({ loggedIn: true });
     render(<ClientApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    fireEvent.click(await screen.findByRole("button", { name: /change server/i }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /change server/i }),
+    );
     // A credential is only valid for its issuing server; switching revokes it. The user must be
     // told that is the price while they can still cancel.
-    expect(await screen.findByText(/signs you out and tears down the tunnel/i)).toBeTruthy();
+    expect(
+      await screen.findByText(/signs you out and tears down the tunnel/i),
+    ).toBeTruthy();
   });
 });
 
@@ -265,12 +319,18 @@ describe("the home pane stays one screen", () => {
     // not a design, it is an accumulation.
     window.tunnex = fakeBridge({ loggedIn: true });
     const { container } = render(<ClientApp />);
-    await waitFor(() => expect(screen.getByRole("heading", { name: /connected|disconnected/i })).toBeTruthy());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: /connected|disconnected/i }),
+      ).toBeTruthy(),
+    );
     expect(screen.queryByRole("button", { name: /change server/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /sign out/i })).toBeNull();
     expect(container.querySelectorAll('input[type="radio"]')).toHaveLength(0);
     // What the home pane DOES answer: am I connected, and what do I press.
-    expect(screen.getByRole("button", { name: /^(Connect|Disconnect|Cancel)$/ })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /^(Connect|Disconnect|Cancel)$/ }),
+    ).toBeTruthy();
   });
 
   it("every pane is reachable from the nav", async () => {
@@ -279,7 +339,11 @@ describe("the home pane stays one screen", () => {
     for (const name of ["Settings", "Logs", "Connection"]) {
       fireEvent.click(await screen.findByRole("button", { name }));
     }
-    expect(screen.getByRole("button", { name: "Connection" }).getAttribute("aria-current")).toBe("page");
+    expect(
+      screen
+        .getByRole("button", { name: "Connection" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
   });
 });
 
@@ -288,11 +352,17 @@ describe("the log is visible IN the client, and export tells the truth", () => {
     // A log a user cannot see is a log they will not read, and revealing a file is useless on a
     // machine where the problem is that the app will not start.
     const b = fakeBridge({ loggedIn: true });
-    b.diag.readLog = vi.fn().mockResolvedValue("[info] tunnex client started\n[error] not_authenticated");
+    b.diag.readLog = vi
+      .fn()
+      .mockResolvedValue(
+        "[info] tunnex client started\n[error] not_authenticated",
+      );
     window.tunnex = b;
     render(<ClientApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Logs" }));
-    await waitFor(() => expect(screen.getByText(/not_authenticated/)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/not_authenticated/)).toBeTruthy(),
+    );
   });
 
   it("⛔ a CANCELLED export does not claim the file was saved", async () => {
@@ -310,17 +380,23 @@ describe("the log is visible IN the client, and export tells the truth", () => {
 
   it("a completed export names the path it wrote", async () => {
     const b = fakeBridge({ loggedIn: true });
-    b.diag.exportLog = vi.fn().mockResolvedValue("/Users/x/tunnex-client-log.txt");
+    b.diag.exportLog = vi
+      .fn()
+      .mockResolvedValue("/Users/x/tunnex-client-log.txt");
     window.tunnex = b;
     render(<ClientApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Logs" }));
     fireEvent.click(await screen.findByRole("button", { name: /export/i }));
-    await waitFor(() => expect(screen.getByText(/tunnex-client-log\.txt/)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/tunnex-client-log\.txt/)).toBeTruthy(),
+    );
   });
 
   it("an unreadable log renders the FAILURE, never an empty box", async () => {
     const b = fakeBridge({ loggedIn: true });
-    b.diag.readLog = vi.fn().mockResolvedValue("Could not read the log at /x: EACCES");
+    b.diag.readLog = vi
+      .fn()
+      .mockResolvedValue("Could not read the log at /x: EACCES");
     window.tunnex = b;
     render(<ClientApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Logs" }));
@@ -333,7 +409,9 @@ describe("version, updates and the tagline", () => {
     window.tunnex = fakeBridge({ loggedIn: true });
     render(<ClientApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    await waitFor(() => expect(screen.getByText(/Tunnex v0\.1\.0/)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/Tunnex v0\.1\.0/)).toBeTruthy(),
+    );
   });
 
   it("⛔ NO 'Check for updates' button while updates cannot work — and it says why", async () => {
@@ -347,17 +425,27 @@ describe("version, updates and the tagline", () => {
     window.tunnex = fakeBridge({ loggedIn: true });
     render(<ClientApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    await waitFor(() => expect(screen.getByText(/Automatic updates are off/i)).toBeTruthy());
-    expect(screen.queryByRole("button", { name: /check for updates/i })).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByText(/Automatic updates are off/i)).toBeTruthy(),
+    );
+    expect(
+      screen.queryByRole("button", { name: /check for updates/i }),
+    ).toBeNull();
   });
 
   it("the button appears only when a check could actually run", async () => {
     const b = fakeBridge({ loggedIn: true });
-    b.diag.appInfo = vi.fn().mockResolvedValue({ version: "9.9.9", update: { kind: "ready" } });
+    b.diag.appInfo = vi
+      .fn()
+      .mockResolvedValue({ version: "9.9.9", update: { kind: "ready" } });
     window.tunnex = b;
     render(<ClientApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /check for updates/i })).toBeTruthy());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /check for updates/i }),
+      ).toBeTruthy(),
+    );
   });
 
   it("⛔ the header shows no raw tray-appearance word — that was a debug readout", async () => {
@@ -368,7 +456,9 @@ describe("version, updates and the tagline", () => {
     b.tunnel.status = vi.fn().mockResolvedValue({ state: "up" });
     window.tunnex = b;
     const { container } = render(<ClientApp />);
-    await waitFor(() => expect(screen.getByRole("heading", { name: /connected/i })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: /connected/i })).toBeTruthy(),
+    );
     for (const word of ["grey", "solid", "pulsing", "red"]) {
       expect(screen.queryByText(word)).toBeNull();
     }
@@ -390,7 +480,9 @@ describe("an imported .conf connects, and says what it gives up", () => {
     window.tunnex = b;
     render(<ClientApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    fireEvent.click(await screen.findByRole("button", { name: /import \.conf/i }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /import \.conf/i }),
+    );
     await waitFor(() => expect(b.tunnel.importConfig).toHaveBeenCalled());
   });
 
@@ -399,10 +491,16 @@ describe("an imported .conf connects, and says what it gives up", () => {
     // revoking this device is not reflected in the client. A mode degraded only in documentation
     // looks identical to the safe one, so the warning sits where the user actually is.
     const b = fakeBridge({ loggedIn: true });
-    b.tunnel.importedInfo = vi.fn().mockResolvedValue({ address: "10.99.0.7/32", fullTunnel: true });
+    b.tunnel.importedInfo = vi
+      .fn()
+      .mockResolvedValue({ address: "10.99.0.7/32", fullTunnel: true });
     window.tunnex = b;
     render(<ClientApp />);
-    await waitFor(() => expect(screen.getByText(/revocation and posture checks do not apply/i)).toBeTruthy());
+    await waitFor(() =>
+      expect(
+        screen.getByText(/revocation and posture checks do not apply/i),
+      ).toBeTruthy(),
+    );
   });
 
   it("⛔ a CANCELLED picker imports nothing and says nothing", async () => {
@@ -411,35 +509,49 @@ describe("an imported .conf connects, and says what it gives up", () => {
     window.tunnex = b;
     render(<ClientApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    fireEvent.click(await screen.findByRole("button", { name: /import \.conf/i }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /import \.conf/i }),
+    );
     await waitFor(() => expect(b.tunnel.importConfig).toHaveBeenCalled());
     // ⚠ ASSERT WHAT STAYS TRUE, NOT WHAT STAYS ABSENT. The first version of this test only checked
     // that the warning banner was missing — which it is either way, so the mutation "treat cancel
     // as an import" passed it. The state that actually distinguishes the two is the section still
     // offering to import, and no error being claimed for a cancel.
     expect(screen.getByRole("button", { name: /import \.conf/i })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /remove imported profile/i })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /remove imported profile/i }),
+    ).toBeNull();
     expect(screen.queryByText(/that did not work/i)).toBeNull();
   });
 
   it("a malformed .conf surfaces the parser's refusal rather than half-importing", async () => {
     // parseWgConf is strict because the result is handed to a ROOT helper.
     const b = fakeBridge({ loggedIn: true });
-    b.tunnel.importConfig = vi.fn().mockRejectedValue(new Error("malformed .conf line: Addres = x"));
+    b.tunnel.importConfig = vi
+      .fn()
+      .mockRejectedValue(new Error("malformed .conf line: Addres = x"));
     window.tunnex = b;
     render(<ClientApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    fireEvent.click(await screen.findByRole("button", { name: /import \.conf/i }));
-    await waitFor(() => expect(screen.getByText(/malformed \.conf line/)).toBeTruthy());
+    fireEvent.click(
+      await screen.findByRole("button", { name: /import \.conf/i }),
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/malformed \.conf line/)).toBeTruthy(),
+    );
   });
 
   it("an imported profile can be removed, returning to the account path", async () => {
     const b = fakeBridge({ loggedIn: true });
-    b.tunnel.importedInfo = vi.fn().mockResolvedValue({ address: "10.99.0.7/32", fullTunnel: false });
+    b.tunnel.importedInfo = vi
+      .fn()
+      .mockResolvedValue({ address: "10.99.0.7/32", fullTunnel: false });
     window.tunnex = b;
     render(<ClientApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    fireEvent.click(await screen.findByRole("button", { name: /remove imported profile/i }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /remove imported profile/i }),
+    );
     await waitFor(() => expect(b.tunnel.forgetImported).toHaveBeenCalled());
   });
 });
