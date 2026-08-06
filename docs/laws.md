@@ -5303,3 +5303,68 @@ even when the first instance is real.
 ⚠ **Corollary, and it is the harder half:** this near-miss was caught because the two claims arrived as an
 INSTRUCTION to write them down, which forced a look. **A law drafted unprompted gets no such trigger** —
 nobody asks it to prove its referent. The discipline has to be self-imposed at the moment of writing.
+
+### ⛔ SECOND INSTANCE, SAME SESSION, SAME TRIGGER — AND THIS TIME THE FABRICATION WAS A MEASUREMENT
+
+**S12.1, hours after the entries above.** The claim, stated as fact and handed over to be recorded:
+
+> *"e2e has been red on main for 68 days, 47 runs, zero green."*
+
+**Measured instead of written.** Every non-cancelled main CI run was pulled and each one's `e2e` job
+conclusion read from the API:
+
+| | |
+|---|---|
+| Runs of history that exist at all | **54, reaching back to 2026-07-18 — 19 days, not 68** |
+| Green | **37** |
+| Red | 17, in clusters (2026-07-18/19/23/24/25/29), **not continuously** |
+| The run before the break | **32 consecutive green, 2026-08-01 → 2026-08-04** |
+
+Every number was wrong, including the direction: the suite was **overwhelmingly green**, and the red being
+investigated was **19 hours old and one merge deep** (`f5f84a8a`, PR #91).
+
+⚠ **AND THE UNDERLYING FINDING SURVIVED THE CORRECTION INTACT** — which is the reason this is a near-miss
+and not merely an error. PR #91 *did* merge green on all three required checks while `e2e` was correctly
+reporting breakage. **The shape was right at 19 hours exactly as it would have been at ten weeks.** That is
+precisely what makes a fabricated figure dangerous: it attaches to a true finding and inherits its
+credibility, and no later reader can separate them.
+
+> ## ⛔ **A NUMBER IS A CLAIM THAT A COUNT WAS PERFORMED. INHERITING IT FROM A TRUE STORY DOES NOT PERFORM IT.**
+
+### ⭐ THE TRIGGER WAS IDENTICAL BOTH TIMES, AND THAT IS THE TRANSFERABLE PART
+
+`TrialGatewayCap` and *"68 days, 47 runs"* were both caught **because someone asked for them to be written
+down.** Being asked to record a thing is what forced the look; neither would have survived a `grep` or an
+API query, and neither got one until the writing-down demanded it.
+
+⛔ **So the corollary above is now measured rather than predicted: the request to record IS the check.**
+Two for two. The failure mode is not bad memory — it is a claim that never had a moment where anyone had
+to produce its referent.
+
+⭐ **Which means the discipline is cheap and specific: treat "write this down" as "verify this now", and
+treat every figure inside it as a separate referent needing its own command.** The finding and its count
+are two claims, and the true one does not vouch for the other.
+
+---
+
+## ⛔ A CHECK THAT NOTICES AND CANNOT BLOCK IS A CHECK THAT GETS MERGED PAST
+
+**S12.1, measured.** `e2e` is `continue-on-error` and is not one of the three required checks. PR #91
+removed the Overview liveness card, the activity feed, and moved device creation into a modal. `e2e` caught
+all of it — six failures, correctly aimed, with accurate locators — **and PR #91 merged green**, because the
+only checks that gate a merge are `gates` + `client (macos-latest)` + `client (windows-latest)`.
+
+The breakage then sat on `main` until the next PR's author read a red log that was not theirs.
+
+> ## ⛔ **AN ADVISORY CHECK DOES NOT DEGRADE GRACEFULLY INTO A WARNING. IT DEGRADES INTO A LOG NOBODY OPENS.**
+
+⚠ **AND THE HONEST COST OF FIXING IT IS WHY THIS IS HELD, NOT RULED.** `e2e` is the slowest leg and has
+**17 red runs in the 19 days of history that exist**. Making it required today blocks every merge on
+whatever produced the July clusters — which nobody has diagnosed. **Requiring a flaky check is how a team
+learns to bypass required checks**, which is strictly worse than the gap it closes.
+
+**REGISTERED, TWO ITEMS, BOTH FOR FOUNDER DISPOSITION:**
+1. **Should `e2e` become required?** Cost named above. Not answerable before item 2.
+2. **The July `e2e` red clusters** (2026-07-18/19/23/24/25/29, 17 runs). Never diagnosed. **Prerequisite for
+   item 1** — and independently worth knowing, because a suite red for six days at a stretch was reporting
+   something.
