@@ -64,6 +64,45 @@ expected to be rewritten before merge.
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
 **CURRENT (2026-07-31): EPIC 13 = GATEWAY RECOVERY — BUILD COMPLETE INCLUDING SLICE 7 on `story/S13.1-gateway-recovery` (tip `7c1a127`; Slice 7 = `120ff0c`, since then docs-only), NOT MERGED. Slice 7 (operator-initiated restore, `POST /nodes/{nodeId}/restore-devices`, new perm `device:restore`, re-homes onto a named LIVE gateway because a revoked node never returns) closed the reachability defect and is RED-PROVEN REACHABLE + UI-exposed. **REVIEW STATE POINTER = `docs/S13.1-review-state.md`** (pass 1 COMPLETE — 20 findings + F3, HELD, nothing folded, `docs/S13.1-review-pass1-findings.md`; pass 3 launched before pass 2 by ruling; pass 2 not started and must cover Slice 7). Earlier note: pass 1 was once interrupted — (run `wf_642e5fe8-1ed`: 8/8 finders done, 127/144 verifiers returned, Critic and Synthesize never ran — resumable from cache). The review remains a merge precondition. Next session = REVIEW → WALK → merge word, nothing in between.** The epic exists for one observed event: an AWS gateway went offline past its 48h cert lifetime and could not come back — `/agent/renew` lives behind the mTLS channel its expired cert can no longer authenticate to. Commit-one `docs/S13.1-decisions.md` (six walls, D1–D10 ruled). **SHIPPED:** agent precedence (`identity.Decide`, no network argument — a failed handshake structurally cannot trigger re-key; `Recover` ranked above `UseToken`) · **PoP re-key** on the public listener (RSA over `nonce ‖ CSR DER`; gate BEFORE crypto so timing is not a liveness oracle; **D3 amended: expiry authorizes, revocation REFUSES** — expiry is an absence of action, revocation is the presence of a decision) · its own path-scoped throttle + body cap (registered before `middleware.RealIP` — review #1 was exactly that) · **cascade restore** (`revoked_cause`, reclaim-first via the canonical oracle) · **Slice 6 `provisioned_ip`** (`needs_reexport` gains the ADDRESS cause for EVERY mode; ranges stay static-only; both contract rewrites + the label the census under-scoped) · **D10 second identifier** (key fingerprint: a LOST RESPONSE no longer bricks a gateway; ambiguity refuses; three implementations of one digest pinned to a golden vector; agent persists its pending key before submitting and reuses it so retries CONVERGE; migration guard forced expand/contract with both shim halves). Retroactive review pass 1 (leader election) folded — *leadership was a boolean that lies*; `ConfirmLeader` now matches `pg_locks`. **OWED BEFORE MERGE, IN ORDER: (1) the epic-end review pass — three passes by surface family (unauthenticated re-key surface · identity/cascade data path + migrations 0054–0061 · agent recovery loop), ~4.5–6M tokens, a merge precondition alongside CI and the walk, and a truncated pass is worse than none; (2) the walk per `docs/S13-boxwalk.md` — seven legs, TWO GATEWAYS MUST BE OFFLINE 48h+ BEFORE the session (`agentca.CertTTL` is a constant; the clock is the only way to make a cert expire); (3) the merge word.** **RULED — cascade-restore reachability: SLICE 7 (operator-initiated restore), built AFTER the review pass and BEFORE the walk; two conditions — authorized as a deliberate operator act (same class as minting a join token) and RED-PROVEN REACHABLE, not merely correct. Un-revoke PERMANENTLY REFUSED (it is the attack chain D3 exists to prevent); removing the mechanism refused (re-opens Wall 6). Walk Leg 4 stays a falsification attempt. The defect:** `RestoreCascadeRevokedDevices` has one caller (`Rekey`), devices are cascade-revoked in one place (`Revoke`), and `Rekey` refuses a revoked node — so the trigger may put the node into the one state that can never reach the restorer (dormant-machinery law). Four faces in the paper; walk Leg 4 is written as a falsification attempt. Retroactive **pass 2 (backup/restore)** still attaches to the next natural merge boundary. Registered: the 0061 contract migration (trigger = the release after this one) · no general rate limiting · body caps only on the two re-key routes · failover hysteresis persistence (beta-blocking, owned by the failover story).
+**CURRENT (2026-08-06): S12.1 — SINGLE BINARY AND ENTITLEMENTS — PR #92, content tip `63abf44f`
+(pre-merge).** ⛔ **THE LICENSING BANDS ARE NOW REAL.** Before this, `Community 1 · trial 2 · Starter 5 ·
+Growth 20 · Scale unlimited` existed only as prose. Nine slices: single binary (build tags gone,
+`internal/enterprise/{idpsync,policy,sso}` moved into the tree — **~1,784 lines relicensed to Apache-2.0,
+ONE-WAY, founder-ruled**) · entitlements as ONE map tier→features · `licence.Manager` (offline Ed25519,
+`tier` in the wire, verdict computed PER READ) · gateway + org ceilings **at creation only** · `POST
+/license` (owner-only, audited, key never logged, no restart) · the grace ladder · the enforcement census ·
+IdP-sync downgrade release.
+
+**The ladder:** `valid` → everything · `expired` (90 days) → paid capabilities STILL WORK, only NEW
+principals refused · `lapsed` → tier falls to Community. ⛔ **A running VPN never stops, no connected user is
+ever disconnected, running gateways are never stopped.** Gated: devices, gateways, agents. NOT gated: adding
+a member — a device is a principal, a person is a seat, and there are no seat gates.
+
+**Two deliberate asymmetries, both founder-ruled.** SSO **login is never gated** (`requireSSOAdmin` guards
+configuring SSO and claiming a domain only) — *a licence gate that prevents installing a licence is a trap,
+not enforcement*; the literal reading of "gated capabilities stop" is in the paper as recorded-AND-REJECTED
+with its reason. IdP sync's **subtractive half is never gated** — *a licence may stop granting access, it
+must never stop removing it*.
+
+**What the build found:** a gate added in front of a handler **silently re-aims every test that calls it**
+(`requireSSOAdmin` turned the blocking S4.5 secret-payload assertion into a 403 check) · the
+enterprise-tagged leg **had never run on this branch** and broke twice invisibly, because `test-editions`
+runs the open leg first and exits on its failure · slice 9 needed no gate BUILT, it needed the gate
+**CALLED** — `WithProvisioningGate` and its three reds had existed since S7.5.2 and nothing ever invoked
+them · the census initially counted its own status screen (*a screen that TELLS you the limit is not a
+limit*) · `build-editions` is now **vacuous and NOTHING replaced it**, recorded as a deletion of an
+invariant rather than deleted quietly.
+
+**Registered, not fixed:** `gateway_limit_reached` burns the join token (the refusal now SAYS so) ·
+`recent_activity` ships in `/overview` with no consumer · `StatCard`'s `tone="ok"` path is dormant machinery
+· the five stale-sealed local packages (`platform_secrets` rows from 2026-08-04) are ENVIRONMENTAL — CI's
+clean database is the authority.
+
+⚠ **NEXT STORY IS THE FOUNDER'S TO NAME. Do not start one.** Open items measured and ranked in the merge
+report: S12.3 in-app upgrade · the pre-launch key + ADMIN_TOKEN rotation · the `orgs[0]` question · D23
+deactivated owner's credential · D26 agent inherits CASCADE · Step 4 NOT NULL contract · the §7 full-surface
+walk (never run).
+
 **`misc-development` — RAPID UI/UX BRANCH, FIRST MERGE (2026-08-05) — PR #91, content tip
 `f5f84a8a` (`9c8f5bc6` pre-merge).** ⭐ **THE BRANCH STAYS OPEN** — founder-directed: a standing
 lane for rapid UI/UX iteration, not a story branch, so it is NOT deleted on merge and re-merges from the
