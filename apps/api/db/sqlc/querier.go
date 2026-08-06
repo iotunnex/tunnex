@@ -165,6 +165,7 @@ type Querier interface {
 	// counting them as "online" would be dishonest.
 	CountOnlineDevicesByOrg(ctx context.Context, arg CountOnlineDevicesByOrgParams) (int64, error)
 	CountOrganizations(ctx context.Context) (int64, error)
+	// lint:allow-deleted
 	// ⛔ INCLUDES SOFT-DELETED ROWS, DELIBERATELY, AND THAT IS THE WHOLE POINT.
 	//
 	// This answers "has this deployment ever been set up", which is a DIFFERENT question from

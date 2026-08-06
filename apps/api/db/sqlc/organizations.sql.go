@@ -93,6 +93,7 @@ const countOrganizationsEver = `-- name: CountOrganizationsEver :one
 SELECT count(*) FROM organizations
 `
 
+// lint:allow-deleted
 // ⛔ INCLUDES SOFT-DELETED ROWS, DELIBERATELY, AND THAT IS THE WHOLE POINT.
 //
 // This answers "has this deployment ever been set up", which is a DIFFERENT question from
