@@ -159,12 +159,18 @@ func TestCrossOrgRoleGrants(t *testing.T) {
 	if r, ok := m["role"].(map[string]any); !ok || r["to"] != rbac.RoleAdmin {
 		t.Errorf("the row does not say WHAT changed: %v", m["role"])
 	}
-	// ⛔ AND NOT SOMEWHERE ELSE. A deployment-wide event filed under an arbitrary org would put one
-	// tenant's history in another's feed. The grants above targeted orgA and orgB only.
+	// ⛔ AND NOT SOMEWHERE ELSE. A grant filed under an org it was not made in would put one tenant's
+	// history in another's feed. The grants above targeted orgA and orgB only.
+	//
+	// ⚠ SCOPED TO THIS TEST'S ACTOR, AND IT WAS NOT AT FIRST. The unscoped version counted every row of
+	// this action in a SHARED database and went red the moment the e2e suite exercised the same surface —
+	// reporting six strays that were somebody else's perfectly correct rows. A global assertion inside a
+	// per-test transaction is a claim about the whole deployment, which is not what this leg is checking.
 	var strays int
 	if e := tx.QueryRow(ctx, `SELECT count(*) FROM audit_logs
-	    WHERE action='member.role_granted_by_cp_admin' AND (org_id IS NULL OR org_id NOT IN ($1,$2))`,
-		orgA, orgB).Scan(&strays); e != nil {
+	    WHERE action='member.role_granted_by_cp_admin' AND actor_user_id = $3
+	      AND (org_id IS NULL OR org_id NOT IN ($1,$2))`,
+		orgA, orgB, admin).Scan(&strays); e != nil {
 		t.Fatal(e)
 	}
 	if strays != 0 {
