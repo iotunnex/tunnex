@@ -65,23 +65,38 @@ func TestSeedStatesOrgCreationCapability(t *testing.T) {
 	}
 }
 
-// ⭐ THE FIXTURE MUST STAY REPRESENTATIVE: one account that may create, several that may not.
+// ⭐ THE FIXTURE MUST STAY REPRESENTATIVE: a MINORITY holds the capability, and the majority does not.
 //
-// ⚠ A seed where everybody holds the capability tests nothing — the sixth leg of the signup boundary
-// (a member of an existing org is REFUSED) has no fixture to demonstrate it against, and a reviewer
-// clicking through sees an affordance every account has, which is not the shape a real deployment has.
+// ⚠ A seed where everybody holds it tests nothing — the sixth leg of the signup boundary (a member of an
+// existing org is REFUSED) has no fixture to demonstrate it against, and a reviewer clicking through sees
+// an affordance every account has, which is not the shape a real deployment has.
+//
+// ⛔ THE COUNT WENT FROM ONE TO TWO IN S12.6, DELIBERATELY, AND THE SECOND HOLDER IS A DIFFERENT KIND.
+// The demo owner holds it AND belongs to the demo org, so every grant they make is an ordinary in-tenant
+// act — the cross-tenant surface has nothing to be seen against. The second holder belongs to NO
+// organization, which is what a real install mints at bootstrap.
+//
+// ⚠ SO THE ASSERTION IS NO LONGER A BARE NUMBER: what matters is that holders stay the minority, which is
+// the property the number was standing in for.
 func TestSeedGrantsTheCapabilityToExactlyOneAccount(t *testing.T) {
 	src, ok := seedSources(t)["seed"]
 	if !ok {
 		t.Skip("cmd/seed not present")
 	}
 	granted := strings.Count(src, "CpAdmin: true")
-	if granted != 1 {
-		t.Errorf("⛔ cmd/seed grants org creation to %d accounts, want exactly 1 (the demo owner).\n\n"+
-			"Every account holding it makes the fixture unrepresentative: signup creates an account and "+
-			"never an organization, so the MAJORITY case a real deployment produces is an account that "+
-			"may NOT create — and the seed has to model that or the boundary has nothing to be seen "+
-			"against.", granted)
+	withheld := strings.Count(src, "CpAdmin: false")
+	if granted != 2 {
+		t.Errorf("⛔ cmd/seed grants the deployment capability to %d accounts, want exactly 2 — the demo "+
+			"owner (a holder INSIDE an org) and the deployment administrator (a holder inside NONE).\n\n"+
+			"If a third was added, say which kind of holder it models and why the two existing ones "+
+			"cannot serve; if one was removed, the cross-tenant grant fixture no longer has an actor.",
+			granted)
+	}
+	if withheld <= granted {
+		t.Errorf("⛔ cmd/seed withholds the capability from only %d accounts and grants it to %d. Signup "+
+			"creates an account and never an organization, so the MAJORITY case a real deployment "+
+			"produces is an account that may NOT create — the seed has to model that or the boundary has "+
+			"nothing to be seen against.", withheld, granted)
 	}
 	// ⛔ AND THE NO-ORG FIXTURE MUST NOT HOLD IT. DemoNoOrgEmail exists to model an account that has not
 	// been admitted — which is what onboarding.spec.ts drives to the invitation card. Granting it would

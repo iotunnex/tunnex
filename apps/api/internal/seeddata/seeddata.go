@@ -58,6 +58,54 @@ const (
 	// DemoNoOrgPassword is that user's password (development only).
 	DemoNoOrgPassword = "tunnex-demo-password"
 
+	// --- THE CROSS-TENANT FIXTURE (S12.6) ------------------------------------------------------------
+	//
+	// ⛔ THE DEPLOYMENT ADMINISTRATOR CANNOT BE THE DEMO OWNER, and that is why these rows exist. The demo
+	// owner holds `cp_admin` AND belongs to the demo org — so any grant they make is an ordinary in-tenant
+	// act, and the one property the S12.6 surface exists for (acting on an organization you are NOT in)
+	// has no fixture to be seen against. A second organization is needed for the same reason: something
+	// must be on the other side of the boundary.
+
+	// DemoCPAdminUserID holds `cp_admin` and belongs to NO organization — the deployment administrator a
+	// real install mints at bootstrap, which is exactly the account the cross-tenant grant is designed for.
+	DemoCPAdminUserID = "01900000-0000-7000-8000-000000000020"
+	// DemoCPAdminEmail is that account's login email.
+	DemoCPAdminEmail = "cpadmin@demo.tunnex.local"
+	// DemoCPAdminName is that account's display name — it is what the TARGET org's audit feed must render
+	// beside a cross-tenant grant, since the roster cannot name somebody who was never on it.
+	DemoCPAdminName = "Demo Deployment Admin"
+	// DemoCPAdminPassword is that account's password (development only).
+	DemoCPAdminPassword = "tunnex-demo-password"
+
+	// DemoSandboxOrgID is a SECOND organization the demo owner is not a member of — the far side of the
+	// tenant boundary. ⚠ Its owner is a separate account, deliberately: adding the demo owner would change
+	// what every existing spec's org switcher shows.
+	DemoSandboxOrgID = "01900000-0000-7000-8000-000000000021"
+	// DemoSandboxOrgName is the second organization's display name.
+	DemoSandboxOrgName = "Demo Sandbox"
+	// DemoSandboxOrgSlug is the second organization's slug.
+	DemoSandboxOrgSlug = "demo-sandbox"
+	// DemoSandboxOwnerUserID owns the second organization and nothing else.
+	DemoSandboxOwnerUserID = "01900000-0000-7000-8000-000000000022"
+	// DemoSandboxOwnerEmail is the second organization owner's login email.
+	DemoSandboxOwnerEmail = "sandbox-owner@demo.tunnex.local"
+	// DemoSandboxOwnerName is the second organization owner's display name.
+	DemoSandboxOwnerName = "Demo Sandbox Owner"
+	// DemoSandboxOwnerPassword is that account's password (development only).
+	DemoSandboxOwnerPassword = "tunnex-demo-password"
+
+	// DemoGranteeUserID is a verified account with NO membership, existing only to be GRANTED one across
+	// the boundary. ⛔ It is not DemoNoOrgUser: that fixture models an account awaiting an invitation and
+	// the onboarding funnel drives it to the invitation card — granting it a membership would delete the
+	// state it exists to represent.
+	DemoGranteeUserID = "01900000-0000-7000-8000-000000000023"
+	// DemoGranteeEmail is the grant target's login email.
+	DemoGranteeEmail = "grantee@demo.tunnex.local"
+	// DemoGranteeName is the grant target's display name.
+	DemoGranteeName = "Demo Grantee"
+	// DemoGranteePassword is the grant target's password (development only).
+	DemoGranteePassword = "tunnex-demo-password"
+
 	// --- ENTERPRISE seed (S7.4c) — laid down by cmd/seed-enterprise ON TOP of the
 	// base seed, never forking it. These rows exist only to let the enterprise
 	// e2e stack exercise the REAL S4.5/S4.5b assertions (SSO no-secret payload +

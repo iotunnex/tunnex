@@ -208,9 +208,90 @@ func main() {
 		os.Exit(1)
 	}
 
+	// ── THE CROSS-TENANT FIXTURE (S12.6) ─────────────────────────────────────────────────────────────
+	//
+	// ⛔ THE DEMO OWNER CANNOT DEMONSTRATE THIS SURFACE. They hold `cp_admin` and belong to the demo org,
+	// so every grant they make is an ordinary in-tenant act. The property S12.6 exists for — acting on an
+	// organization you are NOT a member of — needs a holder on the outside and an organization on the far
+	// side of the boundary. Both are seeded here; neither is a member of the other's world.
+	// ⚠ THE CAPABILITY IS WRITTEN AS A LITERAL AT EVERY CALL SITE, NEVER PASSED THROUGH A HELPER
+	// PARAMETER. `TestSeedStatesOrgCreationCapability` reads this FILE — that is the whole design, because
+	// a database query would pass on the rig where migration 0073 already backfilled — and a helper taking
+	// `cpAdmin bool` would hide the fact from the only reader that can answer for a fresh install.
+	credential := func(id uuid.UUID, email, pw string, verified bool) {
+		h, err := password.Hash(pw)
+		if err != nil {
+			logger.Error("seed_hash_failed", slog.String("email", email), slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		if err := q.SetUserPassword(ctx, sqlc.SetUserPasswordParams{ID: id, PasswordHash: &h}); err != nil {
+			logger.Error("seed_password_failed", slog.String("email", email), slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		if verified {
+			if err := q.MarkEmailVerified(ctx, id); err != nil {
+				logger.Error("seed_verify_failed", slog.String("email", email), slog.String("error", err.Error()))
+				os.Exit(1)
+			}
+		}
+	}
+
+	// ⚠ THE SECOND HOLDER, AND IT IS A MEMBER OF NOTHING. This is what a real install actually mints at
+	// bootstrap: an administrator of the DEPLOYMENT who has joined no tenant.
+	cpAdminID := uuid.MustParse(seeddata.DemoCPAdminUserID)
+	if _, err := q.UpsertUser(ctx, sqlc.UpsertUserParams{
+		ID: cpAdminID, Email: seeddata.DemoCPAdminEmail, Name: seeddata.DemoCPAdminName,
+		CpAdmin: true,
+	}); err != nil {
+		logger.Error("seed_cpadmin_user_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	credential(cpAdminID, seeddata.DemoCPAdminEmail, seeddata.DemoCPAdminPassword, true)
+
+	// A verified account with no membership, existing only to be granted one across the boundary.
+	// ⛔ NOT the no-org onboarding fixture: that one models an account awaiting an invitation, and giving
+	// it a membership would delete the state onboarding.spec.ts drives to the invitation card.
+	granteeID := uuid.MustParse(seeddata.DemoGranteeUserID)
+	if _, err := q.UpsertUser(ctx, sqlc.UpsertUserParams{
+		ID: granteeID, Email: seeddata.DemoGranteeEmail, Name: seeddata.DemoGranteeName,
+		CpAdmin: false,
+	}); err != nil {
+		logger.Error("seed_grantee_user_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	credential(granteeID, seeddata.DemoGranteeEmail, seeddata.DemoGranteePassword, true)
+
+	sandboxOrgID := uuid.MustParse(seeddata.DemoSandboxOrgID)
+	if _, err := q.UpsertOrganization(ctx, sqlc.UpsertOrganizationParams{
+		ID: sandboxOrgID, Name: seeddata.DemoSandboxOrgName, Slug: seeddata.DemoSandboxOrgSlug,
+	}); err != nil {
+		logger.Error("seed_sandbox_org_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	// ⚠ ITS OWNER IS A SEPARATE ACCOUNT ON PURPOSE. Making the demo owner a member of both would change
+	// what every existing spec's org switcher renders — a fixture addition is not licensed to alter the
+	// state other specs were written against.
+	sandboxOwnerID := uuid.MustParse(seeddata.DemoSandboxOwnerUserID)
+	if _, err := q.UpsertUser(ctx, sqlc.UpsertUserParams{
+		ID: sandboxOwnerID, Email: seeddata.DemoSandboxOwnerEmail, Name: seeddata.DemoSandboxOwnerName,
+		CpAdmin: false,
+	}); err != nil {
+		logger.Error("seed_sandbox_user_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	credential(sandboxOwnerID, seeddata.DemoSandboxOwnerEmail, seeddata.DemoSandboxOwnerPassword, true)
+	if _, err := q.UpsertMembership(ctx, sqlc.UpsertMembershipParams{
+		OrgID: sandboxOrgID, UserID: sandboxOwnerID, Role: "owner",
+	}); err != nil {
+		logger.Error("seed_sandbox_membership_failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
 	logger.Info("seed_complete",
 		slog.String("demo_org_id", seeddata.DemoOrgID),
 		slog.String("demo_owner_email", seeddata.DemoOwnerEmail),
+		slog.String("sandbox_org_id", seeddata.DemoSandboxOrgID),
+		slog.String("cp_admin_email", seeddata.DemoCPAdminEmail),
 	)
 }
 
@@ -229,8 +310,11 @@ func tableExists(ctx context.Context, pool *pgxpool.Pool, name string) (bool, er
 // counting them would wrongly block a reseed after demo data was deleted.
 func countRealOrgs(ctx context.Context, pool *pgxpool.Pool) (int64, error) {
 	var n int64
+	// ⛔ BOTH SEEDED ORGS ARE EXCLUDED, OR THE SEED REFUSES TO RE-RUN AFTER ITS OWN FIRST RUN. The guard
+	// asks "does this database hold REAL data" — a fixture row this seeder wrote is not real data, and
+	// leaving the sandbox org out of the list would have made `make seed` idempotent exactly once.
 	err := pool.QueryRow(ctx,
-		`SELECT count(*) FROM organizations WHERE id <> $1 AND deleted_at IS NULL`,
-		seeddata.DemoOrgID).Scan(&n)
+		`SELECT count(*) FROM organizations WHERE id <> $1 AND id <> $2 AND deleted_at IS NULL`,
+		seeddata.DemoOrgID, seeddata.DemoSandboxOrgID).Scan(&n)
 	return n, err
 }
