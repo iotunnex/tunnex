@@ -206,41 +206,77 @@ export function groupNotes(rows: GatewayRow[]): string[] {
 /**
  * revokeConsequence states what revoking THIS gateway costs, for the two-step confirm.
  *
- * ⛔ THE WHOLE TRUTH, IN THREE CLAUSES, AT THE MOMENT OF THE ACT.
+ * ⛔ ONE CLAUSE OF THIS CHANGED THE DAY TRANSFER SHIPPED, AND THAT IS WHY IT WAS NOT REWRITTEN EARLIER.
  *
- * 1. The devices homed here stop connecting IMMEDIATELY. Revoking cascades to them in the same
- *    transaction as the node revoke (`RevokeDevicesForNode`), so this is a disconnection, not a tidy-up.
- * 2. The gateway CANNOT BE UN-REVOKED. Measured, not assumed: `restoreNodeDevices` requires a live target
- *    gateway, and the spec says why — "a revoked gateway is never active again" (openapi.yaml:3538).
- * 3. The devices CAN BE MOVED to another gateway. Their rows survive the cascade (soft revoke, stamped
- *    `revoked_cause='cascade'`), and that survival is exactly what makes the re-home possible.
+ * The previous version said the devices homed here "stop connecting immediately", which was TRUE: revoke
+ * cascaded to them in the same transaction. It stopped being true in the commit that added the transfer
+ * step and the revoke refusal, and it was changed in that commit and not one earlier — copy describing a
+ * flow the product does not have is the defect recorded twice in docs/laws.md this cycle.
  *
- * ⛔ CLAUSE 3 IS NOT OPTIONAL. Without it the warning is a dead end, and an operator reading a dead end
- * either does not act at all or acts believing the people are simply lost. It is their way out and it is
- * true, so it belongs beside the cost rather than in documentation they will not open mid-click.
+ * WHAT IT SAYS NOW, and the split is the point:
  *
- * ⚠ THE PERMANENCE IS STATED EVEN AT ZERO DEVICES, because it is a fact about the GATEWAY and is true
- * whether or not anyone is homed there. The COUNT is what falls silent at zero — a caution that fires on
- * the harmless case is a caution nobody reads on the dangerous one.
+ *   n > 0  — the revoke will be REFUSED. So the sentence is not a warning about a cost, it is an
+ *            instruction: move them first. The server refuses with `devices_still_homed` and names the same
+ *            count, so the screen and the API tell one story.
+ *   n === 0 — the permanence, which is a fact about the GATEWAY and true whether or not anyone is homed
+ *            here. It stays at zero devices; only the count falls silent, because a caution that fires on
+ *            the harmless case is a caution nobody reads on the dangerous one.
  *
- * ⚠ AND AN UNREADABLE COUNT IS NOT ZERO. `counts === null` means the devices list failed to load; a silent
- * all-clear manufactured by a failure is the worst possible output for the one sentence whose entire job is
- * to stop a destructive click.
+ * ⚠ AND AN UNREADABLE COUNT IS NOT ZERO. `counts === null` means the devices list failed to load. A silent
+ * all-clear manufactured by a failure is the worst possible output for the one sentence whose job is to
+ * stop a destructive click — and here it would also promise a revoke the server may well refuse.
  */
 export function revokeConsequence(
   counts: Record<string, number> | null,
   nodeId: string,
 ): string {
-  const permanent = "This cannot be undone \u2014 a revoked gateway is never active again.";
+  const permanent =
+    "This cannot be undone \u2014 a revoked gateway is never active again.";
   if (counts === null)
     return (
-      `${permanent} The devices homed here could not be counted; any that are will stop ` +
-      `connecting immediately, and can be moved to another gateway afterwards.`
+      `${permanent} The devices homed here could not be counted \u2014 if any are, ` +
+      `the revoke will be refused until they are moved to another gateway.`
     );
   const n = counts[nodeId] ?? 0;
   if (n === 0) return permanent;
   return (
-    `${n} ${n === 1 ? "device is" : "devices are"} homed here and will stop connecting ` +
-    `immediately. ${permanent} The ${n === 1 ? "device" : "devices"} can be moved to another gateway.`
+    `${n} ${n === 1 ? "device is" : "devices are"} homed here, so this gateway cannot be ` +
+    `retired yet: move ${n === 1 ? "it" : "them"} to another gateway first. ${permanent}`
+  );
+}
+
+/**
+ * transferConsequence states what MOVING these devices costs — the sentence beside the destination picker.
+ *
+ * ⛔ IT LEADS WITH THE RE-IMPORT, BECAUSE THAT IS THE PART THE OPERATOR MUST PLAN FOR. Moving the row is
+ * the easy half; every issued config bakes its gateway's endpoint and public key, so a moved device holds a
+ * config naming a gateway that will not serve it. The server reports which devices need a fresh profile
+ * (`needs_reissue`), and this says so before the click rather than after it.
+ *
+ * ⛔ AND THE CROSS-SITE CLAUSE IS NOT A NICETY (D5). Site-scoped policy is evaluated against the device's
+ * GATEWAY'S SITE, so moving a device to a gateway in a different site changes WHICH RULES APPLY TO IT. That
+ * is a grant or a revocation, arriving as a side effect of maintenance. A move between sites that does not
+ * say so is a silent access change wearing a maintenance label, which is the one thing this surface must
+ * not be.
+ *
+ * ⚠ IT IS DELIBERATELY VAGUE ABOUT THE DIRECTION — "may widen or narrow" — because the screen genuinely
+ * does not know. Computing it would mean evaluating the org's whole rule set per device, and a confident
+ * wrong answer here is worse than an honest uncertain one: an operator told "nothing changes" will not
+ * check, and an operator told "this may change what they reach" will.
+ */
+export function transferConsequence(
+  count: number,
+  crossSite: boolean,
+): string {
+  const base =
+    `${count} ${count === 1 ? "device" : "devices"} will move. ` +
+    `${count === 1 ? "Its" : "Their"} current configuration names this gateway, so ` +
+    `${count === 1 ? "its owner" : "their owners"} must re-import ` +
+    `${count === 1 ? "a new profile" : "new profiles"} before reconnecting.`;
+  if (!crossSite) return base;
+  return (
+    `${base} The destination is in a DIFFERENT SITE, and site-scoped policy is evaluated against a ` +
+    `device's gateway \u2014 so the rules that apply to ${count === 1 ? "this device" : "these devices"} ` +
+    `will change, and what ${count === 1 ? "it" : "they"} can reach may widen or narrow.`
   );
 }

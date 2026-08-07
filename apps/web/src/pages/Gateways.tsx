@@ -24,6 +24,7 @@ import {
   type GatewayFilter,
   type GatewayRow,
   revokeConsequence,
+  transferConsequence,
 } from "../lib/gatewaysview";
 
 // ── S14.6 — GATEWAYS, THE SECTION PASS ──────────────────────────────────────────────────────────────────
@@ -83,6 +84,9 @@ export default function GatewaysPage() {
   // than blanking the fleet — the gateway list is this screen's subject and the site name is a courtesy.
   const [siteNames, setSiteNames] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
+  // A SUCCESS message, separate from loadError: the transfer's outcome is not an error and must not
+  // render as one, but it is the only place the re-import count is ever shown.
+  const [notice, setNotice] = useState<string | null>(null);
   const [filter, setFilter] = useState<GatewayFilter>("all");
 
   const [lic, setLic] = useState<{
@@ -98,6 +102,53 @@ export default function GatewaysPage() {
   const [homedCounts, setHomedCounts] = useState<Record<string, number> | null>(
     null,
   );
+  // The destination an operator picked for the move, per gateway being retired. Kept beside confirmRevoke
+  // rather than inside it because cancelling the revoke must forget the destination too — a stale choice
+  // silently applied to the NEXT gateway is the shape of mistake this whole screen is trying to prevent.
+  const [moveTarget, setMoveTarget] = useState<string>("");
+  const [moving, setMoving] = useState(false);
+
+  /**
+   * ⛔ THE STEP THAT COMES BEFORE THE DESTRUCTIVE ONE (S12.12 D1). Revoke is refused while devices are homed
+   * here, and this is the only way past it.
+   *
+   * ⭐ TRANSFER-FIRST MEANS NOTHING BREAKS IF THE OPERATOR WALKS AWAY. Half-done here is "devices moved, old
+   * gateway still running" — harmless, and they can pick the revoke up later. The other order's half-done
+   * state is a disconnected fleet and a gateway that can never come back.
+   *
+   * ⚠ AND THE RESULT IS REPORTED, NOT SWALLOWED. The server answers with how many configs must be
+   * re-imported, which is a different number from how many rows moved — see the transfer endpoint.
+   */
+  async function moveDevices(fromNodeId: string) {
+    if (!org || !moveTarget) return;
+    setMoving(true);
+    const { data, error } = await api.POST(
+      "/api/v1/organizations/{orgId}/nodes/{nodeId}/transfer-devices",
+      {
+        params: { path: { orgId: org.id, nodeId: fromNodeId } },
+        body: { target_node_id: moveTarget },
+      },
+    );
+    setMoving(false);
+    if (error) {
+      setLoadError(apiErrorMessage(error, "Could not move the devices."));
+      return;
+    }
+    setMoveTarget("");
+    // ⛔ THE RE-IMPORT COUNT IS SURFACED, not left in the response. An operator who is not told that eleven
+    // people must re-import will find out when eleven people cannot connect, which is the failure mode this
+    // whole story exists to stop happening one layer down.
+    if (data && data.needs_reissue > 0) {
+      setNotice(
+        `${data.moved} moved. ${data.needs_reissue} of them must re-import a new configuration before ` +
+          `reconnecting \u2014 their current profile names the gateway they just left. The Devices list ` +
+          `marks them.`,
+      );
+    } else if (data) {
+      setNotice(`${data.moved} moved.`);
+    }
+    await reload();
+  }
 
   /** Revoke, then reload — the row must stop looking live the moment the server says it is not. */
   async function revokeGateway(nodeId: string) {
@@ -279,8 +330,20 @@ export default function GatewaysPage() {
        *
        * ⚠ Already-revoked rows get no button: `revoked` is terminal here, and there is no un-revoke.
        */
-      cell: (r: GatewayRow) =>
-        r.status === "revoked" ? null : confirmRevoke === r.id ? (
+      cell: (r: GatewayRow) => {
+        // The gateways this one's devices could move to: live, and not itself. Computed from the SAME rows
+        // the table renders, so a destination an operator can pick is a destination they can see.
+        const destinations = groups
+          .flatMap((g) => g.rows)
+          .filter((d) => d.id !== r.id && d.status === "active");
+        const homed = homedCounts === null ? null : (homedCounts[r.id] ?? 0);
+        const chosen = destinations.find((d) => d.id === moveTarget) ?? null;
+        // ⛔ CROSS-SITE IS A POLICY CHANGE (D5), so it is computed from what BOTH ends are bound to. Unknown
+        // on either side reads as same-site: claiming a policy change that may not happen would train
+        // operators to dismiss the sentence that matters when it does.
+        const crossSite =
+          !!chosen && !!r.siteId && !!chosen.siteId && chosen.siteId !== r.siteId;
+        return r.status === "revoked" ? null : confirmRevoke === r.id ? (
           <span className="flex flex-col items-end gap-1">
             {/* ⛔ THE COST OF THE ACT, AT THE MOMENT OF THE ACT. Revoking cascades to every device homed
                 here, so this is a disconnection, not a tidy-up — and the operator reaching for it is
@@ -290,18 +353,84 @@ export default function GatewaysPage() {
             <span className="max-w-[19rem] text-right text-micro text-warn">
               {revokeConsequence(homedCounts, r.id)}
             </span>
+            {/* ⛔ THE MOVE, IN PLACE, WHEN THERE IS SOMETHING TO MOVE. The server refuses the revoke while
+                devices are homed here, so a Confirm button in this state is a button whose only outcome is
+                a 409 — and a control that exists only to fail teaches an operator that the screen is
+                broken rather than that the order is deliberate.
+                ⚠ SHOWN WHEN THE COUNT IS UNKNOWN TOO. A failed read must not hide the step: the operator
+                can still move devices, and the alternative is a Confirm that may be refused for a reason
+                the screen chose not to mention. */}
+            {homed !== 0 && destinations.length > 0 && (
+              <span className="flex flex-col items-end gap-1">
+                <span className="flex items-center gap-2">
+                  <label
+                    htmlFor={`move-${r.id}`}
+                    className="text-micro text-ink-tertiary"
+                  >
+                    Move to
+                  </label>
+                  <select
+                    id={`move-${r.id}`}
+                    value={moveTarget}
+                    onChange={(e) => setMoveTarget(e.target.value)}
+                    className="rounded-input border border-line bg-surface-inset px-1.5 py-0.5 text-micro"
+                  >
+                    <option value="">Choose a gateway…</option>
+                    {destinations.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                        {d.siteName ? ` (${d.siteName})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void moveDevices(r.id)}
+                    disabled={moving || !moveTarget}
+                    className="text-micro font-medium text-accent hover:underline disabled:text-ink-tertiary disabled:no-underline"
+                  >
+                    {moving ? "Moving…" : "Move devices"}
+                  </button>
+                </span>
+                {/* The cost of the MOVE, stated once a destination exists to state it about — including
+                    the cross-site policy consequence, which is the clause that turns a maintenance step
+                    into an access change (D5). */}
+                {chosen && homed !== null && homed > 0 && (
+                  <span className="max-w-[19rem] text-right text-micro text-ink-tertiary">
+                    {transferConsequence(homed, crossSite)}
+                  </span>
+                )}
+              </span>
+            )}
+            {/* ⚠ NO DESTINATION EXISTS AND DEVICES ARE HOMED HERE — the one dead end this screen can
+                actually reach, so it is named rather than left as a disabled control with no explanation.
+                Enrolling a gateway is a CLI act on the operator's own server, which is why the sentence
+                points at that rather than at a button. */}
+            {homed !== null && homed > 0 && destinations.length === 0 && (
+              <span className="max-w-[19rem] text-right text-micro text-ink-tertiary">
+                There is no other live gateway to move them to. Enrol one first — this gateway cannot
+                be retired while anyone is homed to it.
+              </span>
+            )}
             <span className="flex items-center gap-2">
+            {/* ⛔ CONFIRM IS OFFERED ONLY WHEN THE COUNT IS KNOWN TO BE ZERO. Anything else is a click the
+                server will refuse. */}
+            {homed === 0 && (
+              <button
+                type="button"
+                onClick={() => void revokeGateway(r.id)}
+                disabled={revoking}
+                className="text-micro font-medium text-danger hover:underline"
+              >
+                {revoking ? "Revoking…" : "Confirm"}
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => void revokeGateway(r.id)}
-              disabled={revoking}
-              className="text-micro font-medium text-danger hover:underline"
-            >
-              {revoking ? "Revoking…" : "Confirm"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirmRevoke(null)}
+              onClick={() => {
+                setConfirmRevoke(null);
+                setMoveTarget("");
+              }}
               className="text-micro text-ink-tertiary hover:underline"
             >
               Cancel
@@ -311,12 +440,16 @@ export default function GatewaysPage() {
         ) : (
           <button
             type="button"
-            onClick={() => setConfirmRevoke(r.id)}
+            onClick={() => {
+              setConfirmRevoke(r.id);
+              setMoveTarget("");
+            }}
             className="text-micro text-ink-tertiary hover:text-danger hover:underline"
           >
             Revoke
           </button>
-        ),
+        );
+      },
     },
   ];
 
@@ -349,6 +482,21 @@ export default function GatewaysPage() {
         )}
 
       {loadError && <LoadRetry error={loadError} onRetry={reload} />}
+      {/* ⛔ THE MOVE'S OUTCOME, AND IT IS NOT AN ERROR. It carries the only number that says how many people
+          must act — how many configs are now stale — which the row count never could. Rendered above the
+          table because the rows it describes have just been re-drawn underneath it. */}
+      {notice && (
+        <div className="rounded-card border border-hairline bg-surface-inset p-3">
+          <p className="text-cell text-ink-body">{notice}</p>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="mt-1.5 text-micro text-ink-tertiary hover:underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {!loadError && (org === null || nodes === null) && (
         <p className="text-cell text-ink-faint">Loading…</p>
       )}
