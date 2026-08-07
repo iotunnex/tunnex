@@ -147,7 +147,8 @@ func TestDeleteAndRenameACompletedRetirement(t *testing.T) {
 	ex(`INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'D',$2,'10.93.0.0/24')`, org, "d-"+org.String()[:8])
 	ex(`INSERT INTO users (id,email) VALUES ($1,$2)`, owner, "dl-"+owner.String()[:8]+"@ex.com")
 	ex(`INSERT INTO memberships (org_id,user_id,role) VALUES ($1,$2,'owner')`, org, owner)
-	ex(`INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,'gw-typpo',$3)`, node, org, "s-"+node.String()[:8])
+	ex(`INSERT INTO nodes (id,org_id,name,cert_serial,endpoint) VALUES ($1,$2,'gw-typpo',$3,'gw.example.com:51820')`,
+		node, org, "s-"+node.String()[:8])
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM organizations WHERE id=$1", org) })
 	svc := NewService(pool, nil, nil)
 
@@ -159,6 +160,13 @@ func TestDeleteAndRenameACompletedRetirement(t *testing.T) {
 	}
 	if renamed.Name != "gw-london" {
 		t.Fatalf("rename must trim: %q", renamed.Name)
+	}
+	// ⛔ AND THE ENDPOINT SURVIVED THE RENAME. UpdateNodeIdentity edits both fields behind COALESCE and the
+	// rename passes nil for the endpoint — so this asserts the nil means "leave it" rather than "blank it".
+	// Silently clearing the one field D3 deliberately did NOT ship would be the worst possible outcome of
+	// not shipping it: every peer holds that endpoint and every issued config bakes it.
+	if renamed.Endpoint != "gw.example.com:51820" {
+		t.Fatalf("a rename must not touch the endpoint: %q", renamed.Endpoint)
 	}
 	if _, err := svc.RenameNode(ctx, owner, org, node, "   "); err == nil {
 		t.Fatal("an all-whitespace name must be refused, not stored — it is how an operator tells one " +
