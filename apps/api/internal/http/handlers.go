@@ -297,6 +297,39 @@ func (s apiServer) UpdateOrganization(ctx context.Context, req api.UpdateOrganiz
 	}, nil
 }
 
+// OrgDeletionPreflight implements GET /api/v1/organizations/{orgId}/deletion-preflight.
+//
+// ⛔ THE SCREEN MUST BE ABLE TO SAY WHY BEFORE THE OPERATOR COMMITS. Delete refuses while the org owns
+// anything, and a refusal that arrives only AFTER someone has typed the organization's name to confirm is
+// a refusal they met at the most dangerous possible moment — with their attention on getting past it.
+//
+// ⚠ SAME PERMISSION AS THE DELETE. A preflight is only actionable to someone who could act on it, and a
+// read-only permission for "what would block a delete" would need its own answer to who may see it.
+func (s apiServer) OrgDeletionPreflight(ctx context.Context, req api.OrgDeletionPreflightRequestObject) (api.OrgDeletionPreflightResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgDelete); err != nil {
+		return nil, err
+	}
+	r, err := s.orgs.OrgResourceCount(ctx, req.OrgId)
+	if err != nil {
+		return nil, err
+	}
+	// ⚠ THE BLOCKER STRINGS COME FROM THE SERVICE, not from the handler and not from the client — the same
+	// function the refusal message uses. Two renderings of one state is how a screen ends up saying
+	// "nothing left" beside an error saying "2 gateways".
+	blockers := r.Blockers()
+	if blockers == nil {
+		blockers = []string{}
+	}
+	return api.OrgDeletionPreflight200JSONResponse{
+		Body: api.OrgDeletionPreflight{
+			Deletable: r.Empty(), Blockers: blockers,
+			Gateways: int(r.Gateways), Devices: int(r.Devices), Sites: int(r.Sites),
+			Clusters: int(r.Clusters), MachineCredentials: int(r.MachineCredentials),
+		},
+		Headers: api.OrgDeletionPreflight200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
 // DeleteOrganization implements DELETE /api/v1/organizations/{orgId}.
 func (s apiServer) DeleteOrganization(ctx context.Context, req api.DeleteOrganizationRequestObject) (api.DeleteOrganizationResponseObject, error) {
 	ctx, err := authorize(ctx, req.OrgId, rbac.PermOrgDelete)

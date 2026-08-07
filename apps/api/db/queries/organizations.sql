@@ -107,3 +107,23 @@ SELECT id FROM organizations WHERE ovpn_enabled = true AND deleted_at IS NULL;
 -- the first organization — must key on the former. Keyed on the latter, deleting every organization
 -- REOPENS setup, and the next person to reach the URL becomes owner of the deployment.
 SELECT count(*) FROM organizations;
+
+-- name: CountOrgResources :one
+-- ⛔ WHAT MUST BE GONE BEFORE AN ORGANIZATION MAY BE DELETED (S12.8).
+--
+-- Deleting an org is a SOFT delete — the row gets `deleted_at` and nothing else happens. So every gateway,
+-- device, site, cluster and machine credential it owned keeps existing, keeps its address pool slot, and in
+-- the gateway's case KEEPS CARRYING TRAFFIC on a customer's server, now belonging to an organization no
+-- screen will ever show again. That is not a deletion, it is an abandonment.
+--
+-- ⚠ ONE QUERY, NOT FIVE ROUND TRIPS: the operator is told everything blocking them at once. A preflight
+-- that reveals one blocker per attempt is a guessing game with a destructive verb at the end of it.
+--
+-- ⚠ LIVE ROWS ONLY, matching what each table means by gone: nodes/machine credentials use `revoked_at`,
+-- devices use `deleted_at`, sites and clusters have neither and are counted whole.
+SELECT
+  (SELECT count(*) FROM nodes n WHERE n.org_id = $1 AND n.revoked_at IS NULL)::bigint AS gateways,
+  (SELECT count(*) FROM devices d WHERE d.org_id = $1 AND d.deleted_at IS NULL)::bigint AS devices,
+  (SELECT count(*) FROM sites s WHERE s.org_id = $1)::bigint AS sites,
+  (SELECT count(*) FROM k8s_clusters k WHERE k.org_id = $1)::bigint AS clusters,
+  (SELECT count(*) FROM machine_credentials m WHERE m.org_id = $1 AND m.revoked_at IS NULL)::bigint AS machine_credentials;

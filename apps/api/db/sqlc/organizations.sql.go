@@ -77,6 +77,48 @@ func (q *Queries) CountOnlineDevicesByOrg(ctx context.Context, arg CountOnlineDe
 	return count, err
 }
 
+const countOrgResources = `-- name: CountOrgResources :one
+SELECT
+  (SELECT count(*) FROM nodes n WHERE n.org_id = $1 AND n.revoked_at IS NULL)::bigint AS gateways,
+  (SELECT count(*) FROM devices d WHERE d.org_id = $1 AND d.deleted_at IS NULL)::bigint AS devices,
+  (SELECT count(*) FROM sites s WHERE s.org_id = $1)::bigint AS sites,
+  (SELECT count(*) FROM k8s_clusters k WHERE k.org_id = $1)::bigint AS clusters,
+  (SELECT count(*) FROM machine_credentials m WHERE m.org_id = $1 AND m.revoked_at IS NULL)::bigint AS machine_credentials
+`
+
+type CountOrgResourcesRow struct {
+	Gateways           int64 `json:"gateways"`
+	Devices            int64 `json:"devices"`
+	Sites              int64 `json:"sites"`
+	Clusters           int64 `json:"clusters"`
+	MachineCredentials int64 `json:"machine_credentials"`
+}
+
+// ⛔ WHAT MUST BE GONE BEFORE AN ORGANIZATION MAY BE DELETED (S12.8).
+//
+// Deleting an org is a SOFT delete — the row gets `deleted_at` and nothing else happens. So every gateway,
+// device, site, cluster and machine credential it owned keeps existing, keeps its address pool slot, and in
+// the gateway's case KEEPS CARRYING TRAFFIC on a customer's server, now belonging to an organization no
+// screen will ever show again. That is not a deletion, it is an abandonment.
+//
+// ⚠ ONE QUERY, NOT FIVE ROUND TRIPS: the operator is told everything blocking them at once. A preflight
+// that reveals one blocker per attempt is a guessing game with a destructive verb at the end of it.
+//
+// ⚠ LIVE ROWS ONLY, matching what each table means by gone: nodes/machine credentials use `revoked_at`,
+// devices use `deleted_at`, sites and clusters have neither and are counted whole.
+func (q *Queries) CountOrgResources(ctx context.Context, orgID uuid.UUID) (CountOrgResourcesRow, error) {
+	row := q.db.QueryRow(ctx, countOrgResources, orgID)
+	var i CountOrgResourcesRow
+	err := row.Scan(
+		&i.Gateways,
+		&i.Devices,
+		&i.Sites,
+		&i.Clusters,
+		&i.MachineCredentials,
+	)
+	return i, err
+}
+
 const countOrganizations = `-- name: CountOrganizations :one
 SELECT count(*) FROM organizations
 WHERE deleted_at IS NULL

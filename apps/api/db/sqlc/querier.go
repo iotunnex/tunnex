@@ -189,6 +189,19 @@ type Querier interface {
 	// the node's desired state) even though the device row stays 'active', so
 	// counting them as "online" would be dishonest.
 	CountOnlineDevicesByOrg(ctx context.Context, arg CountOnlineDevicesByOrgParams) (int64, error)
+	// ⛔ WHAT MUST BE GONE BEFORE AN ORGANIZATION MAY BE DELETED (S12.8).
+	//
+	// Deleting an org is a SOFT delete — the row gets `deleted_at` and nothing else happens. So every gateway,
+	// device, site, cluster and machine credential it owned keeps existing, keeps its address pool slot, and in
+	// the gateway's case KEEPS CARRYING TRAFFIC on a customer's server, now belonging to an organization no
+	// screen will ever show again. That is not a deletion, it is an abandonment.
+	//
+	// ⚠ ONE QUERY, NOT FIVE ROUND TRIPS: the operator is told everything blocking them at once. A preflight
+	// that reveals one blocker per attempt is a guessing game with a destructive verb at the end of it.
+	//
+	// ⚠ LIVE ROWS ONLY, matching what each table means by gone: nodes/machine credentials use `revoked_at`,
+	// devices use `deleted_at`, sites and clusters have neither and are counted whole.
+	CountOrgResources(ctx context.Context, orgID uuid.UUID) (CountOrgResourcesRow, error)
 	CountOrganizations(ctx context.Context) (int64, error)
 	// lint:allow-deleted
 	// ⛔ INCLUDES SOFT-DELETED ROWS, DELIBERATELY, AND THAT IS THE WHOLE POINT.

@@ -304,7 +304,154 @@ export default function Settings() {
           <MachineCredentials orgId={org.id} canManage={canMachines} />
         </div>
       )}
+
+      {/* ⛔ THE CAPABILITY EXISTED AND NOTHING COULD REACH IT. `DELETE /organizations/{id}` has shipped
+          since S1 with `org:delete` on it and NO CALL SITE anywhere in the web — one of the 12 genuinely
+          unreachable mutating operations the S14.12 census counted. An owner could not delete an
+          organization they created by mistake without curl.
+          ⚠ OUTSIDE THE COLUMNS AND LAST, deliberately: a destructive verb does not belong beside the name
+          field, where a mis-click lands next to routine edits. */}
+      {org && (
+        <div className="mt-3.5">
+          <DangerZone
+            org={org}
+            canDelete={can(myRole, "org:delete")}
+            role={myRole}
+          />
+        </div>
+      )}
     </div>
+  );
+}
+
+/**
+ * Deleting an organization.
+ *
+ * ⛔ OWNER-ONLY, AND AN ADMIN IS SHOWN WHY RATHER THAN SHOWN NOTHING. `org:delete` is one of the three
+ * permissions an owner holds and an admin does not; hiding the section entirely would leave an admin
+ * hunting for a control the product does have.
+ *
+ * ⛔ AND IT REFUSES WHILE THE ORGANIZATION OWNS ANYTHING. Delete here is a SOFT delete — gateways keep
+ * carrying traffic on the customer's own servers, devices keep their addresses, machine credentials keep
+ * authenticating, all owned by an organization no screen will show again. The server enforces this; this
+ * screen reads the same counts from the same function so the two can never describe the state differently.
+ */
+function DangerZone({
+  org,
+  canDelete,
+  role,
+}: {
+  org: Org;
+  canDelete: boolean;
+  role: string | undefined;
+}) {
+  const [pre, setPre] = useState<{
+    deletable: boolean;
+    blockers: string[];
+  } | null>(null);
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!canDelete) return;
+    let off = false;
+    void api
+      .GET("/api/v1/organizations/{orgId}/deletion-preflight", {
+        params: { path: { orgId: org.id } },
+      })
+      .then(({ data }) => {
+        if (!off && data) setPre({ deletable: data.deletable, blockers: data.blockers });
+      })
+      .catch(() => {});
+    return () => {
+      off = true;
+    };
+  }, [org.id, canDelete]);
+
+  if (!canDelete) {
+    return (
+      <Card>
+        <h2 className="text-sm font-semibold text-slate-300">
+          Delete this organization
+        </h2>
+        <p className="mt-2 text-sm text-slate-400">
+          {role === "admin"
+            ? "Deleting an organization is reserved for owners."
+            : "Organization settings are managed by owners and admins."}
+        </p>
+      </Card>
+    );
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+    const { error } = await api.DELETE("/api/v1/organizations/{orgId}", {
+      params: { path: { orgId: org.id } },
+    });
+    setBusy(false);
+    if (error) {
+      // ⚠ THE SERVER'S OWN WORDS. It names every blocker; a generic "could not delete" here would throw
+      // away the only sentence that tells the operator what to do next.
+      return setErr(apiErrorMessage(error, "Could not delete the organization."));
+    }
+    // ⛔ A FULL RELOAD, NOT A ROUTER NAVIGATION. The org seam holds the list in memory and has no refresh
+    // verb; a client-side route change would leave the just-deleted organization in the switcher and
+    // selected — a tenant that no longer exists, on screen, ready to be acted on. Adding a refresh method
+    // to the seam for one caller is the wider change; this is the honest small one.
+    window.location.assign("/dashboard");
+  }
+
+  const blocked = pre !== null && !pre.deletable;
+  return (
+    <Card className="border-danger/40">
+      <h2 className="text-sm font-semibold text-danger">
+        Delete this organization
+      </h2>
+      <p className="mt-2 text-sm text-slate-400">
+        This cannot be undone. Members lose access to it immediately; the
+        organization stops appearing in the switcher.
+      </p>
+
+      {/* ⛔ THE BLOCKERS ARE SHOWN BEFORE THE CONFIRMATION FIELD, NOT AFTER THE ATTEMPT. A refusal that
+          arrives only once someone has typed the organization's name to confirm is a refusal met at the
+          most dangerous moment — with their attention on getting past it. */}
+      {blocked && (
+        <div className="mt-3 rounded-card border border-warn/30 bg-warn/5 p-3">
+          <p className="text-cell text-ink-body">
+            This organization still has {pre.blockers.join(", ")}. Remove them
+            first — deleting now would leave them running with no organization
+            to manage them from.
+          </p>
+        </div>
+      )}
+
+      <form onSubmit={submit} className="mt-3 flex flex-wrap items-end gap-3">
+        <div className="min-w-[14rem] flex-1">
+          {/* ⚠ TYPE THE SLUG, NOT "DELETE". The slug is the one string that differs between the org you
+              mean and the one you are looking at — and with a switcher in the header, looking at the wrong
+              organization is the realistic mistake, not clicking the wrong button. */}
+          <Field label={`Type ${org.slug} to confirm`}>
+            <Input
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              disabled={blocked}
+              placeholder={org.slug}
+            />
+          </Field>
+        </div>
+        <Button
+          type="submit"
+          variant="danger"
+          disabled={busy || blocked || confirm !== org.slug}
+        >
+          {busy ? "Deleting…" : "Delete organization"}
+        </Button>
+      </form>
+      <ErrorText>{err}</ErrorText>
+    </Card>
   );
 }
 
