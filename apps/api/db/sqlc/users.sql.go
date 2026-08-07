@@ -25,6 +25,7 @@ const countUsers = `-- name: CountUsers :one
 SELECT count(*) FROM users
 `
 
+// lint:allow-deleted
 // ⛔ INCLUDES SOFT-DELETED ROWS. The bootstrap condition is "has this deployment ever had a user", not
 // "does it have one now" — otherwise deleting every account reopens admin minting, which is the same
 // re-open CountOrganizationsEver exists to prevent.

@@ -183,6 +183,7 @@ type Querier interface {
 	CountPolicyRulesReferencingSite(ctx context.Context, arg CountPolicyRulesReferencingSiteParams) (int64, error)
 	// lint:cross-org — user-scoped credential.
 	CountUnusedRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
+	// lint:allow-deleted
 	// ⛔ INCLUDES SOFT-DELETED ROWS. The bootstrap condition is "has this deployment ever had a user", not
 	// "does it have one now" — otherwise deleting every account reopens admin minting, which is the same
 	// re-open CountOrganizationsEver exists to prevent.

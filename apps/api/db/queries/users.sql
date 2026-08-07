@@ -56,6 +56,7 @@ UPDATE users SET can_create_orgs = true, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: CountUsers :one
+-- lint:allow-deleted
 -- ⛔ INCLUDES SOFT-DELETED ROWS. The bootstrap condition is "has this deployment ever had a user", not
 -- "does it have one now" — otherwise deleting every account reopens admin minting, which is the same
 -- re-open CountOrganizationsEver exists to prevent.
