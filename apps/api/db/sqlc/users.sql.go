@@ -37,9 +37,9 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 }
 
 const createBootstrapAdmin = `-- name: CreateBootstrapAdmin :one
-INSERT INTO users (email, name, password_hash, email_verified_at, can_create_orgs, must_change_password)
+INSERT INTO users (email, name, password_hash, email_verified_at, cp_admin, must_change_password)
 VALUES ($1, $2, $3, now(), true, true)
-RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs, must_change_password
+RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs, must_change_password, cp_admin
 `
 
 type CreateBootstrapAdminParams struct {
@@ -63,6 +63,7 @@ func (q *Queries) CreateBootstrapAdmin(ctx context.Context, arg CreateBootstrapA
 		&i.DeletedAt,
 		&i.CanCreateOrgs,
 		&i.MustChangePassword,
+		&i.CpAdmin,
 	)
 	return i, err
 }
@@ -70,7 +71,7 @@ func (q *Queries) CreateBootstrapAdmin(ctx context.Context, arg CreateBootstrapA
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, name, password_hash)
 VALUES ($1, $2, $3)
-RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs, must_change_password
+RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs, must_change_password, cp_admin
 `
 
 type CreateUserParams struct {
@@ -94,12 +95,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.DeletedAt,
 		&i.CanCreateOrgs,
 		&i.MustChangePassword,
+		&i.CpAdmin,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs, must_change_password FROM users
+SELECT id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs, must_change_password, cp_admin FROM users
 WHERE email = $1 AND deleted_at IS NULL
 `
 
@@ -118,12 +120,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.DeletedAt,
 		&i.CanCreateOrgs,
 		&i.MustChangePassword,
+		&i.CpAdmin,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs, must_change_password FROM users
+SELECT id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs, must_change_password, cp_admin FROM users
 WHERE id = $1 AND deleted_at IS NULL
 `
 
@@ -142,12 +145,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.DeletedAt,
 		&i.CanCreateOrgs,
 		&i.MustChangePassword,
+		&i.CpAdmin,
 	)
 	return i, err
 }
 
-const grantOrgCreation = `-- name: GrantOrgCreation :exec
-UPDATE users SET can_create_orgs = true, updated_at = now()
+const grantCPAdmin = `-- name: GrantCPAdmin :exec
+UPDATE users SET cp_admin = true, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL
 `
 
@@ -155,8 +159,8 @@ WHERE id = $1 AND deleted_at IS NULL
 // ⛔ `deleted_at IS NULL` IS NOT BOILERPLATE HERE — the lint asked and the answer is a real filter, not an
 // annotation. Granting deployment-level authority to a soft-deleted account would arm an identity that is
 // meant to be gone, and a later undelete would restore it silently holding a capability nobody granted it.
-func (q *Queries) GrantOrgCreation(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, grantOrgCreation, id)
+func (q *Queries) GrantCPAdmin(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, grantCPAdmin, id)
 	return err
 }
 
@@ -204,24 +208,24 @@ func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) er
 }
 
 const upsertUser = `-- name: UpsertUser :one
-INSERT INTO users (id, email, name, can_create_orgs)
+INSERT INTO users (id, email, name, cp_admin)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (id) DO UPDATE
     SET email = EXCLUDED.email, name = EXCLUDED.name,
-        can_create_orgs = EXCLUDED.can_create_orgs
-RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs, must_change_password
+        cp_admin = EXCLUDED.cp_admin
+RETURNING id, email, name, password_hash, email_verified_at, status, created_at, updated_at, deleted_at, can_create_orgs, must_change_password, cp_admin
 `
 
 type UpsertUserParams struct {
-	ID            uuid.UUID `json:"id"`
-	Email         string    `json:"email"`
-	Name          string    `json:"name"`
-	CanCreateOrgs bool      `json:"can_create_orgs"`
+	ID      uuid.UUID `json:"id"`
+	Email   string    `json:"email"`
+	Name    string    `json:"name"`
+	CpAdmin bool      `json:"cp_admin"`
 }
 
 // Used by the seed with a fixed id; idempotent.
 //
-// ⛔ can_create_orgs IS STATED EXPLICITLY, AND IT IS A FIXTURE'S JOB TO STATE IT. It is a DEPLOYMENT fact —
+// ⛔ cp_admin IS STATED EXPLICITLY, AND IT IS A FIXTURE'S JOB TO STATE IT. It is a DEPLOYMENT fact —
 // who may bring an organization into existence — and leaving it to the column DEFAULT made the seed silent
 // about a security property it is responsible for.
 //
@@ -234,7 +238,7 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (User, e
 		arg.ID,
 		arg.Email,
 		arg.Name,
-		arg.CanCreateOrgs,
+		arg.CpAdmin,
 	)
 	var i User
 	err := row.Scan(
@@ -249,17 +253,18 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (User, e
 		&i.DeletedAt,
 		&i.CanCreateOrgs,
 		&i.MustChangePassword,
+		&i.CpAdmin,
 	)
 	return i, err
 }
 
-const userMayCreateOrgs = `-- name: UserMayCreateOrgs :one
-SELECT can_create_orgs FROM users WHERE id = $1 AND deleted_at IS NULL
+const userIsCPAdmin = `-- name: UserIsCPAdmin :one
+SELECT cp_admin FROM users WHERE id = $1 AND deleted_at IS NULL
 `
 
-func (q *Queries) UserMayCreateOrgs(ctx context.Context, id uuid.UUID) (bool, error) {
-	row := q.db.QueryRow(ctx, userMayCreateOrgs, id)
-	var can_create_orgs bool
-	err := row.Scan(&can_create_orgs)
-	return can_create_orgs, err
+func (q *Queries) UserIsCPAdmin(ctx context.Context, id uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, userIsCPAdmin, id)
+	var cp_admin bool
+	err := row.Scan(&cp_admin)
+	return cp_admin, err
 }

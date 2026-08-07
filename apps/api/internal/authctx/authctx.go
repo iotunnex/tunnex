@@ -54,10 +54,10 @@ type Principal struct {
 	// compromised from the moment it works. Until it is changed the principal may authenticate and may do
 	// NOTHING ELSE.
 	MustChangePassword bool
-	// ⛔ CanCreateOrgs — the deployment-level capability. On the Principal because /auth/me rehydrates the
+	// ⛔ CPAdmin — the deployment-level capability. On the Principal because /auth/me rehydrates the
 	// SPA from it on every page load, and a field the session cannot carry is a field that vanishes on
 	// refresh.
-	CanCreateOrgs bool
+	CPAdmin bool
 	// MachineID / MachineName (S10.2) — set ONLY for a machine principal (AuthMachine); zero for a human.
 	// A machine has NO UserID (kept out of the identity-binding subject space, D4). MachineName is the
 	// operator-chosen credential label surfaced in audit as the system actor "operator:<name>".

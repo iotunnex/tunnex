@@ -45,10 +45,9 @@ export default function CreateOrg() {
   const [ceilingMsg, setCeilingMsg] = useState<string | null>(null);
   // ⚠ A HOLDER ALREADY INSIDE vs A ZERO-ORG VISITOR — one refusal, two audiences. The visitor cannot
   // install a licence (no org, no settings screen, no owner role) and needs an invitation; the holder can,
-  // and gets the route. `can_create_orgs` is the honest discriminator: only a holder reaches this page
+  // and gets the route. `cp_admin` is the honest discriminator: only a holder reaches this page
   // with an organization already in hand.
-  const hasOrg =
-    state.status === "authed" && Boolean(state.user.can_create_orgs);
+  const hasOrg = state.status === "authed" && Boolean(state.user.cp_admin);
   const [busy, setBusy] = useState(false);
 
   // Verified-email gate (decision 3): unverified users can't create an org, so
@@ -128,12 +127,12 @@ export default function CreateOrg() {
   // ⛔ THE FORM IS NEVER OFFERED TO SOMEONE WHO CANNOT USE IT.
   //
   // RequireNoOrg asks one question — "do you have an organization?" — and a brand-new account has none, so
-  // it routes here. That account does not hold `can_create_orgs`, so submitting hit a refusal.
+  // it routes here. That account does not hold `cp_admin`, so submitting hit a refusal.
   //
   // ⚠ A FORM OFFERED TO SOMEONE WHO CANNOT USE IT IS WORSE THAN NO FORM: it costs them an attempt to learn
   // what the screen could have told them first. The invitation card is the correct destination for exactly
   // this state, it already existed, and it was one FAILED SUBMIT away. Now it is the first thing they see.
-  if (state.status === "authed" && !state.user.can_create_orgs) {
+  if (state.status === "authed" && !state.user.cp_admin) {
     return (
       <AuthLayout>
         <h1 className="text-xl font-semibold text-white">

@@ -125,7 +125,7 @@ func TestOnlyBootstrapOrInsidersMayCreateAnOrg(t *testing.T) {
 	// ⚠ AND THE GRANT PERSISTED. Bootstrap's condition is destroyed by using it, so authority that was
 	// only implied by `ever == 0` would evaporate the instant the first org existed.
 	var may bool
-	if e := tx.QueryRow(ctx, "SELECT can_create_orgs FROM users WHERE id=$1", founder).Scan(&may); e != nil {
+	if e := tx.QueryRow(ctx, "SELECT cp_admin FROM users WHERE id=$1", founder).Scan(&may); e != nil {
 		t.Fatal(e)
 	}
 	if !may {

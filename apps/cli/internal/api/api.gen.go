@@ -500,7 +500,7 @@ type AuditLogEntry struct {
 
 // AuthUser defines model for AuthUser.
 type AuthUser struct {
-	CanCreateOrgs          *bool               `json:"can_create_orgs,omitempty"`
+	CpAdmin                *bool               `json:"cp_admin,omitempty"`
 	Email                  openapi_types.Email `json:"email"`
 	EmailVerified          bool                `json:"email_verified"`
 	Id                     openapi_types.UUID  `json:"id"`

@@ -21,13 +21,12 @@ export function OrgSwitcher() {
   const { orgs, org, setOrg } = useOrg();
   const { state } = useAuth();
   const navigate = useNavigate();
-  // ⛔ THE CAPABILITY, NOT A ROLE. `can_create_orgs` is deployment-scoped — the only such field this
+  // ⛔ THE CAPABILITY, NOT A ROLE. `cp_admin` is deployment-scoped — the only such field this
   // product has — because a permission granted inside org A cannot license creating org B.
   //
   // ⚠ AN AFFORDANCE HINT, NEVER THE BOUNDARY. The server refuses regardless (tenancy.checkMayCreateOrg),
   // so a client that ignores this gains nothing; it only decides whether offering the action is honest.
-  const mayCreate =
-    state.status === "authed" && Boolean(state.user.can_create_orgs);
+  const mayCreate = state.status === "authed" && Boolean(state.user.cp_admin);
 
   // ⭐ THE "ABSENT BELOW 2" RULE RELAXES ONLY FOR A HOLDER, and only because the switcher is now the ONLY
   // place org creation lives. A control with one option still teaches nothing — but for someone who may

@@ -494,7 +494,7 @@ type Querier interface {
 	// ⛔ `deleted_at IS NULL` IS NOT BOILERPLATE HERE — the lint asked and the answer is a real filter, not an
 	// annotation. Granting deployment-level authority to a soft-deleted account would arm an identity that is
 	// meant to be gone, and a later undelete would restore it silently holding a capability nobody granted it.
-	GrantOrgCreation(ctx context.Context, id uuid.UUID) error
+	GrantCPAdmin(ctx context.Context, id uuid.UUID) error
 	// lint:cross-org — user-scoped login challenge.
 	IncrementMfaChallengeAttempts(ctx context.Context, id uuid.UUID) (int32, error)
 	// The id is app-generated (uuid v7) so the SAME id identifies the row in BOTH the PG
@@ -1245,7 +1245,7 @@ type Querier interface {
 	UpsertUnconfirmedTOTP(ctx context.Context, arg UpsertUnconfirmedTOTPParams) error
 	// Used by the seed with a fixed id; idempotent.
 	//
-	// ⛔ can_create_orgs IS STATED EXPLICITLY, AND IT IS A FIXTURE'S JOB TO STATE IT. It is a DEPLOYMENT fact —
+	// ⛔ cp_admin IS STATED EXPLICITLY, AND IT IS A FIXTURE'S JOB TO STATE IT. It is a DEPLOYMENT fact —
 	// who may bring an organization into existence — and leaving it to the column DEFAULT made the seed silent
 	// about a security property it is responsible for.
 	//
@@ -1257,7 +1257,7 @@ type Querier interface {
 	// lint:cross-org — spans a user's orgs by design: does ANY org the user belongs to enforce MFA?
 	// The D8/D5 enforcement predicate (local-auth users only; SSO is exempt at the login seam).
 	UserInEnforcingOrg(ctx context.Context, userID uuid.UUID) (bool, error)
-	UserMayCreateOrgs(ctx context.Context, id uuid.UUID) (bool, error)
+	UserIsCPAdmin(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
 var _ Querier = (*Queries)(nil)

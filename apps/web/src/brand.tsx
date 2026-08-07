@@ -48,29 +48,29 @@ export function Logo({
   return (
     <span className={`flex select-none items-center gap-2.5 ${className}`}>
       {!wordmarkOnly && (
-      <img
-        src={logoUrl}
-        alt=""
-        aria-hidden
-        draggable={false}
-        width={Math.round(size * MARK_RATIO)}
-        height={size}
-        // ⛔ NO CORNER CROP ON THE MARK. `rounded-lg` clipped an 8px radius off a 22px image, and
-        // the mark's shape reaches its own corners — so the identity was being trimmed at every
-        // size, most visibly the smallest. A logo is the one asset that must never be cropped to
-        // fit its box; scale it or give it room.
-        className="shrink-0 object-contain"
-      />
+        <img
+          src={logoUrl}
+          alt=""
+          aria-hidden
+          draggable={false}
+          width={Math.round(size * MARK_RATIO)}
+          height={size}
+          // ⛔ NO CORNER CROP ON THE MARK. `rounded-lg` clipped an 8px radius off a 22px image, and
+          // the mark's shape reaches its own corners — so the identity was being trimmed at every
+          // size, most visibly the smallest. A logo is the one asset that must never be cropped to
+          // fit its box; scale it or give it room.
+          className="shrink-0 object-contain"
+        />
       )}
       {!markOnly && (
-      <img
-        src={wordmarkUrl}
-        alt={PRODUCT_NAME}
-        draggable={false}
-        width={Math.round(wordHeight * WORDMARK_RATIO)}
-        height={wordHeight}
-        className="shrink-0 object-contain"
-      />
+        <img
+          src={wordmarkUrl}
+          alt={PRODUCT_NAME}
+          draggable={false}
+          width={Math.round(wordHeight * WORDMARK_RATIO)}
+          height={wordHeight}
+          className="shrink-0 object-contain"
+        />
       )}
     </span>
   );

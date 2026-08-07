@@ -90,7 +90,7 @@ func main() {
 		// ⛔ THE ONLY SEEDED ACCOUNT THAT MAY CREATE AN ORGANIZATION. Stated here rather than inherited
 		// from a column default, because it is a deployment fact and this fixture is what a fresh install
 		// gets. Without it a fresh rig's demo owner has no "+ New" and cannot run the lifecycle walk.
-		CanCreateOrgs: true,
+		CpAdmin: true,
 	}); err != nil {
 		logger.Error("seed_user_failed", slog.String("error", err.Error()))
 		os.Exit(1)
@@ -126,7 +126,7 @@ func main() {
 	memberID := uuid.MustParse(seeddata.DemoMemberUserID)
 	if _, err := q.UpsertUser(ctx, sqlc.UpsertUserParams{
 		ID: memberID, Email: seeddata.DemoMemberEmail, Name: seeddata.DemoMemberName,
-		CanCreateOrgs: false,
+		CpAdmin: false,
 	}); err != nil {
 		logger.Error("seed_member_user_failed", slog.String("error", err.Error()))
 		os.Exit(1)
@@ -158,7 +158,7 @@ func main() {
 	unverifiedAdminID := uuid.MustParse(seeddata.DemoUnverifiedAdminUserID)
 	if _, err := q.UpsertUser(ctx, sqlc.UpsertUserParams{
 		ID: unverifiedAdminID, Email: seeddata.DemoUnverifiedAdminEmail, Name: seeddata.DemoUnverifiedAdminName,
-		CanCreateOrgs: false,
+		CpAdmin: false,
 	}); err != nil {
 		logger.Error("seed_uadmin_user_failed", slog.String("error", err.Error()))
 		os.Exit(1)
@@ -187,7 +187,7 @@ func main() {
 	noOrgID := uuid.MustParse(seeddata.DemoNoOrgUserID)
 	if _, err := q.UpsertUser(ctx, sqlc.UpsertUserParams{
 		ID: noOrgID, Email: seeddata.DemoNoOrgEmail, Name: seeddata.DemoNoOrgName,
-		CanCreateOrgs: false,
+		CpAdmin: false,
 	}); err != nil {
 		logger.Error("seed_noorg_user_failed", slog.String("error", err.Error()))
 		os.Exit(1)

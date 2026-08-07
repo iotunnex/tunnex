@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   CLIENT_STATES,
   PREVIEW_DISCLAIMER,
@@ -13,7 +19,12 @@ import {
 import { desktop, type AppInfo, type ImportedProfile } from "../lib/desktop";
 import { Logo, Tagline } from "../brand";
 import { drawGraph, pushRate, rateBetween } from "./throughput";
-import { createHyperState, drawHyper, stepLink, type HyperMode } from "./hyperdrive";
+import {
+  createHyperState,
+  drawHyper,
+  stepLink,
+  type HyperMode,
+} from "./hyperdrive";
 
 /**
  * ClientApp — the desktop client's whole UI.
@@ -25,10 +36,7 @@ import { createHyperState, drawHyper, stepLink, type HyperMode } from "./hyperdr
  * formatting helpers, and the desktop bridge type.
  */
 export function ClientApp() {
-  const preview = useMemo(
-    () => parsePreviewState(window.location.search),
-    [],
-  );
+  const preview = useMemo(() => parsePreviewState(window.location.search), []);
   const [live, setLive] = useState<ClientState>("disconnected");
   const [fullTunnel, setFullTunnel] = useState(false);
   // ⛔ REAL COUNTERS NOW, AND THE `n/a` IS NO LONGER PERMANENT. These were hard-wired to null with
@@ -47,7 +55,16 @@ export function ClientApp() {
     handshakeSec: number | null;
     address: string | null;
     history: number[];
-  }>({ rate: null, peak: 0, rx: null, tx: null, since: null, handshakeSec: null, address: null, history: [] });
+  }>({
+    rate: null,
+    peak: 0,
+    rx: null,
+    tx: null,
+    since: null,
+    handshakeSec: null,
+    address: null,
+    history: [],
+  });
 
   const state = preview ?? live;
   const view = stateView(state);
@@ -89,9 +106,18 @@ export function ClientApp() {
   useEffect(() => {
     const d = desktop();
     if (!d || preview) return;
-    void d.config.getServerUrl().then(setServerUrl).catch(() => {});
-    void d.diag.appInfo().then(setAppInfo).catch(() => {});
-    void d.tunnel.importedInfo().then(setImportedProfile).catch(() => {});
+    void d.config
+      .getServerUrl()
+      .then(setServerUrl)
+      .catch(() => {});
+    void d.diag
+      .appInfo()
+      .then(setAppInfo)
+      .catch(() => {});
+    void d.tunnel
+      .importedInfo()
+      .then(setImportedProfile)
+      .catch(() => {});
     void (async () => {
       const ok = await refreshAuth();
       if (ok) setLive(mapStatus(await d.tunnel.status()));
@@ -121,7 +147,16 @@ export function ClientApp() {
           // Down: drop the baseline and the clock. Keeping them would make the next connection
           // report a rate computed across the gap and a duration that includes it.
           prevCounter.current = null;
-          setStats((p) => ({ ...p, rate: null, rx: null, tx: null, since: null, handshakeSec: null, address: null, history: [] }));
+          setStats((p) => ({
+            ...p,
+            rate: null,
+            rx: null,
+            tx: null,
+            since: null,
+            handshakeSec: null,
+            address: null,
+            history: [],
+          }));
           return;
         }
         const bytes = (st.rx_bytes ?? 0) + (st.tx_bytes ?? 0);
@@ -150,7 +185,9 @@ export function ClientApp() {
     };
   }, [preview]);
 
-  const elapsed = stats.since ? Math.floor((Date.now() - stats.since) / 1000) : null;
+  const elapsed = stats.since
+    ? Math.floor((Date.now() - stats.since) / 1000)
+    : null;
   // last_handshake_sec is an ABSOLUTE unix second, not an age — trayview.ts documents the same trap.
   const handshakeAge =
     stats.handshakeSec && stats.handshakeSec > 0
@@ -232,7 +269,8 @@ export function ClientApp() {
   const [draftServer, setDraftServer] = useState("");
   const [logText, setLogText] = useState<string>("");
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
-  const [importedProfile, setImportedProfile] = useState<ImportedProfile | null>(null);
+  const [importedProfile, setImportedProfile] =
+    useState<ImportedProfile | null>(null);
   const [exported, setExported] = useState<string | null>(null);
 
   /**
@@ -352,7 +390,11 @@ export function ClientApp() {
   const hyperState = useRef(createHyperState());
 
   const mode: HyperMode =
-    state === "connected" ? "connected" : state === "connecting" ? "connecting" : "idle";
+    state === "connected"
+      ? "connected"
+      : state === "connecting"
+        ? "connecting"
+        : "idle";
 
   useEffect(() => {
     hyperState.current.mode = mode;
@@ -360,14 +402,19 @@ export function ClientApp() {
 
   useEffect(() => {
     // Decorative motion: a reader who asked for stillness gets the static first frame.
-    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const reduced = window.matchMedia?.(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
     let raf = 0;
     const fit = (cv: HTMLCanvasElement) => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const w = cv.clientWidth;
       const h = cv.clientHeight;
       if (!w || !h) return null;
-      if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+      if (
+        cv.width !== Math.round(w * dpr) ||
+        cv.height !== Math.round(h * dpr)
+      ) {
         cv.width = Math.round(w * dpr);
         cv.height = Math.round(h * dpr);
       }
@@ -535,124 +582,129 @@ export function ClientApp() {
                 in the documentation looks identical to the safe one. */}
             {importedProfile && (
               <p className="rounded-lg border border-warn/40 bg-warn/5 px-3 py-2 text-[11px] text-warn">
-                Imported profile — this tunnel is not tied to an account, so revocation and posture
-                checks do not apply. It keeps working until the server drops the peer.
+                Imported profile — this tunnel is not tied to an account, so
+                revocation and posture checks do not apply. It keeps working
+                until the server drops the peer.
               </p>
             )}
-        {/* ── THE MESH ────────────────────────────────────────────────────────────────────── */}
-        {/* Decorative and honest about it: aria-hidden, no data behind it, no claim in the label. */}
-        <div className="relative min-h-[150px] flex-1">
-          <canvas
-            ref={hyperRef}
-            id="tnxHyper"
-            aria-hidden
-            className="absolute inset-0 block h-full w-full"
-          />
-        </div>
+            {/* ── THE MESH ────────────────────────────────────────────────────────────────────── */}
+            {/* Decorative and honest about it: aria-hidden, no data behind it, no claim in the label. */}
+            <div className="relative min-h-[150px] flex-1">
+              <canvas
+                ref={hyperRef}
+                id="tnxHyper"
+                aria-hidden
+                className="absolute inset-0 block h-full w-full"
+              />
+            </div>
 
-        {/* ── STATUS HEAD ─────────────────────────────────────────────────────────────────── */}
-        <section>
-          <h1
-            data-state={state}
-            className={
-              "text-[26px] font-semibold leading-tight " +
-              (view.severity === "loud"
-                ? "text-danger"
-                : view.severity === "ok"
-                  ? "text-accent-400"
-                  : view.severity === "warn"
-                    ? "text-warn"
-                    : "text-ink-heading")
-            }
-          >
-            {view.label}
-          </h1>
-          <p className="mt-1 text-sm text-ink-secondary">{view.detail}</p>
-        </section>
+            {/* ── STATUS HEAD ─────────────────────────────────────────────────────────────────── */}
+            <section>
+              <h1
+                data-state={state}
+                className={
+                  "text-[26px] font-semibold leading-tight " +
+                  (view.severity === "loud"
+                    ? "text-danger"
+                    : view.severity === "ok"
+                      ? "text-accent-400"
+                      : view.severity === "warn"
+                        ? "text-warn"
+                        : "text-ink-heading")
+                }
+              >
+                {view.label}
+              </h1>
+              <p className="mt-1 text-sm text-ink-secondary">{view.detail}</p>
+            </section>
 
-        {/* ── CONNECTION STATS ────────────────────────────────────────────────────────────── */}
-        <section className="rounded-xl border border-line bg-surface-inset p-4">
-          <div className="flex items-baseline justify-between">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-ink-secondary">
-              Connection stats
-            </span>
-            <span className="font-mono text-sm text-ink-heading">
-              {formatRate(stats.rate)}
-            </span>
-          </div>
-          {/* The designer's plot: a filled area under a 1.6px line over a fixed 64-sample window,
-              so it SCROLLS rather than rescaling. */}
-          <canvas
-            ref={graphRef}
-            id="tnxGraph"
-            aria-hidden
-            className="mt-2 block h-12 w-full"
-          />
-          <div className="mt-1 flex justify-between font-mono text-[10px] text-ink-secondary">
-            <span>{formatRate(stats.peak)} peak</span>
-            <span>{formatRate(stats.rate)}</span>
-          </div>
-          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
-            {[
-              ["BYTES IN ↓", formatBytes(stats.rx)],
-              ["BYTES OUT ↑", formatBytes(stats.tx)],
-              ["DURATION", formatDuration(elapsed)],
-              // ⛔ THE HELPER REPORTS A HANDSHAKE, NOT A PACKET COUNT. The old row could never be
-              // filled from any source in the chain; this one is the liveness fact the whole
-              // "never green while the tunnel is dead" rule is built on.
-              ["LAST HANDSHAKE", handshakeAge == null ? "n/a" : `${handshakeAge}s ago`],
-              // ⛔ THE ADDRESS WAS ALREADY ON THE WIRE AND NOTHING SHOWED IT. TunnelController
-              // attaches it to every status specifically so the client can answer "what is my IP"
-              // without a round trip, and the panel never asked. It is the single most-looked-at
-              // fact in a VPN client.
-              ["TUNNEL IP", stats.address ?? "n/a"],
-            ].map(([k, v]) => (
-              <div key={k} className="flex justify-between">
-                <dt className="font-mono text-[10px] text-ink-secondary">{k}</dt>
-                <dd className="font-mono text-xs text-ink-body">{v}</dd>
+            {/* ── CONNECTION STATS ────────────────────────────────────────────────────────────── */}
+            <section className="rounded-xl border border-line bg-surface-inset p-4">
+              <div className="flex items-baseline justify-between">
+                <span className="font-mono text-[10px] uppercase tracking-wider text-ink-secondary">
+                  Connection stats
+                </span>
+                <span className="font-mono text-sm text-ink-heading">
+                  {formatRate(stats.rate)}
+                </span>
               </div>
-            ))}
-          </dl>
-        </section>
+              {/* The designer's plot: a filled area under a 1.6px line over a fixed 64-sample window,
+              so it SCROLLS rather than rescaling. */}
+              <canvas
+                ref={graphRef}
+                id="tnxGraph"
+                aria-hidden
+                className="mt-2 block h-12 w-full"
+              />
+              <div className="mt-1 flex justify-between font-mono text-[10px] text-ink-secondary">
+                <span>{formatRate(stats.peak)} peak</span>
+                <span>{formatRate(stats.rate)}</span>
+              </div>
+              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
+                {[
+                  ["BYTES IN ↓", formatBytes(stats.rx)],
+                  ["BYTES OUT ↑", formatBytes(stats.tx)],
+                  ["DURATION", formatDuration(elapsed)],
+                  // ⛔ THE HELPER REPORTS A HANDSHAKE, NOT A PACKET COUNT. The old row could never be
+                  // filled from any source in the chain; this one is the liveness fact the whole
+                  // "never green while the tunnel is dead" rule is built on.
+                  [
+                    "LAST HANDSHAKE",
+                    handshakeAge == null ? "n/a" : `${handshakeAge}s ago`,
+                  ],
+                  // ⛔ THE ADDRESS WAS ALREADY ON THE WIRE AND NOTHING SHOWED IT. TunnelController
+                  // attaches it to every status specifically so the client can answer "what is my IP"
+                  // without a round trip, and the panel never asked. It is the single most-looked-at
+                  // fact in a VPN client.
+                  ["TUNNEL IP", stats.address ?? "n/a"],
+                ].map(([k, v]) => (
+                  <div key={k} className="flex justify-between">
+                    <dt className="font-mono text-[10px] text-ink-secondary">
+                      {k}
+                    </dt>
+                    <dd className="font-mono text-xs text-ink-body">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
 
-        {/* ── THE VERB ────────────────────────────────────────────────────────────────────── */}
-        {/* ⛔ NULL MEANS NO BUTTON. Revoked, posture-blocked, pending-approval and helper-outdated
+            {/* ── THE VERB ────────────────────────────────────────────────────────────────────── */}
+            {/* ⛔ NULL MEANS NO BUTTON. Revoked, posture-blocked, pending-approval and helper-outdated
             have nothing the user can press — offering "Connect" there would be a control that
             cannot work, which is worse than none. */}
-        {view.action ? (
-          <button
-            type="button"
-            data-action
-            onClick={() => void onAction()}
-            disabled={busy}
-            className={
-              "w-full rounded-lg px-4 py-3 text-sm font-medium transition-colors disabled:opacity-60 " +
-              (view.severity === "loud"
-                ? "bg-danger/15 text-danger hover:bg-danger/25"
-                : "border border-white/15 bg-white/[.08] text-ink-heading hover:bg-white/[.14]")
-            }
-          >
-            {view.action}
-          </button>
-        ) : (
-          <p className="rounded-lg border border-dashed border-line px-4 py-3 text-center text-xs text-ink-secondary">
-            Nothing to do here — this resolves elsewhere.
-          </p>
-        )}
+            {view.action ? (
+              <button
+                type="button"
+                data-action
+                onClick={() => void onAction()}
+                disabled={busy}
+                className={
+                  "w-full rounded-lg px-4 py-3 text-sm font-medium transition-colors disabled:opacity-60 " +
+                  (view.severity === "loud"
+                    ? "bg-danger/15 text-danger hover:bg-danger/25"
+                    : "border border-white/15 bg-white/[.08] text-ink-heading hover:bg-white/[.14]")
+                }
+              >
+                {view.action}
+              </button>
+            ) : (
+              <p className="rounded-lg border border-dashed border-line px-4 py-3 text-center text-xs text-ink-secondary">
+                Nothing to do here — this resolves elsewhere.
+              </p>
+            )}
 
-        {simulated && (
-          <p className="text-[11px] text-warn">
-            No desktop bridge — this is a browser preview, so Connect drives the
-            surface locally instead of a real tunnel.
-          </p>
-        )}
-
+            {simulated && (
+              <p className="text-[11px] text-warn">
+                No desktop bridge — this is a browser preview, so Connect drives
+                the surface locally instead of a real tunnel.
+              </p>
+            )}
           </>
         )}
 
         {pane === "settings" && (
           <>
-        {/* ── ROUTING MODE ────────────────────────────────────────────────────────────────────
+            {/* ── ROUTING MODE ────────────────────────────────────────────────────────────────────
             ⛔ THE CONTROL SAID THE OPPOSITE OF WHAT IT DID, AND THE SAFE-LOOKING SETTING WAS THE
             LEAKING ONE.
 
@@ -666,37 +718,51 @@ export function ClientApp() {
             > and a checkbox cannot say which state is which — the unchecked box has no words on it.
 
             Two named options now, each stating what it DOES to traffic. No inference from a tick. */}
-        <fieldset className="rounded-lg border border-line p-3">
-          <legend className="px-1 font-mono text-[10px] uppercase tracking-wider text-ink-secondary">
-            Routing
-          </legend>
-          {(
-            [
-              ["full", "All traffic", "Everything leaves through the tunnel, including your normal browsing."],
-              ["split", "Only Tunnex routes", "Just the networks your admin published. Everything else uses your normal connection."],
-            ] as const
-          ).map(([key, label, why]) => (
-            <label key={key} className="mt-1 flex cursor-pointer items-start gap-2.5 text-sm text-ink-body">
-              <input
-                type="radio"
-                name="routing"
-                className="mt-1"
-                checked={key === "full" ? fullTunnel : !fullTunnel}
-                onChange={() => setFullTunnel(key === "full")}
-              />
-              <span>
-                {label}
-                <span className="block text-xs text-ink-secondary">{why}</span>
-              </span>
-            </label>
-          ))}
-          {/* Changing this re-mints the device config (deviceconfig.ts) — it is not a live switch. */}
-          <p className="mt-2 text-[11px] text-ink-secondary">
-            Changing this while connected re-issues the device configuration.
-          </p>
-        </fieldset>
+            <fieldset className="rounded-lg border border-line p-3">
+              <legend className="px-1 font-mono text-[10px] uppercase tracking-wider text-ink-secondary">
+                Routing
+              </legend>
+              {(
+                [
+                  [
+                    "full",
+                    "All traffic",
+                    "Everything leaves through the tunnel, including your normal browsing.",
+                  ],
+                  [
+                    "split",
+                    "Only Tunnex routes",
+                    "Just the networks your admin published. Everything else uses your normal connection.",
+                  ],
+                ] as const
+              ).map(([key, label, why]) => (
+                <label
+                  key={key}
+                  className="mt-1 flex cursor-pointer items-start gap-2.5 text-sm text-ink-body"
+                >
+                  <input
+                    type="radio"
+                    name="routing"
+                    className="mt-1"
+                    checked={key === "full" ? fullTunnel : !fullTunnel}
+                    onChange={() => setFullTunnel(key === "full")}
+                  />
+                  <span>
+                    {label}
+                    <span className="block text-xs text-ink-secondary">
+                      {why}
+                    </span>
+                  </span>
+                </label>
+              ))}
+              {/* Changing this re-mints the device config (deviceconfig.ts) — it is not a live switch. */}
+              <p className="mt-2 text-[11px] text-ink-secondary">
+                Changing this while connected re-issues the device
+                configuration.
+              </p>
+            </fieldset>
 
-        {/* ⛔ THE FAILURE SENTENCE. `not_authenticated` became a STATE above; anything else is shown
+            {/* ⛔ THE FAILURE SENTENCE. `not_authenticated` became a STATE above; anything else is shown
             verbatim rather than swallowed. A raw message is worse than a written one and far better
             than silence — and it names the verb that produced it. */}
             {/* ── PROFILE ─────────────────────────────────────────────────────────────────────
@@ -712,11 +778,18 @@ export function ClientApp() {
               {importedProfile ? (
                 <>
                   <p className="mt-1 font-mono text-xs text-ink-body">
-                    Imported .conf{importedProfile.address ? ` · ${importedProfile.address}` : ""}
+                    Imported .conf
+                    {importedProfile.address
+                      ? ` · ${importedProfile.address}`
+                      : ""}
                   </p>
                   <p className="mt-1 text-[11px] text-warn">
-                    Routing comes from the file ({importedProfile.fullTunnel ? "all traffic" : "only its routes"}),
-                    so the routing choice above does not apply. No revocation or posture monitoring.
+                    Routing comes from the file (
+                    {importedProfile.fullTunnel
+                      ? "all traffic"
+                      : "only its routes"}
+                    ), so the routing choice above does not apply. No revocation
+                    or posture monitoring.
                   </p>
                   <button
                     type="button"
@@ -731,9 +804,10 @@ export function ClientApp() {
               ) : (
                 <>
                   <p className="mt-1 text-[11px] text-ink-secondary">
-                    Signing in mints a device for you. If you were given a WireGuard{" "}
-                    <code>.conf</code> when the device was created, import it instead — it connects
-                    without an account, and without revocation or posture monitoring.
+                    Signing in mints a device for you. If you were given a
+                    WireGuard <code>.conf</code> when the device was created,
+                    import it instead — it connects without an account, and
+                    without revocation or posture monitoring.
                   </p>
                   <button
                     type="button"
@@ -824,51 +898,53 @@ export function ClientApp() {
                 </div>
               )}
             </section>
-        {editingServer && !simulated && (
-          <form
-            className="rounded-lg border border-line p-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void onChangeServer();
-            }}
-          >
-            <label className="block text-xs text-ink-secondary" htmlFor="tnx-server">
-              Control-plane URL
-            </label>
-            <input
-              id="tnx-server"
-              type="url"
-              autoComplete="off"
-              value={draftServer}
-              onChange={(e) => setDraftServer(e.target.value)}
-              placeholder="https://vpn.example.com"
-              className="mt-1 w-full rounded border border-line bg-transparent px-2 py-1.5 font-mono text-xs text-ink-body"
-            />
-            {/* ⛔ SAID BEFORE THE BUTTON IS PRESSED, NOT AFTER. Changing origin revokes the stored
+            {editingServer && !simulated && (
+              <form
+                className="rounded-lg border border-line p-3"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void onChangeServer();
+                }}
+              >
+                <label
+                  className="block text-xs text-ink-secondary"
+                  htmlFor="tnx-server"
+                >
+                  Control-plane URL
+                </label>
+                <input
+                  id="tnx-server"
+                  type="url"
+                  autoComplete="off"
+                  value={draftServer}
+                  onChange={(e) => setDraftServer(e.target.value)}
+                  placeholder="https://vpn.example.com"
+                  className="mt-1 w-full rounded border border-line bg-transparent px-2 py-1.5 font-mono text-xs text-ink-body"
+                />
+                {/* ⛔ SAID BEFORE THE BUTTON IS PRESSED, NOT AFTER. Changing origin revokes the stored
                 credential — the user must know that is the cost, not discover it. */}
-            <p className="mt-2 text-[11px] text-warn">
-              Switching servers signs you out and tears down the tunnel. A credential is only ever
-              valid for the server it was issued by.
-            </p>
-            <div className="mt-2 flex gap-2">
-              <button
-                type="submit"
-                disabled={busy || draftServer.trim().length === 0}
-                className="rounded border border-line px-2 py-1 text-xs hover:text-ink-body disabled:opacity-50"
-              >
-                Switch server
-              </button>
-              <button
-                type="button"
-                onClick={() => setEditingServer(false)}
-                className="rounded px-2 py-1 text-xs text-ink-secondary hover:text-ink-body"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        )}
-
+                <p className="mt-2 text-[11px] text-warn">
+                  Switching servers signs you out and tears down the tunnel. A
+                  credential is only ever valid for the server it was issued by.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="submit"
+                    disabled={busy || draftServer.trim().length === 0}
+                    className="rounded border border-line px-2 py-1 text-xs hover:text-ink-body disabled:opacity-50"
+                  >
+                    Switch server
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingServer(false)}
+                    className="rounded px-2 py-1 text-xs text-ink-secondary hover:text-ink-body"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
           </>
         )}
 
@@ -904,7 +980,9 @@ export function ClientApp() {
               </button>
             </div>
             {exported && (
-              <p className="mt-2 text-[11px] text-ink-secondary">Saved to {exported}</p>
+              <p className="mt-2 text-[11px] text-ink-secondary">
+                Saved to {exported}
+              </p>
             )}
             {/* ⛔ NEWEST LAST, AND SCROLLED HERE RATHER THAN ON THE PAGE. The log is the one thing
                 in this app that is legitimately long; giving it its own scroll box is what keeps
@@ -943,7 +1021,6 @@ export function ClientApp() {
     </div>
   );
 }
-
 
 /** Map the bridge's status to our state union. Kept tiny and total. */
 function mapStatus(s: { state?: string } | null | undefined): ClientState {

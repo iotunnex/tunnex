@@ -474,6 +474,7 @@ type User struct {
 	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
 	CanCreateOrgs      bool               `json:"can_create_orgs"`
 	MustChangePassword bool               `json:"must_change_password"`
+	CpAdmin            bool               `json:"cp_admin"`
 }
 
 type UserGroup struct {
