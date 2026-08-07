@@ -85,9 +85,7 @@ func (s *Service) Signup(ctx context.Context, email, name, pw string) error {
 
 	existing, err := s.q.GetUserByEmail(ctx, email)
 	if err == nil {
-		s.send(ctx, existing.Email, "Your Tunnex account",
-			"You already have a Tunnex account. If you didn't try to sign up, you can ignore this. "+
-				"Forgot your password? Reset it at "+s.baseURL+"/reset-password")
+		s.send(ctx, mail.AccountExistsMessage(existing.Email, s.baseURL+"/reset-password"))
 		return nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -116,8 +114,7 @@ func (s *Service) Signup(ctx context.Context, email, name, pw string) error {
 	if err != nil {
 		return err
 	}
-	s.send(ctx, email, "Verify your Tunnex email",
-		"Welcome to Tunnex. Verify your email: "+s.baseURL+"/verify-email?token="+raw)
+	s.send(ctx, mail.VerifyEmailMessage(email, s.baseURL+"/verify-email?token="+raw))
 	return nil
 }
 
@@ -190,8 +187,7 @@ func (s *Service) ResendVerification(ctx context.Context, userID uuid.UUID) erro
 	}); err != nil {
 		return err
 	}
-	s.send(ctx, user.Email, "Verify your Tunnex email",
-		"Verify your email: "+s.baseURL+"/verify-email?token="+raw)
+	s.send(ctx, mail.VerifyEmailMessage(user.Email, s.baseURL+"/verify-email?token="+raw))
 	return nil
 }
 
@@ -237,8 +233,7 @@ func (s *Service) RequestPasswordReset(ctx context.Context, email string) error 
 	if err != nil {
 		return err
 	}
-	s.send(ctx, email, "Reset your Tunnex password",
-		"Reset your Tunnex password: "+s.baseURL+"/reset-password?token="+raw)
+	s.send(ctx, mail.PasswordResetMessage(email, s.baseURL+"/reset-password?token="+raw))
 	return nil
 }
 
@@ -285,9 +280,11 @@ func (s *Service) ResetPassword(ctx context.Context, rawToken, newPassword strin
 	return nil
 }
 
-func (s *Service) send(ctx context.Context, to, subject, body string) {
-	if err := s.mailer.Send(ctx, mail.Message{To: to, Subject: subject, Text: body}); err != nil {
-		s.logger.Warn("email_send_failed", slog.String("to", to), slog.String("error", err.Error()))
+// send delivers a rendered message. The logo's base URL is resolved by the mailer — see
+// mail.brandedMailer for why that is not each caller's job.
+func (s *Service) send(ctx context.Context, msg mail.Message) {
+	if err := s.mailer.Send(ctx, msg); err != nil {
+		s.logger.Warn("email_send_failed", slog.String("to", msg.To), slog.String("error", err.Error()))
 	}
 }
 

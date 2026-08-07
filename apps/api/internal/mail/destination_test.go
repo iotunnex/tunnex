@@ -19,11 +19,13 @@ import (
 // to the reader. Asserted by construction: the tee's primary IS the SMTP mailer.
 func TestSMTPHostSetMeansSend(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
-	plain := New(Config{Host: "mail.example.net", Port: "587"}, logger)
-	if _, ok := plain.(*SMTPMailer); !ok {
-		t.Fatalf("a configured host must produce an SMTP mailer, got %T", plain)
+	// ⚠ EVERY MAILER IS WRAPPED for logo resolution (S12.14), so the assertion follows the SEND PATH to its
+	// end rather than matching the outermost type. A test that pinned the concrete top-level type would
+	// fail on any future wrapper while proving nothing about where mail goes.
+	if _, ok := sendPathEnd(New(Config{Host: "mail.example.net", Port: "587"}, logger)).(*SMTPMailer); !ok {
+		t.Fatal("a configured host must send via SMTP")
 	}
-	teed := New(Config{Host: "mail.example.net", Port: "587", DevLogging: true}, logger)
+	teed := sendPathEnd(New(Config{Host: "mail.example.net", Port: "587", DevLogging: true}, logger))
 	tee, ok := teed.(*teeMailer)
 	if !ok {
 		t.Fatalf("MAIL_DEV_LOG must WRAP the sender, never replace it, got %T", teed)
@@ -33,7 +35,7 @@ func TestSMTPHostSetMeansSend(t *testing.T) {
 			"reading of it may suggest otherwise")
 	}
 	// Only an ABSENT host disables mail.
-	if _, ok := New(Config{DevLogging: true}, logger).(*disabledMailer); !ok {
+	if _, ok := sendPathEnd(New(Config{DevLogging: true}, logger)).(*disabledMailer); !ok {
 		t.Fatal("mail is disabled by an absent SMTP_HOST and by nothing else")
 	}
 }
@@ -115,4 +117,12 @@ func TestSuccessLineClaimsAcceptanceNotDelivery(t *testing.T) {
 	if strings.Contains(buf.String(), "secret-link") {
 		t.Fatal("the SMTP mailer runs on every deployment and must never log a message body")
 	}
+}
+
+// sendPathEnd unwraps the branding wrapper so a test can assert on where mail actually goes.
+func sendPathEnd(m Mailer) Mailer {
+	if b, ok := m.(*brandedMailer); ok {
+		return b.inner
+	}
+	return m
 }
