@@ -64,6 +64,56 @@ expected to be rewritten before merge.
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
 **CURRENT (2026-07-31): EPIC 13 = GATEWAY RECOVERY — BUILD COMPLETE INCLUDING SLICE 7 on `story/S13.1-gateway-recovery` (tip `7c1a127`; Slice 7 = `120ff0c`, since then docs-only), NOT MERGED. Slice 7 (operator-initiated restore, `POST /nodes/{nodeId}/restore-devices`, new perm `device:restore`, re-homes onto a named LIVE gateway because a revoked node never returns) closed the reachability defect and is RED-PROVEN REACHABLE + UI-exposed. **REVIEW STATE POINTER = `docs/S13.1-review-state.md`** (pass 1 COMPLETE — 20 findings + F3, HELD, nothing folded, `docs/S13.1-review-pass1-findings.md`; pass 3 launched before pass 2 by ruling; pass 2 not started and must cover Slice 7). Earlier note: pass 1 was once interrupted — (run `wf_642e5fe8-1ed`: 8/8 finders done, 127/144 verifiers returned, Critic and Synthesize never ran — resumable from cache). The review remains a merge precondition. Next session = REVIEW → WALK → merge word, nothing in between.** The epic exists for one observed event: an AWS gateway went offline past its 48h cert lifetime and could not come back — `/agent/renew` lives behind the mTLS channel its expired cert can no longer authenticate to. Commit-one `docs/S13.1-decisions.md` (six walls, D1–D10 ruled). **SHIPPED:** agent precedence (`identity.Decide`, no network argument — a failed handshake structurally cannot trigger re-key; `Recover` ranked above `UseToken`) · **PoP re-key** on the public listener (RSA over `nonce ‖ CSR DER`; gate BEFORE crypto so timing is not a liveness oracle; **D3 amended: expiry authorizes, revocation REFUSES** — expiry is an absence of action, revocation is the presence of a decision) · its own path-scoped throttle + body cap (registered before `middleware.RealIP` — review #1 was exactly that) · **cascade restore** (`revoked_cause`, reclaim-first via the canonical oracle) · **Slice 6 `provisioned_ip`** (`needs_reexport` gains the ADDRESS cause for EVERY mode; ranges stay static-only; both contract rewrites + the label the census under-scoped) · **D10 second identifier** (key fingerprint: a LOST RESPONSE no longer bricks a gateway; ambiguity refuses; three implementations of one digest pinned to a golden vector; agent persists its pending key before submitting and reuses it so retries CONVERGE; migration guard forced expand/contract with both shim halves). Retroactive review pass 1 (leader election) folded — *leadership was a boolean that lies*; `ConfirmLeader` now matches `pg_locks`. **OWED BEFORE MERGE, IN ORDER: (1) the epic-end review pass — three passes by surface family (unauthenticated re-key surface · identity/cascade data path + migrations 0054–0061 · agent recovery loop), ~4.5–6M tokens, a merge precondition alongside CI and the walk, and a truncated pass is worse than none; (2) the walk per `docs/S13-boxwalk.md` — seven legs, TWO GATEWAYS MUST BE OFFLINE 48h+ BEFORE the session (`agentca.CertTTL` is a constant; the clock is the only way to make a cert expire); (3) the merge word.** **RULED — cascade-restore reachability: SLICE 7 (operator-initiated restore), built AFTER the review pass and BEFORE the walk; two conditions — authorized as a deliberate operator act (same class as minting a join token) and RED-PROVEN REACHABLE, not merely correct. Un-revoke PERMANENTLY REFUSED (it is the attack chain D3 exists to prevent); removing the mechanism refused (re-opens Wall 6). Walk Leg 4 stays a falsification attempt. The defect:** `RestoreCascadeRevokedDevices` has one caller (`Rekey`), devices are cascade-revoked in one place (`Revoke`), and `Rekey` refuses a revoked node — so the trigger may put the node into the one state that can never reach the restorer (dormant-machinery law). Four faces in the paper; walk Leg 4 is written as a falsification attempt. Retroactive **pass 2 (backup/restore)** still attaches to the next natural merge boundary. Registered: the 0061 contract migration (trigger = the release after this one) · no general rate limiting · body caps only on the two re-key routes · failover hysteresis persistence (beta-blocking, owned by the failover story).
+**CURRENT (2026-08-07): S12.13 MAIL VISIBILITY — PR #98, content tip `<post-merge sha>` (`c96246bc` pre-merge).**
+
+⛔ **THE FOUNDER CONFIGURED FIVE SMTP VARIABLES CORRECTLY AND CONCLUDED MAIL WAS DISABLED. IT WAS SENDING
+THE WHOLE TIME.** `DevLogging: !cfg.IsProduction()` meant `TUNNEX_ENV` — a variable about what KIND of
+deployment this is — silently governed mail behaviour, producing a mailer labelled `smtp+log` and a log
+line reading `email_not_sent_logged`. `teeMailer.Send` logs and then returns the SMTP send's own error; it
+has never suppressed delivery. The defect was entirely in what it was called.
+
+- **D1 — `MAIL_DEV_LOG` is its own variable, read, default off.** SMTP_HOST set means send; nothing
+  overrides it. One flag must not govern two unrelated things.
+- **D2 — the boot line names the DESTINATION, not the mechanism.** `mail_destination` reads
+  `mail.spacemail.com:587`, or that mail is disabled and which variable fixes it. `smtp+log`'s `+` read as
+  capability to one person and as "log INSTEAD of SMTP" to another.
+- **Success is now as visible as failure** (`email_accepted_by_provider`). Only failures logged before, so
+  an empty log meant BOTH "it worked" and "it never tried". It claims ACCEPTANCE, never delivery — the
+  provider's outbound log owns that — and never carries a body.
+- `email_not_sent_logged` → `email_copied_to_log`. **A log line naming an outcome must be true in every
+  context it can be reached from**; the old name was true alone and a flat lie inside the tee.
+- **The screen says it.** `/meta.smtp_configured` had ZERO web consumers — which is how this cost a session.
+
+⭐ **MAIL PROVEN ON THE WIRE 2026-08-07: a real invitation reached a Gmail inbox from `support@tunnex.io`
+via Spacemail.** SPF/DKIM fine. This closes the walk's delivery leg; the accept→membership legs remain.
+
+**CURRENT (2026-08-07): S12.14 BRANDED PRODUCT EMAIL — PR #99, content tip `<post-merge sha>`.**
+
+Ported from `tunnex-web`'s `src/lib/email/{palette,layout}.ts` — same shell, colours and footer. Covers
+invite, resend, password reset, email verification, account-exists, MFA-reset notice.
+
+⛔ **THE LOGO TRAVELS WITH THE MESSAGE (`cid:`), IT IS NEVER FETCHED.** Three versions: tunnex.io (a
+phone-home on the most private mail the product sends) → APP_BASE_URL (no phone-home, but the DEFAULT is
+`http://localhost`, which resolves to the RECIPIENT's machine — every invitation from a default deployment
+shipped a broken image; plus an accidental open-tracking pixel in the org's own logs; plus remote images
+blocked by default in Outlook and corporate gateways) → **embedded**. It DELETED the branding wrapper
+rather than adding one: a rendered message carries no deployment-specific value, so there is nothing to
+forget. `data:` URIs rejected — Gmail and Outlook strip them.
+
+⚠ **Both bodies always**, `multipart/related [ alternative [ text, html ], png ]`, text FIRST (RFC 2046
+orders alternatives least-to-most preferred). **quoted-printable on both text parts** — a red asserting the
+line limit caught 2,200-character HTML lines against RFC 5321's 998 cap, and multi-byte UTF-8 declared as
+7bit. Proven with Python's stdlib MIME parser; decoded PNG sha256-identical to source.
+
+⛔ **AND A TOKEN ENDS AT WHITESPACE.** CI caught `captureMailer` taking everything to the end of the body —
+correct only while the link was last in it. Fixed as the CLASS: `auth/service_test.go` carried the
+identical extractor and was green by luck.
+
+**HELD, unbuilt:** `go/email-injection` at `buildRFC822` (CRLF in To/Subject) — pre-existing on `main`, now
+more reachable with SMTP on · `delivered` has no web consumer · `ResendInvitation` returns no token ·
+**S12.12b** endpoint edit · rotation before launch · **the §7 full-surface walk, never run** · the `127/2`
+ceiling numerator (third instance of the one-count-two-sources law) · the **rule-6 bypass** question.
+
 **CURRENT (2026-08-07): S12.12 GATEWAY LIFECYCLE — transfer, delete, rename — PR #97,
 content tip `c954572b` (`c061b265` pre-merge).**
 
