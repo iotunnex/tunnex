@@ -114,10 +114,19 @@ export function ceilingSentence(
     // transaction), so the remedy this notice recommends can drop fifty people off the network. The
     // sentence was TRUE — revoking really does free a slot — and it named none of that.
     //
+    // ⛔ AND IT IS PERMANENT. `restoreNodeDevices` requires a LIVE target gateway because "a revoked
+    // gateway is never active again" (openapi.yaml:3538) — so the word "retire" has to carry irreversibility
+    // here, not just in the confirm two clicks later.
+    //
+    // ⭐ THE WAY OUT RIDES WITH THE COST. The devices' rows survive the cascade (`revoked_cause='cascade'`),
+    // so they can be re-homed onto another gateway. Stating the damage without the remedy turns a recoverable
+    // situation into one an operator believes they cannot fix.
+    //
     // ⚠ THE COUNT ITSELF BELONGS ON THE CONFIRM, NOT HERE. This notice is deployment-scoped and does not
     // know which gateway an operator will pick; promising a number it cannot compute would be the same
     // mistake in the other direction. It states the KIND of cost and sends them where the number is.
     `There is no room for another — install a licence, or retire a gateway. ` +
-    `Retiring one also disconnects every device homed to it; the Gateways list says how many before you confirm.`
+    `Retiring one is permanent and disconnects every device homed to it; ` +
+    `the Gateways list says how many, and those devices can be moved to another gateway.`
   );
 }

@@ -206,26 +206,41 @@ export function groupNotes(rows: GatewayRow[]): string[] {
 /**
  * revokeConsequence states what revoking THIS gateway costs, for the two-step confirm.
  *
- * ⛔ COUNT FIRST, AT THE MOMENT OF THE ACT. Revoking a gateway cascades to every device homed to it
- * (`RevokeDevicesForNode` runs in the same transaction as the node revoke), so the people using those
- * devices stop connecting immediately. The ceiling notice sends operators here to free a licence slot —
- * "revoke a gateway you no longer use" — which is exactly the frame in which a fifty-device gateway looks
- * like housekeeping.
+ * ⛔ THE WHOLE TRUTH, IN THREE CLAUSES, AT THE MOMENT OF THE ACT.
  *
- * ⚠ SILENT AT ZERO, deliberately, and it is the same rule the deactivate warning follows: a caution that
- * fires on the harmless case is a caution nobody reads on the dangerous one.
+ * 1. The devices homed here stop connecting IMMEDIATELY. Revoking cascades to them in the same
+ *    transaction as the node revoke (`RevokeDevicesForNode`), so this is a disconnection, not a tidy-up.
+ * 2. The gateway CANNOT BE UN-REVOKED. Measured, not assumed: `restoreNodeDevices` requires a live target
+ *    gateway, and the spec says why — "a revoked gateway is never active again" (openapi.yaml:3538).
+ * 3. The devices CAN BE MOVED to another gateway. Their rows survive the cascade (soft revoke, stamped
+ *    `revoked_cause='cascade'`), and that survival is exactly what makes the re-home possible.
  *
- * ⚠ AND AN UNREADABLE COUNT IS NOT ZERO. `counts === null` means the devices list failed to load; saying
- * nothing there would be a silent all-clear manufactured by a failure, on the one sentence whose entire job
- * is to stop a destructive click. It says it could not count instead, and lets the operator decide.
+ * ⛔ CLAUSE 3 IS NOT OPTIONAL. Without it the warning is a dead end, and an operator reading a dead end
+ * either does not act at all or acts believing the people are simply lost. It is their way out and it is
+ * true, so it belongs beside the cost rather than in documentation they will not open mid-click.
+ *
+ * ⚠ THE PERMANENCE IS STATED EVEN AT ZERO DEVICES, because it is a fact about the GATEWAY and is true
+ * whether or not anyone is homed there. The COUNT is what falls silent at zero — a caution that fires on
+ * the harmless case is a caution nobody reads on the dangerous one.
+ *
+ * ⚠ AND AN UNREADABLE COUNT IS NOT ZERO. `counts === null` means the devices list failed to load; a silent
+ * all-clear manufactured by a failure is the worst possible output for the one sentence whose entire job is
+ * to stop a destructive click.
  */
 export function revokeConsequence(
   counts: Record<string, number> | null,
   nodeId: string,
-): string | null {
+): string {
+  const permanent = "This cannot be undone \u2014 a revoked gateway is never active again.";
   if (counts === null)
-    return "The devices homed here could not be counted — revoking disconnects any that are.";
+    return (
+      `${permanent} The devices homed here could not be counted; any that are will stop ` +
+      `connecting immediately, and can be moved to another gateway afterwards.`
+    );
   const n = counts[nodeId] ?? 0;
-  if (n === 0) return null;
-  return `${n} ${n === 1 ? "device is" : "devices are"} homed here and will stop connecting immediately.`;
+  if (n === 0) return permanent;
+  return (
+    `${n} ${n === 1 ? "device is" : "devices are"} homed here and will stop connecting ` +
+    `immediately. ${permanent} The ${n === 1 ? "device" : "devices"} can be moved to another gateway.`
+  );
 }
