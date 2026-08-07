@@ -64,86 +64,45 @@ expected to be rewritten before merge.
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
 **CURRENT (2026-07-31): EPIC 13 = GATEWAY RECOVERY — BUILD COMPLETE INCLUDING SLICE 7 on `story/S13.1-gateway-recovery` (tip `7c1a127`; Slice 7 = `120ff0c`, since then docs-only), NOT MERGED. Slice 7 (operator-initiated restore, `POST /nodes/{nodeId}/restore-devices`, new perm `device:restore`, re-homes onto a named LIVE gateway because a revoked node never returns) closed the reachability defect and is RED-PROVEN REACHABLE + UI-exposed. **REVIEW STATE POINTER = `docs/S13.1-review-state.md`** (pass 1 COMPLETE — 20 findings + F3, HELD, nothing folded, `docs/S13.1-review-pass1-findings.md`; pass 3 launched before pass 2 by ruling; pass 2 not started and must cover Slice 7). Earlier note: pass 1 was once interrupted — (run `wf_642e5fe8-1ed`: 8/8 finders done, 127/144 verifiers returned, Critic and Synthesize never ran — resumable from cache). The review remains a merge precondition. Next session = REVIEW → WALK → merge word, nothing in between.** The epic exists for one observed event: an AWS gateway went offline past its 48h cert lifetime and could not come back — `/agent/renew` lives behind the mTLS channel its expired cert can no longer authenticate to. Commit-one `docs/S13.1-decisions.md` (six walls, D1–D10 ruled). **SHIPPED:** agent precedence (`identity.Decide`, no network argument — a failed handshake structurally cannot trigger re-key; `Recover` ranked above `UseToken`) · **PoP re-key** on the public listener (RSA over `nonce ‖ CSR DER`; gate BEFORE crypto so timing is not a liveness oracle; **D3 amended: expiry authorizes, revocation REFUSES** — expiry is an absence of action, revocation is the presence of a decision) · its own path-scoped throttle + body cap (registered before `middleware.RealIP` — review #1 was exactly that) · **cascade restore** (`revoked_cause`, reclaim-first via the canonical oracle) · **Slice 6 `provisioned_ip`** (`needs_reexport` gains the ADDRESS cause for EVERY mode; ranges stay static-only; both contract rewrites + the label the census under-scoped) · **D10 second identifier** (key fingerprint: a LOST RESPONSE no longer bricks a gateway; ambiguity refuses; three implementations of one digest pinned to a golden vector; agent persists its pending key before submitting and reuses it so retries CONVERGE; migration guard forced expand/contract with both shim halves). Retroactive review pass 1 (leader election) folded — *leadership was a boolean that lies*; `ConfirmLeader` now matches `pg_locks`. **OWED BEFORE MERGE, IN ORDER: (1) the epic-end review pass — three passes by surface family (unauthenticated re-key surface · identity/cascade data path + migrations 0054–0061 · agent recovery loop), ~4.5–6M tokens, a merge precondition alongside CI and the walk, and a truncated pass is worse than none; (2) the walk per `docs/S13-boxwalk.md` — seven legs, TWO GATEWAYS MUST BE OFFLINE 48h+ BEFORE the session (`agentca.CertTTL` is a constant; the clock is the only way to make a cert expire); (3) the merge word.** **RULED — cascade-restore reachability: SLICE 7 (operator-initiated restore), built AFTER the review pass and BEFORE the walk; two conditions — authorized as a deliberate operator act (same class as minting a join token) and RED-PROVEN REACHABLE, not merely correct. Un-revoke PERMANENTLY REFUSED (it is the attack chain D3 exists to prevent); removing the mechanism refused (re-opens Wall 6). Walk Leg 4 stays a falsification attempt. The defect:** `RestoreCascadeRevokedDevices` has one caller (`Rekey`), devices are cascade-revoked in one place (`Revoke`), and `Rekey` refuses a revoked node — so the trigger may put the node into the one state that can never reach the restorer (dormant-machinery law). Four faces in the paper; walk Leg 4 is written as a falsification attempt. Retroactive **pass 2 (backup/restore)** still attaches to the next natural merge boundary. Registered: the 0061 contract migration (trigger = the release after this one) · no general rate limiting · body caps only on the two re-key routes · failover hysteresis persistence (beta-blocking, owned by the failover story).
-**CURRENT (2026-08-07): S12.5 — THE ORG SEAM, THE SWITCHER, AND A SIGNUP BOUNDARY THAT WAS DOING A
-SECURITY JOB BY ACCIDENT — PR #95, content tip `0920e1fe` (pre-merge).**
+**CURRENT (2026-08-07): S12.5 — THE ORG SEAM, THE SIGNUP BOUNDARY, AND THE CP-ADMIN BOOTSTRAP — PR #95,
+content tip `b1546ee6` (pre-merge).**
 
 Started as the org question: `multi_org` became payable in S12.1 while the web threw away every org but the
 first (14 call sites, each indexing zero). Shape B ruled — the server was already multi-org, only the client
 discarded. ⚠ `useOrg()` had NO consumers; the brief said 33 unchanged, measurement said fourteen changed.
 
-⛔ **THEN THE FOUNDER FOUND THE REAL DEFECT.** `/auth/signup` is `security: []` — no invitation, no
-allow-list, no setting that closes it — so a stranger could sign up, verify an email they control, and
-become OWNER of an organization on a private VPN control plane. **The only thing stopping them was the org
-CEILING, a commercial number the customer PAYS TO RAISE.** The product was selling the removal of its own
-signup control.
+⛔ **THEN THE FOUNDER FOUND THE REAL DEFECT.** `/auth/signup` was `security: []` — no invitation, no
+allow-list, no setting that closed it — so a stranger could sign up, verify their own email, and become
+OWNER of an organization on a private VPN control plane. **The only thing stopping them was the org CEILING,
+a commercial number the customer PAYS TO RAISE.** The product was selling the removal of its own signup
+control.
 
-**Signing up now creates an ACCOUNT, never an ORGANIZATION.** `users.can_create_orgs` (0073, DEFAULT false)
-is the first deployment-level authority in the product — one boolean, not a role system, because every
-existing authority is `map[orgID]role` and a permission granted in org A cannot license creating org B.
-**Public signup is closed entirely** (founder-ruled: there is never one; install creates the CP admin).
+**RULED: THERE IS NO PUBLIC SIGNUP, EVER.** Install creates the CP admin; everyone else arrives by
+invitation or SSO domain capture, both acts by someone already inside. `users.can_create_orgs` (0073,
+DEFAULT false) is the first deployment-level authority in the product — ONE BOOLEAN, not a role system,
+because every existing authority is `map[orgID]role` and a permission granted in org A cannot license
+creating org B.
 
-**The CP-admin bootstrap (0074):** first start with no users mints ONE account and prints its credential to
-the logs, once. Idempotent — a restart mints nothing and prints nothing, because **a restart must not be a
-security event**. Forced password change is a WALL (403 on every route but `POST /auth/password`, which did
-not exist and had to be built). Proven on a fresh volume with no seed: 403 → 204 → 201.
+**THE CP-ADMIN BOOTSTRAP (0074):** first start with no users mints ONE account and prints a framed banner
+with the credential — **surfaced by `make up` on the operator's terminal**, gated on the credential still
+being unclaimed so a restart never republishes it. Forced password change is a WALL (403 everywhere but
+`POST /auth/password`, which did not exist and had to be built). ⚠ Three attempts failed on the same blind
+spot — a JSON log line, then a file inside the container, then a banner hidden by `up -d`: **the question
+was never "where does the credential go", it was "where are the operator's eyes".**
 
-**Also shipped:** `/meta` edition from the licence (it was a CONSTANT saying "open" since S12.1 — every
-deployment reported open under any licence while 11 web files gated on it) · licence PERSISTENCE
-(`system_settings`, read-through, TTL floor, last-good-verdict) · `gw` authoritative when signed ·
-cross-repo band guard · the standing ceiling notice with its over-ceiling sentence · `k2026` into
-`TrustedKeys` and **`k-golden-1` removed** (its private seed is published — anyone could mint a Scale key).
+**Also shipped:** `/meta` edition from the licence (a CONSTANT said "open" since S12.1 while 11 web files
+gated on it) · licence PERSISTENCE (`system_settings`, read-through, TTL floor, last-good-verdict) · `gw`
+authoritative when signed · cross-repo band guard · the standing ceiling notice + CeilingUpgrade route ·
+`k2026` into `TrustedKeys` and **`k-golden-1` removed** (its private seed is published) · **peek-before-consume
+on enrolment** — a refusal the operator can fix must not destroy the token they need to retry.
 
-⚠ **Registered, not built:** paid bands cannot be issued at all (queue mints trial only) · granting
-`can_create_orgs` to a second person · `/auth/signup` has no rate limit · the CLI enrolment refusal burns
-the join token (two instances now) · one projection over one type for `authUser`/`CurrentUser`.
+⚠ **Registered, not built:** paid bands cannot be issued (queue mints trial only) · granting
+`can_create_orgs` to a second person · `/auth/signup` has no rate limit · one projection over one type for
+`authUser`/`CurrentUser` · **nine e2e specs SKIPPED with a named trigger** — they assert the signup flow the
+product no longer has, and their replacement is invitation-shaped.
 
 ⛔ **NEXT: the rest of the onboarding rebuild** — invitations (invitee sets their own password from the
-link), CP-admin cross-org role grants, and repairing the demo fixture + e2e specs that still assume signup.
-
-**CURRENT (2026-08-06): S12.1 — SINGLE BINARY AND ENTITLEMENTS — PR #92, content tip `bc4f2928`
-(`4c9cdf34` pre-merge).** ⚠ **RE-POINTED ONCE, IN THE SAME BREATH, RATHER THAN AT MERGE TIME.** It first named
-`63abf44f`; a laws entry landed after it. The rule says nothing follows the checkpoint except the merge —
-when something must, it is re-pointed immediately, which is what this is. ⛔ **THE LICENSING BANDS ARE NOW REAL.** Before this, `Community 1 · trial 2 · Starter 5 ·
-Growth 20 · Scale unlimited` existed only as prose. Nine slices: single binary (build tags gone,
-`internal/enterprise/{idpsync,policy,sso}` moved into the tree — **~1,784 lines relicensed to Apache-2.0,
-ONE-WAY, founder-ruled**) · entitlements as ONE map tier→features · `licence.Manager` (offline Ed25519,
-`tier` in the wire, verdict computed PER READ) · gateway + org ceilings **at creation only** · `POST
-/license` (owner-only, audited, key never logged, no restart) · the grace ladder · the enforcement census ·
-IdP-sync downgrade release.
-
-**The ladder:** `valid` → everything · `expired` (90 days) → paid capabilities STILL WORK, only NEW
-principals refused · `lapsed` → tier falls to Community. ⛔ **A running VPN never stops, no connected user is
-ever disconnected, running gateways are never stopped.** Gated: devices, gateways, agents. NOT gated: adding
-a member — a device is a principal, a person is a seat, and there are no seat gates.
-
-**Two deliberate asymmetries, both founder-ruled.** SSO **login is never gated** (`requireSSOAdmin` guards
-configuring SSO and claiming a domain only) — *a licence gate that prevents installing a licence is a trap,
-not enforcement*; the literal reading of "gated capabilities stop" is in the paper as recorded-AND-REJECTED
-with its reason. IdP sync's **subtractive half is never gated** — *a licence may stop granting access, it
-must never stop removing it*.
-
-**What the build found:** a gate added in front of a handler **silently re-aims every test that calls it**
-(`requireSSOAdmin` turned the blocking S4.5 secret-payload assertion into a 403 check) · the
-enterprise-tagged leg **had never run on this branch** and broke twice invisibly, because `test-editions`
-runs the open leg first and exits on its failure · slice 9 needed no gate BUILT, it needed the gate
-**CALLED** — `WithProvisioningGate` and its three reds had existed since S7.5.2 and nothing ever invoked
-them · the census initially counted its own status screen (*a screen that TELLS you the limit is not a
-limit*) · `build-editions` is now **vacuous and NOTHING replaced it**, recorded as a deletion of an
-invariant rather than deleted quietly.
-
-**Registered, not fixed:** `gateway_limit_reached` burns the join token (the refusal now SAYS so) ·
-`recent_activity` ships in `/overview` with no consumer · `StatCard`'s `tone="ok"` path is dormant machinery
-· the five stale-sealed local packages (`platform_secrets` rows from 2026-08-04) are ENVIRONMENTAL — CI's
-clean database is the authority.
-
-⚠ **NEXT STORY IS THE FOUNDER'S TO NAME. Do not start one.** Open items measured and ranked in the merge
-report: S12.3 in-app upgrade · the pre-launch key + ADMIN_TOKEN rotation · the `orgs[0]` question · D23
-deactivated owner's credential · D26 agent inherits CASCADE · Step 4 NOT NULL contract · the §7 full-surface
-walk (never run). ⚠ **Two more registered from the merge session: should `e2e` become REQUIRED** (it is
-continue-on-error, so PR #91 merged green while e2e correctly reported six failures — *a check that notices
-and cannot block is a check that gets merged past*), and **the July e2e red clusters** (17 red runs across
-2026-07-18/19/23/24/25/29, never diagnosed, and the prerequisite for the first — requiring a flaky check is
-how a team learns to bypass required checks).
+link), CP-admin cross-org role grants, and the fixture/e2e repair that rides with them.
 
 **`misc-development` — RAPID UI/UX BRANCH, FIRST MERGE (2026-08-05) — PR #91, content tip
 `f5f84a8a` (`9c8f5bc6` pre-merge).** ⭐ **THE BRANCH STAYS OPEN** — founder-directed: a standing
