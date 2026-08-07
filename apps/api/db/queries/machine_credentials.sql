@@ -91,3 +91,28 @@ FROM memberships m
 JOIN users u ON u.id = m.user_id
 WHERE m.org_id = $1 AND m.user_id = $2
   AND u.deleted_at IS NULL AND u.status = 'active';
+
+-- name: GetMachineOwnerStanding :one
+-- ⛔ D23: IS THE OWNER OF THIS CREDENTIAL STILL ACCOUNTABLE FOR IT?
+--
+-- D14 bound machine credentials to a human so accountability exists. The binding was checked at REST (the
+-- column is set) and never at USE — so a credential whose owner was deactivated, soft-deleted, or removed
+-- from the organization kept authenticating indefinitely. That is the ruling with its point removed: the
+-- owner stops being accountable and nothing stops the credential.
+--
+-- ⚠ ONE QUERY, THREE FACTS, because they are one question. Two round trips would invite a caller to check
+-- the cheap one and skip the other.
+--   - no row at all      => the owner is soft-deleted (users are read `deleted_at IS NULL` everywhere)
+--   - active = false     => deactivated, which SessionAuth and the CLI bearer already refuse for humans
+--   - in_org = false     => removed from the organization this credential acts in
+--
+-- ⛔ EMAIL VERIFICATION IS DELIBERATELY NOT HERE. A machine principal is EXEMPT from the human email gate
+-- by construction (authorize() skips it for IsMachine), the bootstrap administrator is pre-verified by
+-- design, and an invited operator can be mid-flow — refusing on it would contradict a ruling rather than
+-- enforce one.
+-- lint:cross-org — reads a membership for the credential's OWN org, passed in by the caller.
+SELECT
+  (u.status = 'active')::boolean AS active,
+  EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = u.id AND m.org_id = $2)::boolean AS in_org
+FROM users u
+WHERE u.id = $1 AND u.deleted_at IS NULL;
