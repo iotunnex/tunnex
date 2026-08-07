@@ -56,7 +56,7 @@ UPDATE users SET cp_admin = true, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: SetCPAdmin :execrows
--- The deployment-administrator capability, both directions (S12.6).
+-- The deployment-administrator capability, both directions (S12.11).
 --
 -- ⛔ GrantCPAdmin IS NOT THIS QUERY WITH A PARAMETER. That one is the BOOTSTRAP grant: it runs inside the
 -- transaction that creates the first organization, is unconditional, and can only ever grant. This one is an

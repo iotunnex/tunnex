@@ -70,7 +70,7 @@ describe("resolveActor", () => {
     expect(a.kind).toBe("system");
   });
 
-  // ⛔ THE CROSS-TENANT ACTOR (S12.6). A deployment administrator can change a role in an
+  // ⛔ THE CROSS-TENANT ACTOR (S12.11). A deployment administrator can change a role in an
   // organization they are not a member of — so their id is not on the roster this screen resolves
   // against, and every other arm would have called them a FORMER MEMBER of a tenant they were never
   // in. It is attached to the one event class an org's owners most need to read correctly: someone

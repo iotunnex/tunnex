@@ -9,7 +9,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 )
 
-// The deployment-administration handlers (S12.6). Both are gated by requireCPAdmin — the capability
+// The deployment-administration handlers (S12.11). Both are gated by requireCPAdmin — the capability
 // question, asked BESIDE RoleIn — and neither calls authorize(), because the caller is typically a member
 // of none of the organizations they are acting on.
 

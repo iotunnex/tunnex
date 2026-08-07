@@ -14,7 +14,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 )
 
-// The DEPLOYMENT-level gate (S12.6). requireCPAdmin is the only door to the cross-tenant grant surface, so
+// The DEPLOYMENT-level gate (S12.11). requireCPAdmin is the only door to the cross-tenant grant surface, so
 // every arm of it is a security boundary rather than a validation step.
 func TestRequireCPAdmin(t *testing.T) {
 	ctxWith := func(p *authctx.Principal) context.Context {

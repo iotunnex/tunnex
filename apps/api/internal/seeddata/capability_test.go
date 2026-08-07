@@ -71,7 +71,7 @@ func TestSeedStatesOrgCreationCapability(t *testing.T) {
 // existing org is REFUSED) has no fixture to demonstrate it against, and a reviewer clicking through sees
 // an affordance every account has, which is not the shape a real deployment has.
 //
-// ⛔ THE COUNT WENT FROM ONE TO TWO IN S12.6, DELIBERATELY, AND THE SECOND HOLDER IS A DIFFERENT KIND.
+// ⛔ THE COUNT WENT FROM ONE TO TWO IN S12.11, DELIBERATELY, AND THE SECOND HOLDER IS A DIFFERENT KIND.
 // The demo owner holds it AND belongs to the demo org, so every grant they make is an ordinary in-tenant
 // act — the cross-tenant surface has nothing to be seen against. The second holder belongs to NO
 // organization, which is what a real install mints at bootstrap.

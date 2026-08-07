@@ -1122,7 +1122,7 @@ type Querier interface {
 	// runs once per org. lint:cross-org — keyed by node_id inside the node-revoke transaction (org-authorized
 	// upstream, mirrors RevokeDevicesForNode).
 	RevokeOVPNClientCertsForNode(ctx context.Context, nodeID uuid.UUID) ([]uuid.UUID, error)
-	// The deployment-administrator capability, both directions (S12.6).
+	// The deployment-administrator capability, both directions (S12.11).
 	//
 	// ⛔ GrantCPAdmin IS NOT THIS QUERY WITH A PARAMETER. That one is the BOOTSTRAP grant: it runs inside the
 	// transaction that creates the first organization, is unconditional, and can only ever grant. This one is an

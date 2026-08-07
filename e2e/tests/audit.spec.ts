@@ -8,7 +8,7 @@ const OWNER = {
   email: "owner@demo.tunnex.local",
   pass: "tunnex-demo-password",
 };
-// ⛔ THE CROSS-TENANT CAST (S12.6). A deployment administrator who is a member of NOTHING, a second
+// ⛔ THE CROSS-TENANT CAST (S12.11). A deployment administrator who is a member of NOTHING, a second
 // organization they are not in, and an account with no memberships to be granted one. The demo owner
 // cannot play the administrator: they hold `cp_admin` AND belong to the demo org, so every grant they make
 // is an ordinary in-tenant act and proves nothing about the boundary.
@@ -143,7 +143,7 @@ test("the feed renders actions + resolved actors + secret-free details, with key
   await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0); // short last page → end
 });
 
-// ⛔ THE INVARIANT WITH THE WEAKEST COVERAGE, DRIVEN END TO END (S12.6).
+// ⛔ THE INVARIANT WITH THE WEAKEST COVERAGE, DRIVEN END TO END (S12.11).
 //
 // A deployment administrator can change a role in ANY organization. The rule is that the TARGET org's
 // owners see it in THEIR feed — the only feed they read — because a privilege change made inside your

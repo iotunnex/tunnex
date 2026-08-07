@@ -14,7 +14,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
-// The deployment-administrator surface (S12.6): the ONE place where a caller acts on an organization they
+// The deployment-administrator surface (S12.11): the ONE place where a caller acts on an organization they
 // are not a member of.
 //
 // ⛔ THE AUTHORITY IS ASKED BESIDE `RoleIn`, NEVER INSIDE IT. The tempting shortcut is to synthesise an
