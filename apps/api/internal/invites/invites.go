@@ -115,9 +115,21 @@ func (s *Service) Create(ctx context.Context, actor, orgID uuid.UUID, email, rol
 	if err != nil {
 		return "", err
 	}
-	s.mail(ctx, email, "You're invited to Tunnex", "You've been invited to join an organization on Tunnex: "+s.baseURL+"/accept-invite?token="+raw)
+	// ⭐ THE INVITE SURVIVES A DELIVERY FAILURE, and the caller is told. The row is real and the link is
+	// valid; destroying it because mail is down would throw away the one thing the operator can still hand
+	// over by another route.
+	if err := s.mail(ctx, email, "You're invited to Tunnex",
+		"You've been invited to join an organization on Tunnex: "+s.baseURL+"/accept-invite?token="+raw); err != nil {
+		return raw, ErrNotDelivered
+	}
 	return raw, nil
 }
+
+// ErrNotDelivered means the invitation EXISTS and the email did not leave.
+//
+// ⛔ TWO FACTS, BOTH TRUE, AND THE CALLER MUST BE ABLE TO SAY BOTH. Returning success hid the second;
+// returning a plain error would hide the first and invite a retry that creates nothing new.
+var ErrNotDelivered = errors.New("the invitation was created but the email could not be sent")
 
 // Accept consumes an invite token, provisions/links the user (verifying the
 // email — the token proves inbox control), and adds the membership.
@@ -226,7 +238,10 @@ func (s *Service) Resend(ctx context.Context, actor, orgID uuid.UUID, email stri
 	if err != nil {
 		return err
 	}
-	s.mail(ctx, email, "Your Tunnex invitation", "Your invitation link: "+s.baseURL+"/accept-invite?token="+raw)
+	if err := s.mail(ctx, email, "Your Tunnex invitation",
+		"Your invitation link: "+s.baseURL+"/accept-invite?token="+raw); err != nil {
+		return ErrNotDelivered // the token was re-minted; only the delivery failed
+	}
 	return nil
 }
 
@@ -246,10 +261,22 @@ func (s *Service) Revoke(ctx context.Context, actor, orgID uuid.UUID, email stri
 	})
 }
 
-func (s *Service) mail(ctx context.Context, to, subject, body string) {
+// mail sends and RETURNS whether it left.
+//
+// ⛔ IT USED TO SWALLOW THE ERROR, and that is the worst defect of the three this story fixes. The
+// invitation was created, the send failed, the API answered 202 and the screen said "Invitation sent" —
+// while nothing had been sent. Invitations are now the ONLY way anyone joins a deployment, so a silently
+// dropped one is a person who never gets in and an operator with no reason to look.
+//
+// ⭐ "INVITE CREATED, DELIVERY FAILED" IS TWO FACTS AND BOTH ARE TRUE. The row is real and the link is
+// valid — it can be sent another way — so the invitation is kept and the RESPONSE stops claiming it was
+// delivered.
+func (s *Service) mail(ctx context.Context, to, subject, body string) error {
 	if err := s.mailer.Send(ctx, mail.Message{To: to, Subject: subject, Text: body}); err != nil {
-		s.logger.Warn("invite_email_failed", slog.String("to", to), slog.String("error", err.Error()))
+		s.logger.Error("invite_email_failed", slog.String("to", to), slog.String("error", err.Error()))
+		return err
 	}
+	return nil
 }
 
 func newToken() (raw string, hash []byte, err error) {

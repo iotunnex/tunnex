@@ -1070,6 +1070,9 @@ type InvitationRole string
 
 // InviteCreated defines model for InviteCreated.
 type InviteCreated struct {
+	// Delivered Whether the invitation email actually left. ⛔ False means the invitation EXISTS and delivery FAILED — two facts, both true. The token is still valid and can be handed over another way, so the invitation is kept; what changes is that the response stops claiming a send happened.
+	Delivered *bool `json:"delivered,omitempty"`
+
 	// InviteToken Raw one-time accept token. The dashboard builds the accept link (origin + /accept-invite?token=…) for the admin to hand to the invitee — the SMTP-less delivery path. Also emailed when SMTP is configured. Shown once; not retrievable later.
 	InviteToken string `json:"invite_token"`
 	Message     string `json:"message"`
@@ -1261,9 +1264,12 @@ type Meta struct {
 	ProtocolVersion int `json:"protocol_version"`
 
 	// PublicBaseUrl S8.2c: the control plane's own CONFIGURED public base URL (APP_BASE_URL / install.sh's public address) — the AUTHORITATIVE answer to "where do gateways reach me", independent of how an admin happened to open the dashboard (a tunnel/alias/bare IP would bake the wrong URL into the emitted gateway install command). The gateway-enroll command derives TUNNEX_API_URL/TUNNEX_AGENT_URL from this, never from window.location. Empty when unset (the SPA then falls back to its own origin).
-	PublicBaseUrl *string            `json:"public_base_url,omitempty"`
-	SetupComplete *bool              `json:"setup_complete,omitempty"`
-	SsoProviders  []MetaSsoProviders `json:"sso_providers"`
+	PublicBaseUrl *string `json:"public_base_url,omitempty"`
+	SetupComplete *bool   `json:"setup_complete,omitempty"`
+
+	// SmtpConfigured Whether this deployment can send email at all. ⛔ False means invitations, password resets and email verification cannot be delivered — and invitations are the only way anyone joins. The screens that send mail say so BEFORE the operator acts, rather than after a recipient does not receive something.
+	SmtpConfigured *bool              `json:"smtp_configured,omitempty"`
+	SsoProviders   []MetaSsoProviders `json:"sso_providers"`
 }
 
 // MetaEdition defines model for Meta.Edition.

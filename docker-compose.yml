@@ -67,8 +67,12 @@ services:
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost}
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
-      SMTP_HOST: ${SMTP_HOST:-mailpit}
-      SMTP_PORT: ${SMTP_PORT:-1025}
+      # ⛔ NO DEFAULT. This used to read `${SMTP_HOST:-mailpit}` — so a stack that never configured mail
+      # silently pointed at a FAKE SMTP server that captures and never delivers, and the product reported
+      # success. Mailpit now lives in docker-compose.dev.yml, which a customer never receives, and reaching
+      # it requires asking for it: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up`.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
       SMTP_FROM: ${SMTP_FROM:-no-reply@tunnex.local}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
@@ -170,14 +174,6 @@ services:
       postgres:
         condition: service_healthy
 
-  mailpit:
-    image: axllent/mailpit:latest
-    restart: unless-stopped
-    ports:
-      - "${HOST_MAILPIT_UI:-8025}:8025" # web UI
-      - "${HOST_MAILPIT_SMTP:-1025}:1025" # SMTP
-    environment:
-      MP_MAX_MESSAGES: 500
 
 volumes:
   postgres_data:

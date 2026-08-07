@@ -1,0 +1,35 @@
+# Local development ONLY — a fake inbox, never delivered mail.
+#
+# ⛔ IT IS A SEPARATE FILE BECAUSE A CUSTOMER MUST NOT BE ABLE TO REACH IT BY ACCIDENT. Mailpit captures
+# mail and never delivers it; a shipped deployment pointed at it would drop every invitation, password
+# reset and verification link while every screen reported success — and invitations are now the ONLY way
+# anyone joins a deployment.
+#
+# ⚠ `deploy/tunnex.yml` (what install.sh fetches) has never contained Mailpit. What DID reach a customer
+# was the default: docker-compose.yml read `SMTP_HOST:-mailpit`, so anyone who cloned the repo instead of
+# using the installer got the fake mailer without asking for it. Both halves are fixed: no default, and
+# the service is not in the file they run.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#   (or `make up`, which passes both — see the Makefile)
+#
+# Inbox: http://localhost:8025
+
+name: tunnex
+
+services:
+  api:
+    environment:
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      SMTP_FROM: ${SMTP_FROM:-tunnex@localhost}
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "${HOST_MAILPIT_UI:-8025}:8025" # web UI
+      - "${HOST_MAILPIT_SMTP:-1025}:1025" # SMTP
+    environment:
+      MP_MAX_MESSAGES: 500

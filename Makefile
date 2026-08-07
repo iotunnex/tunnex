@@ -2,7 +2,13 @@
 # One-command boot lives here: `make up` / `make down`.
 
 .DEFAULT_GOAL := help
-COMPOSE := docker compose
+# ⚠ `make up` COMPOSES THE DEV OVERRIDE IN — Mailpit lives there now, not in docker-compose.yml, so a
+# customer who runs the base file (or clones the repo) cannot end up pointed at a fake mailer that
+# captures mail and reports success. Local dev keeps its inbox by asking for it.
+COMPOSE := docker compose -f docker-compose.yml -f docker-compose.dev.yml
+# The base stack ALONE — what a customer's deployment resembles. Used by targets that must not inherit
+# dev conveniences.
+COMPOSE_BASE := docker compose
 
 .PHONY: help
 help: ## Show this help
@@ -10,7 +16,7 @@ help: ## Show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: up
-up: ## Start the full stack (postgres, redis, api, web, nginx, node-agent, mailpit) — OPEN edition
+up: ## Start the full DEV stack (adds docker-compose.dev.yml — Mailpit, a fake inbox, never delivers)
 	@test -f .env || cp .env.example .env
 	$(COMPOSE) up -d --build
 	@echo "Tunnex is starting → http://localhost   (Mailpit → http://localhost:8025)"
@@ -90,7 +96,7 @@ OPEN_ENV = COMPOSE_PROJECT_NAME=tunnex-open HOST_HTTP_PORT=8081 HOST_API_MTLS_PO
 .PHONY: up-open-review
 up-open-review: ## Start the OPEN-edition review stack alongside the primary one (http://localhost:8081)
 	@test -f .env || cp .env.example .env
-	$(OPEN_ENV) docker compose up -d --build
+	$(OPEN_ENV) docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 	@echo ""
 	@echo "OPEN-edition review stack -> http://localhost:8081   (Mailpit -> http://localhost:8026)"
 	@echo "Verify:  curl -s localhost:8081/api/v1/meta | grep -o '\"edition\":\"[a-z]*\"'   # -> open"
@@ -108,7 +114,7 @@ seed-open: ## Seed the open-edition review stack (migrate + base seed + fixtures
 
 .PHONY: down-open-review
 down-open-review: ## Stop the open-edition review stack (leaves the primary stack running)
-	$(OPEN_ENV) docker compose down
+	$(OPEN_ENV) docker compose -f docker-compose.yml -f docker-compose.dev.yml down
 
 .PHONY: down
 down: ## Stop the stack (keep volumes)

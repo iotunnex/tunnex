@@ -193,6 +193,10 @@ type apiServer struct {
 	policy    policyPort    // nil in the open build (Zero Trust, S7.1)
 	accessLog accessLogPort // nil in the open build (Zero Trust visibility, S7.5.1)
 	idpSync   idpSyncPort   // nil in the open build (IdP-group sync, S7.5.2)
+	// ⛔ smtpConfigured — whether this deployment can send mail AT ALL. Served by /meta so the screens that
+	// send mail can say so BEFORE the operator acts. Invitations are the only way anyone joins, so a
+	// deployment without it is unusable while every screen reports success.
+	smtpConfigured bool
 	// deviceApprovalEnabled gates device posture (S7.3). NAMED per-feature (its own
 	// wire files), not a proxy behind s.policy — device posture and Zero Trust policy
 	// are distinct enterprise features (F2 / ledgered S12.1 refactor).

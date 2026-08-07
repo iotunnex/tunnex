@@ -58,17 +58,18 @@ curl -fsSL <url>/install.sh | TUNNEX_PUBLIC_ADDR=vpn.acme.com TUNNEX_SMTP=skip s
 
 ## Develop locally
 
-The dev stack builds from source (Mailpit for email, no public address):
+The dev stack builds from source (⚠ Mailpit for email — a FAKE inbox that never delivers, and it lives in
+`docker-compose.dev.yml` so a real deployment cannot reach it; no public address):
 
 ```bash
-make up                   # build + start postgres, redis, api, web, nginx, node-agent, mailpit
+make up                   # build + start postgres, redis, api, web, nginx, node-agent (+ dev Mailpit)
 ```
 
 Then:
 
 - App shell → http://localhost
 - API health → http://localhost/healthz
-- Mailpit (dev email inbox) → http://localhost:8025
+- Mailpit (⚠ DEV-ONLY fake inbox; captures mail, never delivers) → http://localhost:8025
 
 Node ≥20 is required for the web/client workspaces (pinned via `.nvmrc` + `engine-strict`).
 
