@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
@@ -28,6 +29,11 @@ import (
 type stubMachineQ struct {
 	cred    sqlc.MachineCredential
 	touched *int
+	// D23: the owner's standing. Zero value = a live, in-org owner, so every pre-existing case in this
+	// file keeps meaning what it meant.
+	ownerGone        bool
+	ownerDeactivated bool
+	ownerOutOfOrg    bool
 }
 
 func (s stubMachineQ) GetMachineCredentialByHash(_ context.Context, _ []byte) (sqlc.MachineCredential, error) {
@@ -38,6 +44,13 @@ func (s stubMachineQ) TouchMachineCredentialUsed(_ context.Context, _ uuid.UUID)
 		*s.touched++
 	}
 	return nil
+}
+
+func (s stubMachineQ) GetMachineOwnerStanding(_ context.Context, _ sqlc.GetMachineOwnerStandingParams) (sqlc.GetMachineOwnerStandingRow, error) {
+	if s.ownerGone {
+		return sqlc.GetMachineOwnerStandingRow{}, pgx.ErrNoRows // soft-deleted: users are read deleted_at IS NULL
+	}
+	return sqlc.GetMachineOwnerStandingRow{Active: !s.ownerDeactivated, InOrg: !s.ownerOutOfOrg}, nil
 }
 
 func req(tok string) *http.Request {
@@ -54,7 +67,7 @@ func TestSeamRefusesAnUnassignedMachineCredential(t *testing.T) {
 	unassigned := base
 	unassigned.UserID = pgtype.UUID{Valid: false}
 	var touched int
-	if p, err := MachineAuth(stubMachineQ{unassigned, &touched})(req(tok)); p != nil || err != nil {
+	if p, err := MachineAuth(stubMachineQ{cred: unassigned, touched: &touched})(req(tok)); p != nil || err != nil {
 		t.Fatalf("an UNASSIGNED machine credential authenticated: principal=%+v err=%v", p, err)
 	}
 
@@ -73,7 +86,7 @@ func TestSeamRefusesAnUnassignedMachineCredential(t *testing.T) {
 	owned := base
 	owned.UserID = pgtype.UUID{Bytes: uuid.New(), Valid: true}
 	var touchedOwned int
-	p, err := MachineAuth(stubMachineQ{owned, &touchedOwned})(req(tok))
+	p, err := MachineAuth(stubMachineQ{cred: owned, touched: &touchedOwned})(req(tok))
 	if err != nil || p == nil {
 		t.Fatalf("an OWNED machine credential was refused at the seam: err=%v", err)
 	}
@@ -83,5 +96,58 @@ func TestSeamRefusesAnUnassignedMachineCredential(t *testing.T) {
 	// And an OWNED credential IS stamped — otherwise "not stamped" would be trivially true for everything.
 	if touchedOwned != 1 {
 		t.Fatalf("an owned credential was stamped %d time(s), want 1", touchedOwned)
+	}
+}
+
+// ⛔ D23 — THE BINDING WAS A COLUMN, NOT A CONTROL.
+//
+// MachineAuth checked that `user_id` was SET and never that the person behind it was still accountable, so
+// a credential outlived its owner's deactivation, soft-deletion or removal from the organization —
+// indefinitely. D14 bound credentials to humans SO THAT accountability exists; a binding nothing re-reads
+// at use is the ruling with its point removed.
+//
+// ⚠ REDS BOTH DIRECTIONS. A refusal with no permitted case would be indistinguishable from a broken seam,
+// and the permitted case is asserted FIRST so a later failure cannot be read as "machine auth is down".
+func TestSeamRefusesACredentialWhoseOwnerIsNoLongerAccountable(t *testing.T) {
+	tok := machineauth.TokenPrefix + "abc"
+	live := sqlc.MachineCredential{
+		ID: uuid.New(), OrgID: uuid.New(), Name: "gitops", Role: "operator",
+		UserID: pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+	}
+
+	// ── THE PERMITTED CASE: an active owner, still in the org, still authenticates.
+	var touched int
+	p, err := MachineAuth(stubMachineQ{cred: live, touched: &touched})(req(tok))
+	if err != nil || p == nil {
+		t.Fatalf("⛔ an ACTIVE owner's credential was refused — GitOps is down for everyone: p=%+v err=%v", p, err)
+	}
+	if !p.IsMachine() || p.OwnerUserID == uuid.Nil {
+		t.Fatalf("the principal lost its machine identity or its owner: %+v", p)
+	}
+
+	// ── THE THREE REFUSALS. Each is a state a person can be in that ends their accountability.
+	for _, tc := range []struct {
+		who   string
+		store stubMachineQ
+	}{
+		{"a DEACTIVATED owner — the state SessionAuth and the CLI bearer already refuse for humans",
+			stubMachineQ{cred: live, ownerDeactivated: true}},
+		{"an owner REMOVED FROM THE ORGANIZATION this credential acts in",
+			stubMachineQ{cred: live, ownerOutOfOrg: true}},
+		{"a SOFT-DELETED owner — no user row at all",
+			stubMachineQ{cred: live, ownerGone: true}},
+	} {
+		p, err := MachineAuth(tc.store)(req(tok))
+		if p != nil || err != nil {
+			t.Errorf("⛔ A CREDENTIAL OWNED BY %s STILL AUTHENTICATED: principal=%+v err=%v\n\n"+
+				"An offboarded employee's GitOps operator keeps mutating this organization until somebody "+
+				"remembers the credential exists.", tc.who, p, err)
+		}
+	}
+
+	// ⛔ AND THE REFUSAL CARRIES NO ORACLE. Every arm returns the same (nil, nil) as unknown and revoked:
+	// "your owner was deactivated" would tell whoever holds a stolen token something about a person.
+	if _, err := MachineAuth(stubMachineQ{cred: live, ownerDeactivated: true})(req(tok)); err != nil {
+		t.Error("the owner-standing refusal is distinguishable from unknown/revoked at the wire")
 	}
 }

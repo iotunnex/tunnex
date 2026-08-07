@@ -31,6 +31,8 @@ import (
 type machineCredStore interface {
 	GetMachineCredentialByHash(ctx context.Context, tokenHash []byte) (sqlc.MachineCredential, error)
 	TouchMachineCredentialUsed(ctx context.Context, id uuid.UUID) error
+	// D23: is the owner still accountable? See the arm in MachineAuth.
+	GetMachineOwnerStanding(ctx context.Context, arg sqlc.GetMachineOwnerStandingParams) (sqlc.GetMachineOwnerStandingRow, error)
 }
 
 func MachineAuth(q machineCredStore) BearerAuthFunc {
@@ -63,6 +65,36 @@ func MachineAuth(q machineCredStore) BearerAuthFunc {
 		// ⚠ AND THIS ARM RETIRES AT STEP 4, when the column contracts to NOT NULL. It cannot be removed before
 		// then: assignment is an operator action with no code date.
 		if !cred.UserID.Valid {
+			return nil, nil
+		}
+		// ⛔ D23 — AN OWNER WHO IS NO LONGER ACCOUNTABLE CANNOT LEND THEIR ACCOUNTABILITY TO A CREDENTIAL.
+		//
+		// The binding was checked AT REST (the column is set) and never AT USE, so a credential outlived its
+		// owner's deactivation, soft-deletion, or removal from the org — indefinitely. D14 bound credentials
+		// to humans SO THAT accountability exists; without this arm the binding is a column, not a control.
+		//
+		// ⚠ THE OPERATIONAL COST IS REAL AND IS NOT MITIGATED HERE: deactivating a departing employee now
+		// stops every GitOps operator they owned, AT THAT MOMENT, with no warning anywhere. Neither the
+		// deactivation path nor its UI mentions machine credentials, and nothing in the product lists the
+		// credentials a given person owns. That is the S13.1 class — a live thing stopping during ordinary
+		// maintenance — and the honest statement is that the warning does not exist yet, not that this is
+		// safe because the refusal is correct. Registered; re-assignment before deactivation is the remedy
+		// and there is no screen for it.
+		//
+		// ⛔ REFUSED THE SAME WAY AS EVERY OTHER ARM: `nil, nil` → a generic 401. "Your owner was
+		// deactivated" would be an oracle about a person to whoever holds a stolen token.
+		//
+		// ⚠ EMAIL VERIFICATION IS NOT PART OF THIS. A machine is exempt from the human email gate by
+		// construction, and the bootstrap admin is pre-verified by design — refusing on it would contradict
+		// a ruling rather than enforce one.
+		standing, err := q.GetMachineOwnerStanding(r.Context(), sqlc.GetMachineOwnerStandingParams{
+			ID: cred.UserID.Bytes, OrgID: cred.OrgID,
+		})
+		if err != nil {
+			// Includes ErrNoRows: the owner is soft-deleted. Fail closed, no oracle.
+			return nil, nil
+		}
+		if !standing.Active || !standing.InOrg {
 			return nil, nil
 		}
 		_ = q.TouchMachineCredentialUsed(r.Context(), cred.ID) // best-effort telemetry

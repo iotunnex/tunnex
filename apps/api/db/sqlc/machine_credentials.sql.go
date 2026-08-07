@@ -121,6 +121,49 @@ func (q *Queries) GetMachineCredentialByHash(ctx context.Context, tokenHash []by
 	return i, err
 }
 
+const getMachineOwnerStanding = `-- name: GetMachineOwnerStanding :one
+SELECT
+  (u.status = 'active')::boolean AS active,
+  EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = u.id AND m.org_id = $2)::boolean AS in_org
+FROM users u
+WHERE u.id = $1 AND u.deleted_at IS NULL
+`
+
+type GetMachineOwnerStandingParams struct {
+	ID    uuid.UUID `json:"id"`
+	OrgID uuid.UUID `json:"org_id"`
+}
+
+type GetMachineOwnerStandingRow struct {
+	Active bool `json:"active"`
+	InOrg  bool `json:"in_org"`
+}
+
+// ⛔ D23: IS THE OWNER OF THIS CREDENTIAL STILL ACCOUNTABLE FOR IT?
+//
+// D14 bound machine credentials to a human so accountability exists. The binding was checked at REST (the
+// column is set) and never at USE — so a credential whose owner was deactivated, soft-deleted, or removed
+// from the organization kept authenticating indefinitely. That is the ruling with its point removed: the
+// owner stops being accountable and nothing stops the credential.
+//
+// ⚠ ONE QUERY, THREE FACTS, because they are one question. Two round trips would invite a caller to check
+// the cheap one and skip the other.
+//   - no row at all      => the owner is soft-deleted (users are read `deleted_at IS NULL` everywhere)
+//   - active = false     => deactivated, which SessionAuth and the CLI bearer already refuse for humans
+//   - in_org = false     => removed from the organization this credential acts in
+//
+// ⛔ EMAIL VERIFICATION IS DELIBERATELY NOT HERE. A machine principal is EXEMPT from the human email gate
+// by construction (authorize() skips it for IsMachine), the bootstrap administrator is pre-verified by
+// design, and an invited operator can be mid-flow — refusing on it would contradict a ruling rather than
+// enforce one.
+// lint:cross-org — reads a membership for the credential's OWN org, passed in by the caller.
+func (q *Queries) GetMachineOwnerStanding(ctx context.Context, arg GetMachineOwnerStandingParams) (GetMachineOwnerStandingRow, error) {
+	row := q.db.QueryRow(ctx, getMachineOwnerStanding, arg.ID, arg.OrgID)
+	var i GetMachineOwnerStandingRow
+	err := row.Scan(&i.Active, &i.InOrg)
+	return i, err
+}
+
 const getOrgMemberVerification = `-- name: GetOrgMemberVerification :one
 SELECT (u.email_verified_at IS NOT NULL)::boolean AS email_verified
 FROM memberships m
