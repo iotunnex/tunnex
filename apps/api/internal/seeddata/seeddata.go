@@ -58,11 +58,11 @@ const (
 	// DemoNoOrgPassword is that user's password (development only).
 	DemoNoOrgPassword = "tunnex-demo-password"
 
-	// --- THE CROSS-TENANT FIXTURE (S12.6) ------------------------------------------------------------
+	// --- THE CROSS-TENANT FIXTURE (S12.11) ------------------------------------------------------------
 	//
 	// ⛔ THE DEPLOYMENT ADMINISTRATOR CANNOT BE THE DEMO OWNER, and that is why these rows exist. The demo
 	// owner holds `cp_admin` AND belongs to the demo org — so any grant they make is an ordinary in-tenant
-	// act, and the one property the S12.6 surface exists for (acting on an organization you are NOT in)
+	// act, and the one property the S12.11 surface exists for (acting on an organization you are NOT in)
 	// has no fixture to be seen against. A second organization is needed for the same reason: something
 	// must be on the other side of the boundary.
 

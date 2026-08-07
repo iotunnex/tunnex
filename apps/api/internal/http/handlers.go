@@ -114,7 +114,7 @@ func requireVerifiedUser(ctx context.Context) (*authctx.Principal, error) {
 	return p, nil
 }
 
-// requireCPAdmin is the DEPLOYMENT-level gate: the caller holds `users.cp_admin` (S12.6).
+// requireCPAdmin is the DEPLOYMENT-level gate: the caller holds `users.cp_admin` (S12.11).
 //
 // ⛔ IT WRAPS requireVerifiedUser RATHER THAN STANDING BESIDE IT, and that is the whole reason it is one
 // function instead of four checks. The bootstrap admin holds `cp_admin` AND the one-time password that was

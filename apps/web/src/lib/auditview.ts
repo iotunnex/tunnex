@@ -44,7 +44,7 @@ export type ActorKind =
   /**
    * ⛔ A FIFTH ARM, BECAUSE THE FOURTH WOULD HAVE LIED ABOUT A REAL PERSON.
    *
-   * S12.6 gave deployment administrators the power to change a role in ANY organization. They are
+   * S12.11 gave deployment administrators the power to change a role in ANY organization. They are
    * typically a member of NONE of them — so their `actor_id` is not on the roster this screen
    * resolves against, and the existing arms would have rendered *"former member 019fc421"*: a
    * confident false claim about somebody who was never a member at all, attached to the one event

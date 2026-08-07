@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-// ⭐ REWRITTEN AGAINST THE PRODUCT AS IT IS (S12.6), not deleted. Public signup is closed (founder-ruled):
+// ⭐ REWRITTEN AGAINST THE PRODUCT AS IT IS (S12.11), not deleted. Public signup is closed (founder-ruled):
 // a self-hosted control plane is owned by ONE COMPANY, install mints the deployment administrator, and
 // everyone else arrives by INVITATION. `POST /api/v1/auth/signup` now answers `403 signup_closed`.
 //

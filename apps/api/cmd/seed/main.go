@@ -208,10 +208,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ── THE CROSS-TENANT FIXTURE (S12.6) ─────────────────────────────────────────────────────────────
+	// ── THE CROSS-TENANT FIXTURE (S12.11) ─────────────────────────────────────────────────────────────
 	//
 	// ⛔ THE DEMO OWNER CANNOT DEMONSTRATE THIS SURFACE. They hold `cp_admin` and belong to the demo org,
-	// so every grant they make is an ordinary in-tenant act. The property S12.6 exists for — acting on an
+	// so every grant they make is an ordinary in-tenant act. The property S12.11 exists for — acting on an
 	// organization you are NOT a member of — needs a holder on the outside and an organization on the far
 	// side of the boundary. Both are seeded here; neither is a member of the other's world.
 	// ⚠ THE CAPABILITY IS WRITTEN AS A LITERAL AT EVERY CALL SITE, NEVER PASSED THROUGH A HELPER

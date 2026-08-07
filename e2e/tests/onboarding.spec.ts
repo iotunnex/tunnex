@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// ⭐ REWRITTEN AGAINST THE PRODUCT AS IT IS (S12.6). The funnel these specs were written for asked ONE
+// ⭐ REWRITTEN AGAINST THE PRODUCT AS IT IS (S12.11). The funnel these specs were written for asked ONE
 // question — "do you have an organization?" — and offered a create form to everyone who did not. Two
 // rulings changed that, and the specs were skipped in a batch rather than re-pointed:
 //

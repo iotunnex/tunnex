@@ -16,7 +16,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
-// ⛔ THE ONE OPERATION IN THE PRODUCT THAT CROSSES A TENANT BOUNDARY (S12.6).
+// ⛔ THE ONE OPERATION IN THE PRODUCT THAT CROSSES A TENANT BOUNDARY (S12.11).
 //
 // Everything else is authorized by membership: `authorize()` asks `RoleIn(orgID)` and a caller who is not
 // in the org reads as `org_not_found`. This asks a DIFFERENT question — does this account hold

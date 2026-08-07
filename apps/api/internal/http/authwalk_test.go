@@ -27,7 +27,7 @@ var walkBodies = map[string]string{
 	// ⛔ The forced-password-change escape hatch. It is the ONE authenticated route not blocked by a
 	// forced change — without a body the validator 400s first and the walk cannot prove it still 401s.
 	"changepassword":     `{"current_password":"walk-probe-current","new_password":"walk-probe-new-password"}`,
-	// ⛔ THE CROSS-TENANT SURFACE (S12.6). The walk CAUGHT these: both routes answered 400 to a sessionless
+	// ⛔ THE CROSS-TENANT SURFACE (S12.11). The walk CAUGHT these: both routes answered 400 to a sessionless
 	// caller, so an unauthenticated stranger was being told about request-body validation on the one surface
 	// that edits privileges in organizations the caller is not in.
 	"adminsetorgrole": `{"role":"member"}`,
