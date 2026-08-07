@@ -118,3 +118,96 @@ func asAPIErr(err error, target **apierr.Error) bool {
 	}
 	return ok
 }
+
+// TestDeleteAndRenameACompletedRetirement — S12.12 D2 and D3, driven in the order the product enforces.
+//
+// ⛔ THE SEQUENCE IS THE SAFETY ARGUMENT FOR THE DELETE, so the test walks it rather than asserting the
+// delete in isolation. Devices homed there → revoke refused. Devices moved → revoke proceeds. Node revoked
+// → delete permitted, and its enrolment token goes with it. A delete tested against a hand-made revoked row
+// would pass while proving nothing about whether that state is reachable safely.
+func TestDeleteAndRenameACompletedRetirement(t *testing.T) {
+	dsn := os.Getenv("TUNNEX_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TUNNEX_TEST_DATABASE_URL to run this integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	org, owner, node := uuid.New(), uuid.New(), uuid.New()
+	ex := func(sql string, args ...any) {
+		t.Helper()
+		if _, e := pool.Exec(ctx, sql, args...); e != nil {
+			t.Fatalf("seed %q: %v", sql, e)
+		}
+	}
+	ex(`INSERT INTO organizations (id,name,slug,pool_cidr) VALUES ($1,'D',$2,'10.93.0.0/24')`, org, "d-"+org.String()[:8])
+	ex(`INSERT INTO users (id,email) VALUES ($1,$2)`, owner, "dl-"+owner.String()[:8]+"@ex.com")
+	ex(`INSERT INTO memberships (org_id,user_id,role) VALUES ($1,$2,'owner')`, org, owner)
+	ex(`INSERT INTO nodes (id,org_id,name,cert_serial) VALUES ($1,$2,'gw-typpo',$3)`, node, org, "s-"+node.String()[:8])
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM organizations WHERE id=$1", org) })
+	svc := NewService(pool, nil, nil)
+
+	// D3 — THE TYPO IS CORRECTABLE, which it was not before: enrolment is a CLI act and the name it supplies
+	// was written once and never again.
+	renamed, err := svc.RenameNode(ctx, owner, org, node, "  gw-london  ")
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if renamed.Name != "gw-london" {
+		t.Fatalf("rename must trim: %q", renamed.Name)
+	}
+	if _, err := svc.RenameNode(ctx, owner, org, node, "   "); err == nil {
+		t.Fatal("an all-whitespace name must be refused, not stored — it is how an operator tells one " +
+			"gateway from another on every screen")
+	}
+
+	// ⛔ A LIVE GATEWAY CANNOT BE DELETED. Its devices cascade, and that cascade is only harmless because the
+	// revoke already refused while any were homed there.
+	if err := svc.DeleteRevokedNode(ctx, owner, org, node); err == nil {
+		t.Fatal("deleting a LIVE gateway must be refused — the cascade would be a silent outage with no " +
+			"revoked rows left behind to explain it")
+	}
+
+	// The enrolment token that produced this gateway, which must not outlive it.
+	ex(`INSERT INTO node_join_tokens (token_hash,org_id,node_name,expires_at,consumed_node_id)
+	    VALUES ($1,$2,'gw-london',now() + interval '1 day',$3)`, "hash-"+node.String()[:8], org, node)
+
+	if err := svc.Revoke(ctx, owner, org, node); err != nil {
+		t.Fatalf("revoke with nothing homed there: %v", err)
+	}
+	if err := svc.DeleteRevokedNode(ctx, owner, org, node); err != nil {
+		t.Fatalf("delete a revoked gateway: %v", err)
+	}
+	var nodes, tokens int
+	if e := pool.QueryRow(ctx, "SELECT count(*) FROM nodes WHERE id=$1", node).Scan(&nodes); e != nil {
+		t.Fatal(e)
+	}
+	if e := pool.QueryRow(ctx, "SELECT count(*) FROM node_join_tokens WHERE org_id=$1", org).Scan(&tokens); e != nil {
+		t.Fatal(e)
+	}
+	if nodes != 0 {
+		t.Fatal("the gateway row must be gone")
+	}
+	// ⛔ D2 — THE TOKEN GOES WITH IT. `consumed_node_id` is ON DELETE SET NULL, so without the deliberate
+	// cleanup the token would survive UNLINKED and still enrol a gateway. That is the finding: the FK would
+	// have left a working credential behind for a gateway an operator believes they destroyed.
+	if tokens != 0 {
+		t.Fatal("the enrolment token must be cleaned with the delete, not orphaned by ON DELETE SET NULL")
+	}
+	// And the audit row survives the row it describes, carrying the NAME — the only form of the question
+	// anyone asks afterwards.
+	var withName int
+	if e := pool.QueryRow(ctx,
+		`SELECT count(*) FROM audit_logs WHERE org_id=$1 AND action='node.deleted' AND metadata->>'name'='gw-london'`,
+		org).Scan(&withName); e != nil {
+		t.Fatal(e)
+	}
+	if withName != 1 {
+		t.Fatalf("the delete's audit row must name the gateway; after the delete there is nothing left to "+
+			"join against. got %d", withName)
+	}
+}

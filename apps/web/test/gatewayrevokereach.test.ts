@@ -47,6 +47,16 @@ describe("revoking a gateway is reachable from the Gateways page", () => {
   });
 
   it("⚠ an already-revoked gateway is not offered a revoke — there is no un-revoke", () => {
-    expect(page).toMatch(/status === "revoked"\s*\?\s*null/);
+    // ⛔ THE ASSERTION CHANGED SHAPE WHEN DELETE SHIPPED (S12.12 D2), and only the shape. It used to read
+    // `status === "revoked" ? null` — the revoked branch rendered NOTHING, which was the right answer while
+    // there was nothing a revoked gateway could be offered. There is now: delete. So the branch still must
+    // not offer a revoke, and the test says exactly that rather than pinning the literal `null` it happened
+    // to be expressed as. A census that matches an implementation detail fails on the refactor and passes on
+    // the regression.
+    const branchAt = page.indexOf('r.status === "revoked" ?');
+    expect(branchAt).toBeGreaterThan(-1);
+    const branch = page.slice(branchAt, page.indexOf('confirmRevoke === r.id ?', branchAt));
+    expect(branch).not.toMatch(/setConfirmRevoke/);
+    expect(branch).toMatch(/setConfirmDelete/);
   });
 });

@@ -650,6 +650,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/nodes/{nodeId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a REVOKED gateway permanently
+         * @description S12.12 D2. A revoked gateway is terminal and never serves anything again, but its row stayed on the list forever — so a deployment accumulated dead entries an operator could not clear. Only a REVOKED node can be deleted, and that predicate is the whole safety argument: the revoke itself refuses while any device is homed there, so by the time a node is revoked the transfer has already moved them and the cascading foreign keys have nothing left to destroy. It is the SEQUENCE that makes this safe, not the FK actions. The gateway's ENROLMENT TOKEN is deleted with it: it is ON DELETE SET NULL and would have survived unlinked, and a token whose gateway an operator has just deleted must not still enrol another. Anyone holding that token finds it stops working, which the confirm says because it may be sitting in a colleague's terminal about to be run.
+         */
+        delete: operations["deleteNode"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename a gateway
+         * @description S12.12 D3. Nothing about a gateway was editable: a typo at enrolment was permanent, because enrolment is a CLI act on the operator's own server and the name it supplies is written once. The NAME is a label — nothing consumes it structurally — so changing it costs nothing and is safe to expose. THE ENDPOINT IS DELIBERATELY NOT EDITABLE HERE, and the asymmetry is the point: peers hold the endpoint and every issued device config bakes it, so changing it invalidates those configs, and this product has no snapshot of the endpoint a config was issued against — so the change would be invisible to needs_reexport and every affected user would discover it by failing to connect. That is the exact defect the transfer step was built to avoid one story earlier. Correcting a wrong endpoint is re-enrolment until that snapshot exists.
+         */
+        patch: operations["updateNode"];
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/nodes/{nodeId}/transfer-devices": {
         parameters: {
             query?: never;
@@ -2760,6 +2787,10 @@ export interface components {
         SsoRedirect: {
             redirect_url: string;
         };
+        UpdateNodeRequest: {
+            /** @description The gateway's display name. A label: nothing consumes it structurally, which is why it is the one field safe to edit. */
+            name: string;
+        };
         TransferNodeDevicesRequest: {
             /**
              * Format: uuid
@@ -4219,6 +4250,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RestoreNodeDevicesResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateNodeRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated gateway. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Node"];
                 };
             };
             default: components["responses"]["Error"];

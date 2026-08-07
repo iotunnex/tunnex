@@ -107,6 +107,56 @@ export default function GatewaysPage() {
   // silently applied to the NEXT gateway is the shape of mistake this whole screen is trying to prevent.
   const [moveTarget, setMoveTarget] = useState<string>("");
   const [moving, setMoving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  // Which gateway is being renamed, and the text in the field. Two pieces of state rather than one, because
+  // an empty draft is a legitimate intermediate state (the operator cleared it to retype) and must not read
+  // as "nobody is renaming anything".
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [savingName, setSavingName] = useState(false);
+
+  /**
+   * ⛔ DELETE IS ONLY REACHABLE ON A REVOKED GATEWAY (S12.12 D2), and the sequence is what makes it safe:
+   * revoke refuses while devices are homed there, so by the time a row can be deleted its devices have
+   * already been moved and the cascading foreign keys have nothing left to destroy.
+   */
+  async function deleteGateway(nodeId: string) {
+    if (!org) return;
+    setDeleting(true);
+    const { error } = await api.DELETE(
+      "/api/v1/organizations/{orgId}/nodes/{nodeId}",
+      { params: { path: { orgId: org.id, nodeId } } },
+    );
+    setDeleting(false);
+    setConfirmDelete(null);
+    if (error) {
+      setLoadError(apiErrorMessage(error, "Could not delete the gateway."));
+      return;
+    }
+    await reload();
+  }
+
+  /** D3 — the name is a label and nothing consumes it structurally, which is what makes it safe to edit. */
+  async function saveName(nodeId: string) {
+    if (!org) return;
+    setSavingName(true);
+    const { error } = await api.PATCH(
+      "/api/v1/organizations/{orgId}/nodes/{nodeId}",
+      {
+        params: { path: { orgId: org.id, nodeId } },
+        body: { name: renameDraft },
+      },
+    );
+    setSavingName(false);
+    if (error) {
+      setLoadError(apiErrorMessage(error, "Could not rename the gateway."));
+      return;
+    }
+    setRenaming(null);
+    setRenameDraft("");
+    await reload();
+  }
 
   /**
    * ⛔ THE STEP THAT COMES BEFORE THE DESTRUCTIVE ONE (S12.12 D1). Revoke is refused while devices are homed
@@ -258,7 +308,58 @@ export default function GatewaysPage() {
       cell: (r: GatewayRow) => (
         <span className="flex flex-col gap-0.5">
           <span className="flex items-center gap-2">
-            <span className="font-mono text-ink-primary">{r.name}</span>
+            {/* ⛔ D3 — THE TYPO WAS PERMANENT UNTIL NOW. Enrolment is a CLI act on the operator's own
+                server, so the name it supplies was written once and never again; a gateway called
+                `gw-lodnon` stayed that way for the life of the deployment.
+                ⚠ EDITED IN PLACE, on a revoked row too — no. A revoked gateway is terminal and nothing
+                will serve it again, so renaming one produces a tidier record of something that does not
+                exist; the server refuses it and the control is not offered. */}
+            {renaming === r.id ? (
+              <span className="flex items-center gap-1.5">
+                <input
+                  value={renameDraft}
+                  onChange={(e) => setRenameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void saveName(r.id);
+                    if (e.key === "Escape") setRenaming(null);
+                  }}
+                  aria-label={`Rename ${r.name}`}
+                  className="w-40 rounded-md border border-line bg-surface-inset px-1.5 py-0.5 font-mono text-cell text-ink-body"
+                />
+                <button
+                  type="button"
+                  onClick={() => void saveName(r.id)}
+                  disabled={savingName || renameDraft.trim() === ""}
+                  className="text-micro font-medium text-accent hover:underline disabled:text-ink-tertiary disabled:no-underline"
+                >
+                  {savingName ? "Saving…" : "Save"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRenaming(null)}
+                  className="text-micro text-ink-tertiary hover:underline"
+                >
+                  Cancel
+                </button>
+              </span>
+            ) : (
+              <>
+                <span className="font-mono text-ink-primary">{r.name}</span>
+                {r.status !== "revoked" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRenaming(r.id);
+                      setRenameDraft(r.name);
+                    }}
+                    aria-label={`Rename ${r.name}`}
+                    className="text-micro text-ink-tertiary hover:text-accent hover:underline"
+                  >
+                    Rename
+                  </button>
+                )}
+              </>
+            )}
             {r.isHub && <Badge tone="neutral">HUB</Badge>}
           </span>
           {/* ⛔ THE SERVEABLE THIRD OF A SUB-LINE I CUT WHOLESALE. The handoff shows
@@ -343,7 +444,48 @@ export default function GatewaysPage() {
         // operators to dismiss the sentence that matters when it does.
         const crossSite =
           !!chosen && !!r.siteId && !!chosen.siteId && chosen.siteId !== r.siteId;
-        return r.status === "revoked" ? null : confirmRevoke === r.id ? (
+        return r.status === "revoked" ? (
+          confirmDelete === r.id ? (
+            <span className="flex flex-col items-end gap-1">
+              {/* ⛔ WHAT A DELETE TAKES WITH IT, INCLUDING THE PART NOBODY EXPECTS. The enrolment token that
+                  produced this gateway is deleted with it (D2) — it would otherwise survive unlinked and
+                  still enrol one. Someone may be holding it: it can be in a colleague's terminal history,
+                  about to be run, and they will get a refusal with no explanation unless this said so. */}
+              <span className="max-w-[19rem] text-right text-micro text-warn">
+                This removes the gateway permanently, along with its enrolment token — if anyone still holds
+                that token, it stops working.
+              </span>
+              <span className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void deleteGateway(r.id)}
+                  disabled={deleting}
+                  className="text-micro font-medium text-danger hover:underline"
+                >
+                  {deleting ? "Deleting…" : "Confirm"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(null)}
+                  className="text-micro text-ink-tertiary hover:underline"
+                >
+                  Cancel
+                </button>
+              </span>
+            </span>
+          ) : (
+            /* ⚠ THE ROW USED TO END HERE WITH NO ACTION AT ALL. A revoked gateway is terminal, so its row
+               stayed on the list forever and a deployment silently accumulated dead entries nobody could
+               clear — the same shape as the missing Revoke button one story earlier. */
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(r.id)}
+              className="text-micro text-ink-tertiary hover:text-danger hover:underline"
+            >
+              Delete
+            </button>
+          )
+        ) : confirmRevoke === r.id ? (
           <span className="flex flex-col items-end gap-1">
             {/* ⛔ THE COST OF THE ACT, AT THE MOMENT OF THE ACT. Revoking cascades to every device homed
                 here, so this is a disconnection, not a tidy-up — and the operator reaching for it is
