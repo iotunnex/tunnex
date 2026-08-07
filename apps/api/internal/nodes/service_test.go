@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,6 +23,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/agentca"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
+	"github.com/tunnexio/tunnex/apps/api/internal/licence"
 )
 
 func genCSR(t *testing.T, cn string) string {
@@ -88,7 +90,16 @@ func TestNodeEnrollmentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ca: %v", err)
 	}
-	svc := &Service{q: q, ca: ca, sealer: sealer}
+	// ⛔ A LICENCE THAT PERMITS, BECAUSE THE CEILING IS NOW DEPLOYMENT-WIDE AND THIS TEST IS NOT ABOUT IT.
+	//
+	// A nil manager means Community — one gateway ACROSS THE WHOLE DEPLOYMENT — and this suite shares a
+	// database with every other test that ever enrolled one. It passed only while the count was per-org,
+	// which is the defect the founder found: the ceiling was 5 × however many organizations existed.
+	//
+	// ⚠ The ceiling has its own tests (gateway_ceiling_test.go); giving this one an unlimited band keeps
+	// the enrolment lifecycle testing enrolment rather than accidentally re-testing the band.
+	svc := (&Service{q: q, ca: ca, sealer: sealer}).WithLicence(
+		licence.NewTestManager("scale", time.Now().Add(time.Hour)))
 
 	// Issue a name-pinned token and enroll.
 	raw, err := svc.IssueJoinToken(ctx, actor, org, "gw-1", "")

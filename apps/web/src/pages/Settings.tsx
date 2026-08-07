@@ -380,9 +380,12 @@ function DangerZone({
           Delete this organization
         </h2>
         <p className="mt-2 text-sm text-slate-400">
+          {/* ⚠ NOT THE SETTINGS-WIDE SENTENCE. Reusing "managed by owners and admins" put a second copy of
+              it on the page for a plain member, and the e2e spec that asserts it went strict-mode red —
+              correctly: two identical sentences in different sections is a page that cannot be pointed at. */}
           {role === "admin"
             ? "Deleting an organization is reserved for owners."
-            : "Organization settings are managed by owners and admins."}
+            : "Only an owner can delete an organization."}
         </p>
       </Card>
     );
