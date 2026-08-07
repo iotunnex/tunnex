@@ -9,25 +9,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
+	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/password"
 )
-
-// CredentialFile is where the one-time password is written for the operator to read.
-//
-// ⛔ A FILE, FOUNDER-RULED — reversing the earlier "never in a file". The log line worked but demanded the
-// operator already KNOW to grep for it; a path the login screen can name is something they can act on.
-//
-// ⚠ THE TRADE, STATED: a log line scrolls away, a file PERSISTS. So the file is deleted the moment the
-// password is changed (auth.ChangePassword) — it exists exactly as long as the credential is unclaimed,
-// which is the same lifetime the log line effectively had. It is written 0600 into the container's own
-// volume, never into the repo and never into .env.
-const CredentialFile = "/var/lib/tunnex/secrets/first-run-password.txt"
 
 // AdminEmail is the CP admin's address.
 //
@@ -55,7 +43,9 @@ type Store interface {
 // ⚠ THE CONDITION IS "HAS THIS DEPLOYMENT EVER HAD A USER", counting soft-deleted rows — self-closing in
 // exactly the way `SetupComplete` is. Keyed on live users instead, deleting every account would reopen
 // admin minting to whoever restarts the container next.
-func EnsureAdmin(ctx context.Context, q Store, logger *slog.Logger) error {
+// ⚠ `out` IS INJECTABLE so the reds can assert what an OPERATOR SEES. The credential is no longer in any
+// log line, so a test that read the logger would be testing the wrong surface.
+func EnsureAdmin(ctx context.Context, q Store, logger *slog.Logger, out io.Writer) error {
 	n, err := q.CountUsers(ctx)
 	if err != nil {
 		return err
@@ -78,31 +68,37 @@ func EnsureAdmin(ctx context.Context, q Store, logger *slog.Logger) error {
 		return err
 	}
 
-	// ⭐ WRITTEN WHERE THE LOGIN SCREEN CAN POINT AT IT. 0600, and a failure here is logged rather than
-	// fatal — the log line below is still a complete answer, so a read-only volume must not brick a boot.
-	if err := os.MkdirAll(filepath.Dir(CredentialFile), 0o700); err == nil {
-		if e := os.WriteFile(CredentialFile, []byte(pw+"\n"), 0o600); e != nil {
-			logger.Warn("bootstrap_credential_file_unwritable", slog.String("path", CredentialFile),
-				slog.String("err", e.Error()), slog.String("effect", "the password is in this log only"))
-		}
-	}
-
-	// ⭐ PRINTED WHERE THE OPERATOR IS ALREADY LOOKING. `docker compose up` streams this; there is no file
-	// to find, no env var to set, and no second place it could be. It is deliberately loud and framed,
-	// because a credential that scrolls past inside a wall of JSON is a credential that is lost.
+	// ⭐ A BANNER ON STDOUT, NOT A STRUCTURED LOG LINE — AND THE DIFFERENCE IS WHETHER ANYONE SEES IT.
 	//
-	// ⛔ AND IT IS NEVER WRITTEN ANYWHERE ELSE. Not .env, not a file, not the database in plaintext — the
-	// row stores an argon2id hash like every other account. This is the only moment the plaintext exists.
-	logger.Warn("bootstrap_admin_created",
-		slog.String("banner", strings.Repeat("=", 68)),
-		slog.String("email", AdminEmail),
-		slog.String("password", pw),
-		slog.String("file", CredentialFile),
-		slog.String("action", "SIGN IN NOW AND CHANGE THIS PASSWORD — you will be forced to"),
-		slog.String("warning", "SHOWN ONCE. It is not stored in plaintext and cannot be reprinted. "+
-			"If it is lost before you sign in, the only recovery is to reset the database "+
-			"(docker compose down -v) — there is no signup and no second admin."),
-	)
+	// The credential shipped first as a slog JSON record: correct, greppable, invisible. It scrolled past
+	// inside a wall of identical JSON during `docker compose up`, and the operator had to be TOLD to grep
+	// for it. A file was tried next and was worse — the path is INSIDE THE CONTAINER, so `cat` on the host
+	// finds nothing, which is exactly how it failed the first time somebody used it.
+	//
+	// ⛔ SO IT IS PRINTED, FRAMED, AND ONCE. This is the only moment the plaintext exists — it is stored as
+	// an argon2id hash and nowhere else, and there is no command that reprints it.
+	// ⚠ THE STRUCTURED LINE RECORDS THE EVENT AND NOT THE CREDENTIAL. Logging it too would double the
+	// exposure — a banner scrolls off a terminal, but log aggregation keeps a searchable copy forever.
+	logger.Warn("bootstrap_admin_created", slog.String("email", AdminEmail),
+		slog.String("credential", "printed to stdout once; not stored in plaintext"))
+
+	fmt.Fprint(out, "\n"+
+		"==========================================================================\n"+
+		"  TUNNEX - FIRST RUN: ADMINISTRATOR ACCOUNT\n"+
+		"==========================================================================\n"+
+		"\n"+
+		"  email     "+AdminEmail+"\n"+
+		"  password  "+pw+"\n"+
+		"\n"+
+		"  SHOWN ONCE. Stored only as a hash; it cannot be reprinted. Copy it now.\n"+
+		"\n"+
+		"  You will be required to set your own password immediately, and this one\n"+
+		"  stops working the moment you do.\n"+
+		"\n"+
+		"  Lost it before signing in? There is no recovery and no second admin -\n"+
+		"  reset the deployment with:  docker compose down -v\n"+
+		"\n"+
+		"==========================================================================\n\n")
 	return nil
 }
 

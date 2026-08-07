@@ -4285,13 +4285,6 @@ components:
         # regardless. Hiding a link is not closing a door, and a refused endpoint behind a visible link is a
         # dead end — so both halves exist and neither is load-bearing alone.
         setup_complete: { type: boolean }
-        # ⛔ TRUE while an account still holds its one-time bootstrap password. The login page renders a
-        # hint telling the operator HOW TO RETRIEVE it — never the credential itself, which would hand
-        # admin to anyone who can reach the page.
-        #
-        # ⚠ It reveals only "this deployment has not been claimed yet", which is already evident from a
-        # login page nobody has ever signed into, and it goes false the moment the password is changed.
-        bootstrap_pending: { type: boolean }
         sso_providers:
           type: array
           items: { type: string, enum: [google, microsoft] }

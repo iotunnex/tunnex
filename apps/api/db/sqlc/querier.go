@@ -55,11 +55,6 @@ type Querier interface {
 	// write itself enforces the re-home refusal the read alone could only race on. The caller re-reads on 0
 	// rows to emit the right typed error (same-site no-op / already-bound-elsewhere / node-or-site-not-found).
 	BindNodeToSite(ctx context.Context, arg BindNodeToSiteParams) (int64, error)
-	// ⚠ Is there an account still holding its one-time bootstrap password?
-	// ⛔ Answers a BOOLEAN and never identifies the account. The login page renders a hint from this to an
-	// UNAUTHENTICATED visitor, so it must reveal nothing beyond "this deployment has not been claimed yet" —
-	// which is already obvious to anyone who can reach a login page with no accounts behind it.
-	BootstrapPending(ctx context.Context) (bool, error)
 	// Atomically ALLOCATE the next monotonic per-org CRL number (D-S9.5-1: per-org, never a global counter).
 	// Concurrent rebuilds get DISTINCT numbers; the crl_pem is set immediately after by SetOVPNCRL for THIS
 	// number, so the highest-numbered (latest) CRL wins. On first revocation the placeholder crl_pem is empty

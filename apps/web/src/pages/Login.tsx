@@ -218,37 +218,6 @@ function BrowserLogin() {
         </>
       )}
 
-      {/* ⛔ THE FIRST-RUN HINT — AND IT SHOWS THE COMMAND, NEVER THE CREDENTIAL.
-          An operator should not have to know a password is hiding in `docker compose logs`; the product
-          says where it is, on the page they are already looking at.
-
-          ⚠ THE PASSWORD ITSELF MUST NEVER RENDER HERE. This page is unauthenticated — printing it would
-          hand deployment admin to anyone who can reach the login screen, which is the entire internet on
-          a public control plane. What is safe to state is WHERE to look.
-
-          ⭐ IT DISAPPEARS BY ITSELF. `bootstrap_pending` reads `must_change_password`, and the forced
-          change clears that flag in the same transaction that sets the new hash — so the hint is gone the
-          instant the credential is claimed. No dismissal state, nothing to get out of sync, and no way to
-          leave a stale "first run" banner on a deployment that has been live for a year. */}
-      {meta?.bootstrap_pending && (
-        <div className="mt-5 rounded-card border border-warn/30 bg-warn/5 p-3">
-          <p className="text-cell font-medium text-ink-body">
-            First sign-in to this deployment
-          </p>
-          <p className="mt-1 text-cell text-ink-secondary">
-            Sign in as <span className="font-mono">admin@tunnex.local</span>{" "}
-            with the one-time password in:
-          </p>
-          <code className="mt-2 block overflow-x-auto rounded-input bg-ink-900 px-2.5 py-2 font-mono text-badge text-ink-body">
-            /var/lib/tunnex/secrets/first-run-password.txt
-          </code>
-          <p className="mt-2 text-badge text-ink-tertiary">
-            You will set your own password next. This file is deleted then, and
-            this message disappears.
-          </p>
-        </div>
-      )}
-
       <form onSubmit={submit} className="mt-5 space-y-4">
         <Field label="Email">
           <Input

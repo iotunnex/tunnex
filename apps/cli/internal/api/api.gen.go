@@ -1241,8 +1241,7 @@ type MemberStatus string
 
 // Meta defines model for Meta.
 type Meta struct {
-	BootstrapPending *bool       `json:"bootstrap_pending,omitempty"`
-	Edition          MetaEdition `json:"edition"`
+	Edition MetaEdition `json:"edition"`
 
 	// NodeAgentImage S8.2c WF-2: the gateway agent image the emitted enroll command uses (TUNNEX_NODE_AGENT_IMAGE). One-truth applied to the artifact version — pin it to a DIGEST and the stale-`:latest` drift that mis-convicted D2 becomes structurally impossible. The SPA falls back to its own default ref when unset.
 	NodeAgentImage *string `json:"node_agent_image,omitempty"`
