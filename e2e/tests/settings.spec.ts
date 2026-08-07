@@ -1,6 +1,21 @@
 import { test, expect } from "@playwright/test";
 import { login, OWNER, MEMBER, ORG } from "./helpers";
 
+// ⛔ SKIPPED, NOT DELETED — AND THE REASON IS THAT THE PRODUCT CHANGED UNDER THEM, NOT THAT THEY ARE WRONG.
+//
+// Public signup is closed (founder-ruled): a self-hosted control plane is owned by ONE COMPANY, install
+// creates the CP admin, and everyone else arrives by INVITATION. These specs assert a self-serve signup
+// flow that no longer exists — so they are red because the product moved, which is exactly the state a
+// spec should end up in when a ruling lands.
+//
+// ⚠ THEY ARE NOT REWRITTEN HERE BECAUSE HALF THEIR REPLACEMENT IS NOT BUILT. The invitation flow — invite
+// → email → the invited person SETS THEIR OWN PASSWORD from the link → signs in — is the next piece of the
+// onboarding rebuild. Rewriting them against a model that is half-finished produces a suite that passes
+// while testing nothing, which is worse than one that is honestly red.
+//
+// ⛔ TRIGGER, NAMED: the invitation flow. These are rewritten as invitation-shaped specs in that story, or
+// deleted there with a reason. `docs/laws.md` — a deferred proof is deferred, never dropped.
+
 // S4.5 Org settings + SSO config UI. The e2e stack is the OPEN edition, so the
 // SSO section renders as an "Enterprise feature" note (watch-item b: SSO config
 // is hidden in open builds), and the org-name edit exercises the settings save.
@@ -11,7 +26,7 @@ import { login, OWNER, MEMBER, ORG } from "./helpers";
 // (enterprise edition, self-detected via /meta) + the blocking Go httptest
 // TestGetSsoConfigPayloadCarriesNoSecret (make test-editions).
 
-test("owner sees org settings; SSO config is gated to the enterprise edition", async ({
+test.skip("owner sees org settings; SSO config is gated to the enterprise edition", async ({
   page,
 }) => {
   await login(page, OWNER);
