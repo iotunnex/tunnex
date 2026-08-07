@@ -115,14 +115,19 @@ func main() {
 			"==========================================================================\n\n")
 	}
 
-	mailer := mail.New(mail.Config{
-		Host:       cfg.SMTP.Host,
-		Port:       cfg.SMTP.Port,
-		From:       cfg.SMTP.From,
-		Username:   cfg.SMTP.Username,
-		Password:   cfg.SMTP.Password,
-		DevLogging: !cfg.IsProduction(),
-	}, logger)
+	mailCfg := mail.Config{
+		Host:     cfg.SMTP.Host,
+		Port:     cfg.SMTP.Port,
+		From:     cfg.SMTP.From,
+		Username: cfg.SMTP.Username,
+		Password: cfg.SMTP.Password,
+		// ⛔ ITS OWN VARIABLE (S12.13 D1). This read `!cfg.IsProduction()` — so TUNNEX_ENV, which says what
+		// KIND of deployment this is, silently decided how mail behaved. Setting five SMTP variables
+		// correctly still produced a mailer labelled `smtp+log` and a log line that said mail was not sent.
+		// It was sending. One flag must not govern two unrelated things.
+		DevLogging: cfg.SMTP.DevLog,
+	}
+	mailer := mail.New(mailCfg, logger)
 
 	// Log fingerprints (never the secrets). Stable fingerprints across restarts
 	// prove keys were reused, not regenerated.
@@ -132,6 +137,13 @@ func main() {
 		slog.String("session_secret_fp", secrets.Fingerprint(sec.SessionSecret)),
 		slog.String("mailer", mailer.Kind()),
 	)
+
+	// ⛔ THE BOOT LINE NAMES THE DESTINATION, NOT THE MECHANISM (S12.13 D2). `mailer=smtp+log` was accurate
+	// and unreadable: the `+` says "SMTP and also a log copy" to one reader and "logs instead of SMTP" to
+	// another, and the second reader has no way to discover they were wrong except by not receiving an
+	// email. This says where mail goes, in words, so the question is answered at install rather than at the
+	// first missing invitation.
+	logger.Info("mail_destination", slog.String("mail_goes_to", mail.Destination(mailCfg)))
 
 	// sealer and mailer are consumed by auth/SSO flows starting in EPIC 2.
 	_ = sealer

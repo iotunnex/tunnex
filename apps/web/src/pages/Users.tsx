@@ -900,6 +900,26 @@ function InviteForm({
   const [busy, setBusy] = useState(false);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // ⛔ WHETHER THIS DEPLOYMENT CAN SEND MAIL AT ALL, ASKED BEFORE THE OPERATOR TYPES AN ADDRESS.
+  //
+  // `/meta.smtp_configured` has existed for a while and had ZERO web consumers — the third
+  // producer-without-consumer this cycle. That absence is exactly how the founder lost a session: the API
+  // reported the invitation created, the log said mail was not sent, and no screen anywhere mentioned that
+  // mail was off. He found out by not receiving an email.
+  //
+  // ⚠ THREE STATES, NOT TWO (loading is not absence). `null` means the read has not landed or failed —
+  // rendered as silence, never as "mail is off", because a fetch blip must not accuse a working deployment.
+  const [mailOn, setMailOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void api.GET("/api/v1/meta").then(({ data }) => {
+      if (alive && data && typeof data.smtp_configured === "boolean")
+        setMailOn(data.smtp_configured);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -956,6 +976,16 @@ function InviteForm({
             {busy ? "Sending…" : "Send invite"}
           </Button>
         </div>
+        {/* ⛔ MAIL IS OFF, AND THE SCREEN SAYS SO BEFORE THE CLICK RATHER THAN AFTER THE SILENCE. The
+            invitation still works — the link modal is the delivery path — so this is an instruction, not a
+            refusal, and it must not read as one. */}
+        {mailOn === false && (
+          <p className="mt-3 text-cell text-warn">
+            Email is not configured on this deployment, so nothing will be sent.
+            The invitation is still created and you will get a link to hand over
+            yourself. Set SMTP_HOST and restart the API to send mail.
+          </p>
+        )}
         {/* Success uses the accent, not green (green = liveness only, S4.4). The
             copy is deliberately generic — it never reveals whether the address
             already had an account. */}
@@ -964,7 +994,11 @@ function InviteForm({
       {inviteLink && (
         <OneTimeSecretModal
           title="Invitation link"
-          caption="Copy this link and send it to the invitee. It works once, expires, and won't be shown again. If email is configured, they also received it."
+          caption={
+            mailOn === false
+              ? "Copy this link and send it to the invitee. It works once, expires, and won't be shown again. Email is NOT configured on this deployment, so this link is the only way they will get in."
+              : "Copy this link and send it to the invitee. It works once, expires, and won't be shown again. If email is configured, they also received it."
+          }
           secret={inviteLink}
           copyLabel="Copy link"
           onDismiss={() => setInviteLink(null)}
