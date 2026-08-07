@@ -64,7 +64,57 @@ expected to be rewritten before merge.
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
 **CURRENT (2026-07-31): EPIC 13 = GATEWAY RECOVERY — BUILD COMPLETE INCLUDING SLICE 7 on `story/S13.1-gateway-recovery` (tip `7c1a127`; Slice 7 = `120ff0c`, since then docs-only), NOT MERGED. Slice 7 (operator-initiated restore, `POST /nodes/{nodeId}/restore-devices`, new perm `device:restore`, re-homes onto a named LIVE gateway because a revoked node never returns) closed the reachability defect and is RED-PROVEN REACHABLE + UI-exposed. **REVIEW STATE POINTER = `docs/S13.1-review-state.md`** (pass 1 COMPLETE — 20 findings + F3, HELD, nothing folded, `docs/S13.1-review-pass1-findings.md`; pass 3 launched before pass 2 by ruling; pass 2 not started and must cover Slice 7). Earlier note: pass 1 was once interrupted — (run `wf_642e5fe8-1ed`: 8/8 finders done, 127/144 verifiers returned, Critic and Synthesize never ran — resumable from cache). The review remains a merge precondition. Next session = REVIEW → WALK → merge word, nothing in between.** The epic exists for one observed event: an AWS gateway went offline past its 48h cert lifetime and could not come back — `/agent/renew` lives behind the mTLS channel its expired cert can no longer authenticate to. Commit-one `docs/S13.1-decisions.md` (six walls, D1–D10 ruled). **SHIPPED:** agent precedence (`identity.Decide`, no network argument — a failed handshake structurally cannot trigger re-key; `Recover` ranked above `UseToken`) · **PoP re-key** on the public listener (RSA over `nonce ‖ CSR DER`; gate BEFORE crypto so timing is not a liveness oracle; **D3 amended: expiry authorizes, revocation REFUSES** — expiry is an absence of action, revocation is the presence of a decision) · its own path-scoped throttle + body cap (registered before `middleware.RealIP` — review #1 was exactly that) · **cascade restore** (`revoked_cause`, reclaim-first via the canonical oracle) · **Slice 6 `provisioned_ip`** (`needs_reexport` gains the ADDRESS cause for EVERY mode; ranges stay static-only; both contract rewrites + the label the census under-scoped) · **D10 second identifier** (key fingerprint: a LOST RESPONSE no longer bricks a gateway; ambiguity refuses; three implementations of one digest pinned to a golden vector; agent persists its pending key before submitting and reuses it so retries CONVERGE; migration guard forced expand/contract with both shim halves). Retroactive review pass 1 (leader election) folded — *leadership was a boolean that lies*; `ConfirmLeader` now matches `pg_locks`. **OWED BEFORE MERGE, IN ORDER: (1) the epic-end review pass — three passes by surface family (unauthenticated re-key surface · identity/cascade data path + migrations 0054–0061 · agent recovery loop), ~4.5–6M tokens, a merge precondition alongside CI and the walk, and a truncated pass is worse than none; (2) the walk per `docs/S13-boxwalk.md` — seven legs, TWO GATEWAYS MUST BE OFFLINE 48h+ BEFORE the session (`agentca.CertTTL` is a constant; the clock is the only way to make a cert expire); (3) the merge word.** **RULED — cascade-restore reachability: SLICE 7 (operator-initiated restore), built AFTER the review pass and BEFORE the walk; two conditions — authorized as a deliberate operator act (same class as minting a join token) and RED-PROVEN REACHABLE, not merely correct. Un-revoke PERMANENTLY REFUSED (it is the attack chain D3 exists to prevent); removing the mechanism refused (re-opens Wall 6). Walk Leg 4 stays a falsification attempt. The defect:** `RestoreCascadeRevokedDevices` has one caller (`Rekey`), devices are cascade-revoked in one place (`Revoke`), and `Rekey` refuses a revoked node — so the trigger may put the node into the one state that can never reach the restorer (dormant-machinery law). Four faces in the paper; walk Leg 4 is written as a falsification attempt. Retroactive **pass 2 (backup/restore)** still attaches to the next natural merge boundary. Registered: the 0061 contract migration (trigger = the release after this one) · no general rate limiting · body caps only on the two re-key routes · failover hysteresis persistence (beta-blocking, owned by the failover story).
-**CURRENT (2026-08-07): S12.5 — THE ORG SEAM, THE SIGNUP BOUNDARY, AND THE CP-ADMIN BOOTSTRAP — PR #95,
+**CURRENT (2026-08-07): S12.6–S12.11 + D23 — THE FOUNDER-FOUND DEFECT RUN — PR #96, content tip
+`<post-merge sha>` (`42a9c609` pre-merge).**
+
+⛔ **FOUR DEFECTS THE FOUNDER FOUND BY USING THE PRODUCT, each live on `main` when found:**
+
+1. **THE GATEWAY CEILING COUNTED ONE ORGANIZATION.** Starter allows 5 gateways and UNLIMITED orgs, so the
+   paid ceiling was 5 × N — lifted by the "+ New" button in the product's own header. No exploit, no API
+   misuse. Community and trial only LOOKED safe: their org ceiling happens to be 1, which is two numbers
+   agreeing rather than a boundary. Now `CountLiveNodes` (deployment-wide), and the nav badge's numerator
+   moved to the same source — it paired an ORG count with a DEPLOYMENT ceiling, so a fresh org read "0 / 5"
+   on a full deployment and the operator learned otherwise from a shell error minutes later.
+2. **NO WAY TO DELETE AN ORGANIZATION.** `DELETE /organizations/{id}` had shipped since S1 with `org:delete`
+   on it and NO CALL SITE. And it is a SOFT delete: gateways keep carrying traffic, devices keep pool
+   addresses, credentials keep authenticating — owned by an org no screen shows again. Refuses now with
+   `org_not_empty` naming every blocker at once; no force flag.
+3. **THE TRIAL COULD NOT EVALUATE SSO** — the capability most likely to decide an enterprise purchase.
+   Granted, and BOUNDED: what lapses is ADMISSION (JIT provisioning, domain-capture auto-join), never
+   access, so a lapsed trial keeps its humans and stops collecting new ones.
+4. **D23 — A MACHINE CREDENTIAL OUTLIVED ITS OWNER'S DEACTIVATION**, indefinitely. D14 bound credentials to
+   humans SO THAT accountability exists; the binding was checked at rest and never at use. RULED to
+   deactivation alone — removed-from-org is unreachable (deactivation PRESERVES the membership row) and a
+   guard for a state nothing produces is dormant machinery. ⚠ The cost is real and now has a warning where
+   the act happens: the roster carries the count of credentials a person owns and the deactivate
+   confirmation states that they stop immediately.
+
+**S12.11 (onboarding, renumbered — PLAN's S12.6 is COMPLIANCE and one number named two stories):** no public
+signup ever · CP-admin bootstrap with a printed one-time credential · forced password change as a WALL ·
+**cross-org role grants** (`cp_admin` asked BESIDE `RoleIn` — synthesising owner roles would make every
+org-scoped check in the product return true for tenants the caller is not in) · four invariants, reds both
+directions, mutation-checked · the nine skipped e2e specs re-pointed, **two of which were never about signup**
+(S12.5 org-switcher collateral, swept into a batch reason written over an unread failure).
+
+**S12.6 COMPLIANCE (website repo):** the surface MEASURED, not assumed — seven tables, two free-text fields,
+and `issued_by` making our own staff data subjects. **Retention SHIPPED:** a request that produced no key
+expires after 90 days; the ledger is permanent because offline verification means we can never ask a
+deployment what it is running. `/privacy` rewritten to name the tables and, finally, to say what we do NOT
+hold. **S12.10:** `ADMIN_TOKEN` deleted — the admin gate is a VERIFIED Access assertion (JWKS, `iss`, `aud`),
+and `issued_keys.issued_by` records who signed each key.
+
+⚠ **Registered, not built:** no warning surface listing the credentials a person owns (only the count) ·
+paid bands still cannot be issued (queue mints trial only) · `/auth/signup` has no rate limit · the
+CreateOrg `org_limit_reached` re-check branch is dead code · deployment-scoped audit rows (`org_id NULL`)
+are written and unread · retention for `subscribers`/`trials` and the residency question are HELD.
+
+⛔ **AND S12.5 STILL NAMES TWO THINGS** — PLAN's EPIC-12 list says "Landing + payment", the pointer and
+`docs/S12.5-org-question-decisions.md` say the org seam. Held: renaming a merged story touches PR #95's
+record, and that is a founder call.
+
+---
+
+**PREVIOUS (2026-08-07): S12.5 — THE ORG SEAM, THE SIGNUP BOUNDARY, AND THE CP-ADMIN BOOTSTRAP — PR #95,
 content tip `39ef3d0a` (`b1546ee6` pre-merge).**
 
 Started as the org question: `multi_org` became payable in S12.1 while the web threw away every org but the
