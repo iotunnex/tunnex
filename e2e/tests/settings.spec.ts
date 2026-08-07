@@ -26,11 +26,16 @@ import { login, OWNER, MEMBER, ORG } from "./helpers";
 // (enterprise edition, self-detected via /meta) + the blocking Go httptest
 // TestGetSsoConfigPayloadCarriesNoSecret (make test-editions).
 
-test.skip("owner sees org settings; SSO config is gated to the enterprise edition", async ({
+test("owner sees org settings; SSO config is gated to the enterprise edition", async ({
   page,
 }) => {
   await login(page, OWNER);
-  await expect(page.getByText("Organization", { exact: true })).toBeVisible();
+  // ⛔ THE HEADING, NOT THE TEXT. Also swept into the signup skip batch without touching signup: the S12.5
+  // org switcher carries an `sr-only` "Organization" label in the header, so a bare text match now resolves
+  // to two elements and trips strict mode. The section heading is what this spec means.
+  await expect(
+    page.getByRole("heading", { name: "Organization", exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("slug: demo")).toBeVisible();
   // Open edition: no SSO config form, just the edition-gated notes. S7.5.5 added a SECOND enterprise
   // note (org-wide MFA enforcement) beside SSO, so assert EACH specifically — a bare /Tunnex Enterprise
