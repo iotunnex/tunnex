@@ -203,6 +203,16 @@ func NewService(pool *pgxpool.Pool, ca *agentca.CA, sealer *crypto.Sealer) *Serv
 }
 
 // SetPolicyProvider wires the enterprise policy engine (S7.2). Call before serving.
+// CountLiveGateways is the number the licence ceiling is checked against — every live gateway on the
+// DEPLOYMENT, across all organizations.
+//
+// ⛔ EXPOSED SO THE UI CAN SHOW THE SAME NUMBER THE SERVER ENFORCES. The nav badge paired an ORG-scoped
+// numerator with a DEPLOYMENT-scoped ceiling, so a fresh organization read "0 / 5" on a deployment that
+// was already full and would refuse the very next enrolment. Two different questions, one fraction.
+func (s *Service) CountLiveGateways(ctx context.Context) (int64, error) {
+	return s.q.CountLiveNodes(ctx)
+}
+
 func (s *Service) SetPolicyProvider(p PolicyProvider) { s.policy = p }
 
 // SetOVPNServerCertProvider wires the D-S9.6 server-cert delivery (ovpn.Service.EnsureServerCert).
@@ -273,7 +283,7 @@ func (s *Service) IssueJoinToken(ctx context.Context, actor, orgID uuid.UUID, no
 		// operator meets the limit at the moment they are deciding to add a gateway — the moment they
 		// would upgrade. The enrolment check remains authoritative, because the fleet can grow between
 		// minting a token and redeeming it.
-		if e := s.checkGatewayCeiling(ctx, q, orgID); e != nil {
+		if e := s.checkGatewayCeiling(ctx, q); e != nil {
 			return e
 		}
 		// ⛔ THE ACTOR WAS ALWAYS IN HAND AND WAS ALWAYS THROWN AWAY (S15.2 slice 1). This function has
@@ -314,13 +324,23 @@ type EnrollResult struct {
 //
 // ⚠ A nil manager means Community, matching the fail-open default: a deployment that upgrades into this
 // code keeps one gateway rather than losing the ability to enrol at all.
-func (s *Service) checkGatewayCeiling(ctx context.Context, q *sqlc.Queries, orgID uuid.UUID) error {
+// ⛔ AND IT COUNTS THE WHOLE DEPLOYMENT, NOT ONE ORGANIZATION (founder-found).
+//
+// The count was `CountLiveNodesForOrg`. Starter allows 5 gateways and UNLIMITED organizations, so the
+// real ceiling was 5 × however many orgs the customer felt like creating — and the control that creates
+// them is the "+ New" button in the product's own header. No exploit, no API misuse: a paid limit liftable
+// by clicking. Growth was 20 × N. Community and trial looked safe only because their ORG ceiling happens
+// to be 1, which is two numbers agreeing rather than a boundary.
+//
+// > ## ⛔ **ONE SIGNED KEY, ONE DEPLOYMENT, ONE COUNT.** A ceiling scoped more narrowly than the thing
+// > ## that grants it is not a ceiling.
+func (s *Service) checkGatewayCeiling(ctx context.Context, q *sqlc.Queries) error {
 	tier := s.effectiveTier(time.Now())
 	ceiling, _ := licence.GatewayCeilingFor(tier)
 	if ceiling == nil {
 		return nil // unlimited
 	}
-	live, err := q.CountLiveNodesForOrg(ctx, orgID)
+	live, err := q.CountLiveNodes(ctx)
 	if err != nil {
 		return err
 	}
@@ -354,21 +374,20 @@ func (s *Service) ceilingRefusal(tier licence.Tier, ceiling int, live int64) str
 	if live == 1 {
 		verb = "is"
 	}
-	// ⛔ THE LAST SENTENCE IS NOT POLISH — IT IS THE ONLY WARNING AN OPERATOR GETS.
+	// ⛔ THE LAST SENTENCE IS NOT POLISH — IT IS THE ONLY WARNING AN OPERATOR GETS. Someone who upgrades
+	// and retries with the SAME token would otherwise meet `invalid_join_token`: a second, unrelated error
+	// that describes none of this and sends them hunting for a token problem that does not exist. The
+	// check now sits ABOVE `ConsumeJoinToken`, so the promise this sentence makes is true.
 	//
-	// This refusal fires AFTER `ConsumeJoinToken`, so the token is already spent. The ceiling is per-org
-	// and the org is only knowable once the token is read, so the check cannot be hoisted above it the way
-	// the grace check was. Registered as a known asymmetry, not fixed.
-	//
-	// ⚠ WHAT MAKES IT WORTH A SENTENCE: an operator who upgrades and retries with the SAME token gets
-	// `invalid_join_token` — a second, unrelated error that describes none of this and sends them hunting
-	// for a token problem that does not exist. Telling them here costs one line; not telling them costs a
-	// support round-trip at the exact moment the product first says no to them.
+	// ⛔ AND IT SAYS **ACROSS EVERY ORGANIZATION**, because the count is deployment-wide and the reader may
+	// be standing in an organization with zero gateways. Without those three words the message reads as a
+	// bug — "it allows 5 and I have none" — and their next move is a support ticket rather than an upgrade.
 	return fmt.Sprintf(
-		"This deployment is on the %s band, which allows %d %s, and %d %s already enrolled. "+
-			"Nothing running is affected — existing gateways keep working, and this refusal applies only "+
-			"to enrolling a new one. To add another: upgrade the licence, or revoke a gateway you no "+
-			"longer use to free a slot. Your join token is still valid — retry with it once there is room.",
+		"This deployment is on the %s band, which allows %d %s across every organization, and %d %s "+
+			"already enrolled. Nothing running is affected — existing gateways keep working, and this "+
+			"refusal applies only to enrolling a new one. To add another: upgrade the licence, or revoke "+
+			"a gateway you no longer use to free a slot. Your join token is still valid — retry with it "+
+			"once there is room.",
 		tier, ceiling, unit, live, verb)
 }
 
@@ -438,7 +457,7 @@ func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentV
 		//
 		// ⚠ AND THE REFUSAL SAYS WHICH BAND AND WHICH CEILING. A bare failure here is the first thing a
 		// real customer meets, and "enrolment failed" tells them nothing they can act on.
-		if e := s.checkGatewayCeiling(ctx, q, tok.OrgID); e != nil {
+		if e := s.checkGatewayCeiling(ctx, q); e != nil {
 			return e
 		}
 		// ⛔ THE POINT OF NO RETURN. Every refusal above is one the operator can fix and retry with the SAME
