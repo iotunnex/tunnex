@@ -34,11 +34,16 @@ async function login(page: Page) {
   await expect(page.getByRole("heading", { name: "Audit log" })).toBeVisible();
 }
 
-test.skip("the actor filter is org-scoped (offers only this org's members)", async ({
+test("the actor filter is org-scoped (offers only this org's members)", async ({
   page,
 }) => {
   await login(page);
-  const actor = page.getByRole("combobox").first();
+  // ⛔ NAMED, NOT `.first()`. This spec was swept into the "assumes public signup" skip batch and it never
+  // touched signup: S12.5 put an ORG SWITCHER in the header, so the first combobox on the page became the
+  // org list — a control with no "Anyone" option — and the assertion started reading the wrong element.
+  // A positional locator names whatever happens to be first, which is a claim about page layout, not about
+  // the control under test.
+  const actor = page.getByRole("combobox", { name: "Actor" });
   // Only "Anyone" + the seeded org members — no foreign actor probe.
   await expect(actor.getByRole("option", { name: "Anyone" })).toBeAttached();
   await expect(
