@@ -108,7 +108,7 @@ export function ceilingSentence(
   return (
     `This deployment is on the ${tier} band, which allows ${ceiling} ` +
     `${ceiling === 1 ? "gateway" : "gateways"}, and ${used} ${used === 1 ? "is" : "are"} enrolled. ` +
-    // ⛔ "REVOKE ONE YOU NO LONGER USE" READ AS HOUSEKEEPING AND IS A DISCONNECTION.
+    // ⛔ "REVOKE ONE YOU NO LONGER USE" READ AS HOUSEKEEPING AND WAS A DISCONNECTION.
     //
     // Revoking cascades to every device homed to that gateway (`RevokeDevicesForNode`, in the same
     // transaction), so the remedy this notice recommends can drop fifty people off the network. The
@@ -118,15 +118,20 @@ export function ceilingSentence(
     // gateway is never active again" (openapi.yaml:3538) — so the word "retire" has to carry irreversibility
     // here, not just in the confirm two clicks later.
     //
-    // ⭐ THE WAY OUT RIDES WITH THE COST. The devices' rows survive the cascade (`revoked_cause='cascade'`),
-    // so they can be re-homed onto another gateway. Stating the damage without the remedy turns a recoverable
-    // situation into one an operator believes they cannot fix.
+    // ⛔ AND THE SENTENCE CHANGED AGAIN WHEN THE TRANSFER STEP SHIPPED (S12.12 D1), because "disconnects
+    // every device homed to it" stopped being true: the revoke is now REFUSED while any device is homed
+    // there. So the cost this notice names is no longer an outage — it is WORK, and naming the work is what
+    // stops an operator planning a five-second retirement and finding a fleet-wide re-import.
+    //
+    // ⚠ IT NAMES THE RE-ISSUE, which is the part that surprises. Moving the devices is one click; every
+    // moved device holds a config baking the old gateway's endpoint, so their owners must re-import. An
+    // operator who learns that at the ceiling can schedule it; one who learns it afterwards cannot.
     //
     // ⚠ THE COUNT ITSELF BELONGS ON THE CONFIRM, NOT HERE. This notice is deployment-scoped and does not
     // know which gateway an operator will pick; promising a number it cannot compute would be the same
     // mistake in the other direction. It states the KIND of cost and sends them where the number is.
     `There is no room for another — install a licence, or retire a gateway. ` +
-    `Retiring one is permanent and disconnects every device homed to it; ` +
-    `the Gateways list says how many, and those devices can be moved to another gateway.`
+    `Retiring one is permanent, and a gateway cannot be retired while devices are homed to it: ` +
+    `move them to another gateway first, which re-issues their configurations.`
   );
 }
