@@ -48,9 +48,9 @@ func (s apiServer) TransferNodeDevices(ctx context.Context, req api.TransferNode
 			body.NeedsReissue++
 		}
 		entry := struct {
-			Id           openapi_types.UUID                                 `json:"id"`
-			Name         string                                             `json:"name"`
-			NeedsReissue bool                                               `json:"needs_reissue"`
+			Id           openapi_types.UUID                                  `json:"id"`
+			Name         string                                              `json:"name"`
+			NeedsReissue bool                                                `json:"needs_reissue"`
 			ReissueCause *api.TransferNodeDevicesResponseDevicesReissueCause `json:"reissue_cause,omitempty"`
 		}{Id: r.DeviceID, Name: r.Name, NeedsReissue: r.NeedsReissue}
 		if r.ReissueCause != "" {
