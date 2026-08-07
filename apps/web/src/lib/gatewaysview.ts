@@ -202,3 +202,30 @@ export function groupNotes(rows: GatewayRow[]): string[] {
   }
   return out;
 }
+
+/**
+ * revokeConsequence states what revoking THIS gateway costs, for the two-step confirm.
+ *
+ * ⛔ COUNT FIRST, AT THE MOMENT OF THE ACT. Revoking a gateway cascades to every device homed to it
+ * (`RevokeDevicesForNode` runs in the same transaction as the node revoke), so the people using those
+ * devices stop connecting immediately. The ceiling notice sends operators here to free a licence slot —
+ * "revoke a gateway you no longer use" — which is exactly the frame in which a fifty-device gateway looks
+ * like housekeeping.
+ *
+ * ⚠ SILENT AT ZERO, deliberately, and it is the same rule the deactivate warning follows: a caution that
+ * fires on the harmless case is a caution nobody reads on the dangerous one.
+ *
+ * ⚠ AND AN UNREADABLE COUNT IS NOT ZERO. `counts === null` means the devices list failed to load; saying
+ * nothing there would be a silent all-clear manufactured by a failure, on the one sentence whose entire job
+ * is to stop a destructive click. It says it could not count instead, and lets the operator decide.
+ */
+export function revokeConsequence(
+  counts: Record<string, number> | null,
+  nodeId: string,
+): string | null {
+  if (counts === null)
+    return "The devices homed here could not be counted — revoking disconnects any that are.";
+  const n = counts[nodeId] ?? 0;
+  if (n === 0) return null;
+  return `${n} ${n === 1 ? "device is" : "devices are"} homed here and will stop connecting immediately.`;
+}

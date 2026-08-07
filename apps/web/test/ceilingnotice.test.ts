@@ -3,10 +3,19 @@ import { ceilingSentence } from "../src/components/CeilingUpgrade";
 
 // ⛔ AT-CEILING AND OVER-CEILING ARE DIFFERENT SENTENCES, AND THE WRONG ONE CAUSES A DESTRUCTIVE MISTAKE.
 describe("the standing ceiling notice", () => {
-  it("at the ceiling, offers revoking as a real route", () => {
+  it("at the ceiling, offers retiring as a real route AND names what it costs", () => {
     const s = ceilingSentence(1, 1, "community");
     expect(s).toContain("no room for another");
-    expect(s).toContain("revoke a gateway you no longer use");
+    expect(s).toContain("retire a gateway");
+    // ⛔ THE CLAUSE THAT STOPS THIS READING AS HOUSEKEEPING. Revoking cascades to every device homed to
+    // that gateway, so the remedy this notice recommends can disconnect fifty people. "Revoke a gateway
+    // you no longer use" was TRUE and named none of that.
+    expect(s).toContain("disconnects every device homed to it");
+    // ⚠ AND IT SENDS THEM WHERE THE NUMBER IS, rather than promising a count it cannot compute: this
+    // notice is deployment-scoped and does not know which gateway the operator will pick.
+    expect(s).toContain("says how many before you confirm");
+    // The old phrasing must not survive anywhere in the string.
+    expect(s).not.toContain("you no longer use");
   });
 
   // ⭐ THE ONE THAT MATTERS TODAY. At 6 against 1, revoking a gateway frees NOTHING — five would still be
@@ -17,7 +26,7 @@ describe("the standing ceiling notice", () => {
     expect(s).toContain("6 are enrolled");
     expect(s).toContain("5 past the limit");
     expect(s).toContain("Revoking one will not free a slot");
-    expect(s).not.toContain("revoke a gateway you no longer use");
+    expect(s).not.toContain("retire a gateway");
   });
 
   // ⚠ BOTH SENTENCES PROMISE THE SAME THING FIRST, because the operator's real question is "is my fleet

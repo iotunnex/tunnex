@@ -108,6 +108,16 @@ export function ceilingSentence(
   return (
     `This deployment is on the ${tier} band, which allows ${ceiling} ` +
     `${ceiling === 1 ? "gateway" : "gateways"}, and ${used} ${used === 1 ? "is" : "are"} enrolled. ` +
-    `There is no room for another — install a licence, or revoke a gateway you no longer use.`
+    // ⛔ "REVOKE ONE YOU NO LONGER USE" READ AS HOUSEKEEPING AND IS A DISCONNECTION.
+    //
+    // Revoking cascades to every device homed to that gateway (`RevokeDevicesForNode`, in the same
+    // transaction), so the remedy this notice recommends can drop fifty people off the network. The
+    // sentence was TRUE — revoking really does free a slot — and it named none of that.
+    //
+    // ⚠ THE COUNT ITSELF BELONGS ON THE CONFIRM, NOT HERE. This notice is deployment-scoped and does not
+    // know which gateway an operator will pick; promising a number it cannot compute would be the same
+    // mistake in the other direction. It states the KIND of cost and sends them where the number is.
+    `There is no room for another — install a licence, or retire a gateway. ` +
+    `Retiring one also disconnects every device homed to it; the Gateways list says how many before you confirm.`
   );
 }
