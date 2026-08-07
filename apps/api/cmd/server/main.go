@@ -261,6 +261,10 @@ func main() {
 	// edition-gated away.
 	deviceSvc.SetApprovalEnforced(apphttp.NewDeviceApprovalEdition())
 	deviceSvc.SetDialResolver(nodeSvc.NodeDial) // WF-A D-WFA-6: a new device's config dials the active hub
+	// S12.12 D7: the SAME derivation the dial resolver uses, asked as a set — which gateways a MANAGED device
+	// can be transferred onto without re-issuing its config. Wired here rather than inferred at the call site
+	// so the transfer's report and the device list's staleness answer the question from one place.
+	deviceSvc.SetSelfHomingNodes(nodeSvc.SelfHomingNodes)
 	siteSvc := sites.NewService(pool)
 	k8sSvc := k8s.NewService(pool)
 	k8sSvc.SetNotifier(pushHub) // M5: a K8s sweep (grant-cascading) rides the <5s push path, not the ~25s long-poll

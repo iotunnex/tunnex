@@ -48,6 +48,15 @@ const (
 	// thing that can is another human, holding a permission that says so.
 	PermDeviceRestore Permission = "device:restore"
 
+	// PermDeviceTransfer governs MOVING a gateway's live devices onto another gateway (S12.12 D1). Named per
+	// feature, and deliberately NOT a reuse of device:restore or org:update — the invariant is that a new
+	// capability never rides in on an existing permission, and this one has a distinct blast radius from
+	// both. Restore hands access BACK to devices a revoke took it from; transfer moves LIVE users between
+	// gateways, which changes which gateway serves them and, when the destination sits in a different site,
+	// WHICH POLICY RULES APPLY TO THEM (D5). Reusing the revoke permission would mean everyone who can retire
+	// a gateway silently gained the power to re-scope a fleet's access. Owner/admin grain.
+	PermDeviceTransfer Permission = "device:transfer"
+
 	// PermLicenseManage governs installing a licence key (S12.1).
 	//
 	// ⛔ OWNER-ONLY, AND DELIBERATELY NOT A REUSE OF org:update. Installing a licence changes what the
@@ -131,6 +140,7 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermPolicyManage:       true,
 		PermDeviceApprove:      true,
 		PermDeviceRestore:      true,
+		PermDeviceTransfer:     true,
 		PermDeviceHealthManage: true,
 		PermMfaManage:          true,
 		PermSiteManage:         true,
@@ -147,6 +157,7 @@ var rolePermissions = map[string]map[Permission]bool{
 		PermPolicyManage:       true,
 		PermDeviceApprove:      true,
 		PermDeviceRestore:      true,
+		PermDeviceTransfer:     true,
 		PermDeviceHealthManage: true,
 		PermMfaManage:          true,
 		PermSiteManage:         true,

@@ -50,10 +50,10 @@ func TestProfileStaleAddressHalfAppliesToEVERYMode(t *testing.T) {
 	baked := []byte(`["10.0.0.0/16"]`) // ranges fresh throughout, so only the ADDRESS can move the verdict
 
 	for _, mode := range []string{"static", "managed"} {
-		if ProfileStale(mode, baked, cur, ipp("100.64.0.7"), ipp("100.64.0.7"), pgtype.UUID{}, uuid.Nil) {
+		if ProfileStale(mode, baked, cur, ipp("100.64.0.7"), ipp("100.64.0.7"), pgtype.UUID{}, uuid.Nil, true) {
 			t.Fatalf("%s: an unchanged address with fresh ranges must be fresh", mode)
 		}
-		if !ProfileStale(mode, baked, cur, ipp("100.64.0.7"), ipp("100.64.0.9"), pgtype.UUID{}, uuid.Nil) {
+		if !ProfileStale(mode, baked, cur, ipp("100.64.0.7"), ipp("100.64.0.9"), pgtype.UUID{}, uuid.Nil, true) {
 			t.Fatalf("%s: a device whose issued config bakes 100.64.0.7 while it now holds 100.64.0.9 CANNOT "+
 				"connect until re-imported — and this is exactly the cascade-restore re-addressing case (Slice 5), "+
 				"which the audit log recorded and the device surface could not show", mode)
@@ -70,10 +70,10 @@ func TestProfileStaleRangesHalfStaysStaticOnly(t *testing.T) {
 	behind := []byte(`["10.0.0.0/16"]`) // a range added after issuance
 	ip := ipp("100.64.0.7")
 
-	if !ProfileStale("static", behind, cur, ip, ip, pgtype.UUID{}, uuid.Nil) {
+	if !ProfileStale("static", behind, cur, ip, ip, pgtype.UUID{}, uuid.Nil, true) {
 		t.Fatal("static: baked ranges behind the org's current set must be stale (the S9.1 behavior, unchanged)")
 	}
-	if ProfileStale("managed", behind, cur, ip, ip, pgtype.UUID{}, uuid.Nil) {
+	if ProfileStale("managed", behind, cur, ip, ip, pgtype.UUID{}, uuid.Nil, true) {
 		t.Fatal("managed: routes are POLLED, so a range added after issuance must NOT be reported stale — it " +
 			"would fire on every managed device forever")
 	}
@@ -87,14 +87,14 @@ func TestProfileStaleTreatsUNKNOWNAsFresh(t *testing.T) {
 	baked := []byte(`["10.0.0.0/16"]`)
 	cur := []string{"10.0.0.0/16"}
 
-	if ProfileStale("managed", baked, cur, nil, ipp("100.64.0.7"), pgtype.UUID{}, uuid.Nil) {
+	if ProfileStale("managed", baked, cur, nil, ipp("100.64.0.7"), pgtype.UUID{}, uuid.Nil, true) {
 		t.Fatal("no recorded snapshot (row predates 0060) must report fresh, not stale")
 	}
-	if ProfileStale("managed", baked, cur, ipp("100.64.0.7"), nil, pgtype.UUID{}, uuid.Nil) {
+	if ProfileStale("managed", baked, cur, ipp("100.64.0.7"), nil, pgtype.UUID{}, uuid.Nil, true) {
 		t.Fatal("a device with no assigned address (revoked/pending) has nothing to compare — must report fresh")
 	}
 	// But an absent snapshot must NOT suppress the ranges half for a static device: that evidence IS present.
-	if !ProfileStale("static", []byte(`["10.0.0.0/16"]`), []string{"172.31.0.0/16"}, nil, ipp("100.64.0.7"), pgtype.UUID{}, uuid.Nil) {
+	if !ProfileStale("static", []byte(`["10.0.0.0/16"]`), []string{"172.31.0.0/16"}, nil, ipp("100.64.0.7"), pgtype.UUID{}, uuid.Nil, true) {
 		t.Fatal("an unknown ADDRESS must not mask a KNOWN stale ranges snapshot — the two causes are independent")
 	}
 }
@@ -113,22 +113,58 @@ func TestProfileStaleFlagsAREHOMEDStaticExport(t *testing.T) {
 	gwA, gwB := uuid.New(), uuid.New()
 	snapA := pgtype.UUID{Bytes: [16]byte(gwA), Valid: true}
 
-	if ProfileStale("static", baked, cur, ip, ip, snapA, gwA) {
+	if ProfileStale("static", baked, cur, ip, ip, snapA, gwA, true) {
 		t.Fatal("a device still homed on the gateway its config baked must be fresh")
 	}
-	if !ProfileStale("static", baked, cur, ip, ip, snapA, gwB) {
+	if !ProfileStale("static", baked, cur, ip, ip, snapA, gwB, true) {
 		t.Fatal("a STATIC export re-homed onto a different gateway must be stale: the config names a gateway that " +
 			"will never serve it, and reclaiming the address does not make the file work")
 	}
 	// UNKNOWN IS NOT STALE — rows predating the column carry no snapshot.
-	if ProfileStale("static", baked, cur, ip, ip, pgtype.UUID{}, gwB) {
+	if ProfileStale("static", baked, cur, ip, ip, pgtype.UUID{}, gwB, true) {
 		t.Fatal("no recorded gateway means no evidence it moved; claiming staleness on absent evidence is the " +
 			"mirror of missing it")
 	}
-	// MANAGED is deliberately NOT covered — it polls the dial channel and re-homes itself when its node is a
-	// hub-set member. Flagging it here would fire forever on devices that fixed themselves; the non-hub-set
-	// residual is registered in the paper rather than papered over.
-	if ProfileStale("managed", baked, cur, ip, ip, snapA, gwB) {
-		t.Fatal("managed devices re-point via the dial channel; this must not fire for them")
+	// MANAGED ON A SELF-HOMING DESTINATION is deliberately NOT covered — it polls the dial channel and re-homes
+	// itself when its node is a hub-set member. Flagging it here would fire forever on devices that fixed
+	// themselves.
+	if ProfileStale("managed", baked, cur, ip, ip, snapA, gwB, true) {
+		t.Fatal("managed devices on a hub-set member re-point via the dial channel; this must not fire for them")
+	}
+}
+
+// TestProfileStaleFlagsManagedOnNonSelfHomingGateway — S12.12 D7, the residual the test above USED TO NAME AND
+// LEAVE OPEN.
+//
+// ⛔ THE SENTENCE THAT WAS TRUE AND INCOMPLETE: "managed devices re-point via the dial channel". They do — when
+// their node is a HUB-SET MEMBER. activeHubDialFrom returns derived=false otherwise and the client KEEPS ITS
+// BAKED ENDPOINT, so a managed device moved onto an ordinary gateway dials the gateway it just left. Moved in
+// the database, broken on the wire, and reporting needs_reexport=false on every surface.
+//
+// ⚠ IT WAS REGISTERED RATHER THAN FIXED BECAUSE THE ONLY PATH THAT REACHED IT WAS RARE. Before S12.12 the sole
+// way to re-home a managed device was the operator restore of a revoked gateway's devices — deliberate, and
+// already a re-issue event. TRANSFER makes re-homing the routine first step of retiring any gateway. A residual
+// is acceptable while the path that reaches it is rare; a button that creates it ends that.
+func TestProfileStaleFlagsManagedOnNonSelfHomingGateway(t *testing.T) {
+	baked := []byte(`["10.0.0.0/16"]`)
+	cur := []string{"10.0.0.0/16"}
+	ip := ipp("100.64.0.7")
+	gwA, gwB := uuid.New(), uuid.New()
+	snapA := pgtype.UUID{Bytes: [16]byte(gwA), Valid: true}
+
+	if !ProfileStale("managed", baked, cur, ip, ip, snapA, gwB, false) {
+		t.Fatal("a MANAGED device moved onto a gateway outside the active hub set cannot follow itself there — " +
+			"it keeps its baked endpoint and dials the gateway it left, so its config is stale")
+	}
+	// AND THE BOUNDARY HOLDS IN BOTH DIRECTIONS. A device that never moved is fresh even on a non-self-homing
+	// gateway: nothing about its config is wrong, and firing here would flag every managed device in every org
+	// that runs a single ordinary gateway — the permanent false positive the unknown-is-not-stale rule exists
+	// to prevent, arriving from the other side.
+	if ProfileStale("managed", baked, cur, ip, ip, snapA, gwA, false) {
+		t.Fatal("a managed device still homed where its config was issued is fresh regardless of hub-set membership")
+	}
+	// An absent snapshot is still unknown, still not stale.
+	if ProfileStale("managed", baked, cur, ip, ip, pgtype.UUID{}, gwB, false) {
+		t.Fatal("no recorded gateway means no evidence it moved")
 	}
 }

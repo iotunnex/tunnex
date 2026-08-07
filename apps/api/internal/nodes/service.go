@@ -1079,6 +1079,32 @@ func activeHubMembers(topo siteTopology, now time.Time) []sqlc.ListSiteGatewaysF
 	return electSiteHubSet(topo, now)
 }
 
+// SelfHomingNodes names the gateways a MANAGED device can be moved onto without re-issuing its config
+// (S12.12 D7) — exactly the nodes for which NodeDial returns derived=true.
+//
+// ⛔ IT EXISTS BECAUSE "MANAGED DEVICES RE-HOME THEMSELVES" IS ONLY TRUE FOR HUB-SET MEMBERS. A managed
+// client polls the dial channel, but activeHubDialFrom returns derived=false for a node outside the active
+// hub set, and the client then KEEPS ITS BAKED ENDPOINT. So a managed device transferred onto a non-member
+// gateway dials the gateway it just left: moved in the database, broken on the wire, and — before this —
+// reporting needs_reexport=false on every surface, because ProfileStale's gateway cause is static-only.
+//
+// That residual was acceptable while the only re-homing path was the operator restore of a revoked
+// gateway's devices: rare, deliberate, and already a re-issue event. Transfer makes re-homing ROUTINE, which
+// is what turns a registered residual into a defect. Named here rather than inferred at each call site, so
+// the transfer's report and the device list's staleness answer the question from ONE derivation.
+func (s *Service) SelfHomingNodes(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]bool, error) {
+	topo, err := s.loadSiteTopology(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	members := activeHubMembers(topo, time.Now())
+	out := make(map[uuid.UUID]bool, len(members))
+	for i := range members {
+		out[members[i].ID] = true
+	}
+	return out, nil
+}
+
 // DeviceDial is WF-A D-WFA-6: a device's CURRENT dial (endpoint + gateway pubkey) derived from the org's
 // ACTIVE HUB, so a running device re-homes on promotion via the routed-ranges poll. AUTH (D-WFA-6 cond 2):
 // the org-scoped GetDevice is the cross-ORG guard; the owner check is the cross-DEVICE guard — a device
@@ -2338,6 +2364,28 @@ func (s *Service) Revoke(ctx context.Context, actor, orgID, nodeID uuid.UUID) er
 	binding, bErr := s.q.GetNodeSiteBinding(ctx, sqlc.GetNodeSiteBindingParams{ID: nodeID, OrgID: orgID})
 	wasGateway := bErr == nil && binding.Valid
 	if err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		// ⛔ REVOKE DOES NOT PROCEED WHILE DEVICES ARE STILL HOMED HERE (S12.12 D1).
+		//
+		// The cascade below is real and permanent: a revoked gateway is never active again, so an operator who
+		// revokes with fifty devices homed here has disconnected fifty people with no un-revoke. The old design
+		// answered that with a warning that COUNTED the devices; the ruling replaced it with a step that MOVES
+		// them, and a refusal is what makes the step unskippable.
+		//
+		// ⭐ THE ORDER IS THE WHOLE POINT. Transfer-first means the abandoned state is "devices moved, old
+		// gateway still running" — harmless and resumable. Cascade-then-restore's abandoned state is an outage
+		// the product cannot undo, because the operator who closed the tab halfway has no way back.
+		//
+		// ⚠ INSIDE THE TRANSACTION, and it must stay here. RevokeNode already took this node's row lock, so an
+		// enrolment racing to home a device onto this gateway either commits first (we count it and refuse) or
+		// waits behind us. Asked before the transaction, the check could pass and the device arrive anyway —
+		// which is a revoke that disconnects someone after proving it would not.
+		live, cErr := q.CountLiveDevicesForNode(ctx, nodeID)
+		if cErr != nil {
+			return cErr
+		}
+		if live > 0 {
+			return errDevicesStillHomed(live)
+		}
 		if e := q.RevokeNode(ctx, sqlc.RevokeNodeParams{OrgID: orgID, ID: nodeID}); e != nil {
 			return e
 		}

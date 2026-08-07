@@ -51,7 +51,28 @@ func RangesStale(snapshotJSON []byte, current []string) bool {
 // evidence is the mirror of missing it, and a permanent false positive on a healthy fleet is what the 0055 ruling
 // spent a condition avoiding.
 func ProfileStale(mode string, snapshotJSON []byte, currentRanges []string, provisionedIP, assignedIP *string,
-	provisionedNode pgtype.UUID, currentNode uuid.UUID) bool {
+	provisionedNode pgtype.UUID, currentNode uuid.UUID, currentNodeSelfHoming bool) bool {
+	// ⛔ CAUSE 3, MANAGED HALF (S12.12 D7) — THE RESIDUAL THE COMMENT BELOW REGISTERED, NOW REACHABLE.
+	//
+	// The static-only boundary was drawn on the claim that "a MANAGED device polls the dial channel and
+	// re-homes itself". That is true ONLY when its node is a hub-set member: activeHubDialFrom returns
+	// derived=false otherwise and the client KEEPS ITS BAKED ENDPOINT, so a managed device on a non-member
+	// gateway it was not provisioned against dials a gateway that will not serve it.
+	//
+	// It was registered rather than fixed because the only way to re-home a managed device was the operator
+	// restore of a revoked gateway's devices — rare, deliberate, already a re-issue event. S12.12 adds
+	// TRANSFER, which makes re-homing a routine act an operator performs before retiring any gateway. A
+	// residual is acceptable while the path that reaches it is rare; it stops being acceptable the moment a
+	// button creates it.
+	//
+	// ⚠ AND IT IS STILL NOT UNCONDITIONAL, because that is what the original comment warned against: a
+	// managed device on a self-homing gateway reports FRESH, since it genuinely heals on the next poll.
+	// Reporting every re-homed managed device stale would be the permanent false positive the
+	// unknown-is-not-stale rule exists to avoid, in the other direction.
+	if mode != "static" && provisionedNode.Valid && uuid.UUID(provisionedNode.Bytes) != currentNode &&
+		!currentNodeSelfHoming {
+		return true
+	}
 	if mode == "static" {
 		if RangesStale(snapshotJSON, currentRanges) {
 			return true

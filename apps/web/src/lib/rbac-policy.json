@@ -2,6 +2,7 @@
   "admin": [
     "device:approve",
     "device:restore",
+    "device:transfer",
     "device_health:manage",
     "k8s:manage",
     "member:invite",
@@ -31,6 +32,7 @@
   "owner": [
     "device:approve",
     "device:restore",
+    "device:transfer",
     "device_health:manage",
     "k8s:manage",
     "license:manage",

@@ -51,6 +51,11 @@ type Service struct {
 	// endpoint (pre-WF-A behavior); a resolver ERROR is also a silent keep (mint must not fail on a topology
 	// blip — the re-home poll fixes the endpoint shortly after).
 	dialResolver func(ctx context.Context, orgID, nodeID uuid.UUID) (endpoint, pubkey string, derived bool, err error)
+	// selfHomingNodes (S12.12 D7, optional) names the gateways for which dialResolver would return
+	// derived=true — i.e. the ones a MANAGED device follows itself onto. Wired to nodes.SelfHomingNodes.
+	// nil / an error → unknown, which the transfer resolves to "assume a re-issue is needed": overstating the
+	// work is recoverable, and understating it means a user finds out by failing to connect.
+	selfHomingNodes func(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]bool, error)
 	// exportEnrich (S9.1 Part-2, optional) returns the org's currently-approved routed ranges + whether
 	// it has cross-site DNS forwarding, for a STATIC export (a file/QR profile whose non-polling client
 	// can't learn ranges from the routed-ranges poll). Wired to sites.ListRoutedRanges + the DNS-forward
@@ -85,6 +90,13 @@ func (s *Service) SetRebuildCRL(fn func(ctx context.Context, orgID uuid.UUID) er
 // SetDialResolver wires the WF-A active-hub dial derivation (nodes.NodeDial). Optional — see the field doc.
 func (s *Service) SetDialResolver(fn func(ctx context.Context, orgID, nodeID uuid.UUID) (string, string, bool, error)) {
 	s.dialResolver = fn
+}
+
+// SetSelfHomingNodes wires nodes.SelfHomingNodes — the gateways a MANAGED device can be moved onto without
+// re-issuing its config (S12.12 D7). Optional: nil means unknown, and unknown resolves to "assume a re-issue
+// is needed", which overstates the work rather than hiding a broken device.
+func (s *Service) SetSelfHomingNodes(fn func(ctx context.Context, orgID uuid.UUID) (map[uuid.UUID]bool, error)) {
+	s.selfHomingNodes = fn
 }
 
 // SetExportEnrich wires the S9.1 Part-2 static-export enrichment source (the org's routed ranges + DNS

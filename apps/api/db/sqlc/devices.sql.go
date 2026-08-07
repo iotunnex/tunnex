@@ -86,6 +86,22 @@ func (q *Queries) CountDevicesForUserCap(ctx context.Context, arg CountDevicesFo
 	return count, err
 }
 
+const countLiveDevicesForNode = `-- name: CountLiveDevicesForNode :one
+SELECT count(*) FROM devices
+WHERE node_id = $1 AND status IN ('active', 'pending') AND deleted_at IS NULL
+`
+
+// lint:cross-org — keyed by node_id, which the caller resolved from an org-scoped node row.
+// ⛔ THE PREDICATE THAT MAKES A REVOKE REFUSABLE (S12.12 D1). Exactly the set RevokeDevicesForNode would
+// sweep, asked BEFORE the sweep instead of after it. The two must stay identical: a count that is narrower
+// than the cascade lets a revoke through that still disconnects someone, which is the whole defect.
+func (q *Queries) CountLiveDevicesForNode(ctx context.Context, nodeID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countLiveDevicesForNode, nodeID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createDevice = `-- name: CreateDevice :one
 INSERT INTO devices (org_id, user_id, node_id, name, platform, public_key, assigned_ip, full_tunnel, status, transport, kind)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE(NULLIF($11::text, ''), 'human'))
@@ -764,6 +780,63 @@ func (q *Queries) ListDevicesByUser(ctx context.Context, arg ListDevicesByUserPa
 	return items, nil
 }
 
+const listLiveDevicesForNode = `-- name: ListLiveDevicesForNode :many
+SELECT id, name, user_id, assigned_ip, transport, status, provisioning_mode
+FROM devices
+WHERE node_id = $1 AND status IN ('active', 'pending') AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListLiveDevicesForNodeRow struct {
+	ID               uuid.UUID `json:"id"`
+	Name             string    `json:"name"`
+	UserID           uuid.UUID `json:"user_id"`
+	AssignedIp       *string   `json:"assigned_ip"`
+	Transport        string    `json:"transport"`
+	Status           string    `json:"status"`
+	ProvisioningMode string    `json:"provisioning_mode"`
+}
+
+// lint:cross-org — keyed by node_id, which the caller resolved from an org-scoped node row.
+// The TRANSFER candidate set (S12.12 D1/D4): the devices a revoke would cascade, named so they can be MOVED
+// instead. Same predicate as CountLiveDevicesForNode and RevokeDevicesForNode — one definition of "homed
+// here and live", read three ways.
+//
+// PENDING IS INCLUDED (D4). An outstanding approval is about the PERSON, not the gateway; leaving pending
+// rows behind would strand an approval queue pointing at a gateway that is about to be revoked — the exact
+// reason RevokeDevicesForNode sweeps pending rather than only active.
+//
+// Returns provisioning_mode because the CONSEQUENCE of the move differs by mode: a static export is a file
+// that never polls and must be re-issued, while a managed device re-homes itself — but only through a
+// hub-set member. The caller needs the mode to report which devices are broken until re-imported.
+func (q *Queries) ListLiveDevicesForNode(ctx context.Context, nodeID uuid.UUID) ([]ListLiveDevicesForNodeRow, error) {
+	rows, err := q.db.Query(ctx, listLiveDevicesForNode, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLiveDevicesForNodeRow{}
+	for rows.Next() {
+		var i ListLiveDevicesForNodeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.UserID,
+			&i.AssignedIp,
+			&i.Transport,
+			&i.Status,
+			&i.ProvisioningMode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMalformedKeyPeersForNode = `-- name: ListMalformedKeyPeersForNode :many
 SELECT d.id, d.name, d.public_key
 FROM devices d
@@ -1241,4 +1314,65 @@ func (q *Queries) SoftDeleteRevokedDevice(ctx context.Context, arg SoftDeleteRev
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const transferDeviceToNode = `-- name: TransferDeviceToNode :one
+UPDATE devices
+SET node_id = $3, updated_at = now()
+WHERE id = $1 AND org_id = $2 AND status IN ('active', 'pending') AND deleted_at IS NULL
+RETURNING id, org_id, user_id, node_id, name, platform, public_key, assigned_ip, status, created_at, updated_at, revoked_at, deleted_at, full_tunnel, approved_by, health_blocked, transport, provisioning_mode, provisioned_ranges, revoked_cause, provisioned_ip, revoked_prev_status, provisioned_node_id, kind
+`
+
+type TransferDeviceToNodeParams struct {
+	ID     uuid.UUID `json:"id"`
+	OrgID  uuid.UUID `json:"org_id"`
+	NodeID uuid.UUID `json:"node_id"`
+}
+
+// lint:cross-org — keyed by device id; the caller authorized both nodes via the org and read the candidate
+// set from ListLiveDevicesForNode.
+// Re-homes ONE live device onto another gateway (S12.12 D1).
+//
+// ⛔ STATUS IS NOT TOUCHED, and that is the difference from RestoreCascadeRevokedDevice. Restore RESURRECTS,
+// so it must resolve what the row used to be; transfer moves a device that is already in a state a human
+// chose. A pending device stays pending — the move is about the gateway, never about the approval.
+//
+// ⛔ AND assigned_ip IS NOT TOUCHED EITHER, because the pool is ORG-SCOPED (organizations.pool_cidr, one
+// per org; uniqueness is devices_org_ip_key on (org_id, ip)). A same-org transfer therefore cannot collide:
+// the device already holds that address and keeps holding it. Reallocating would cost every moved user a
+// re-import for a contention that does not exist.
+//
+// The `status IN ('active','pending')` predicate is repeated here deliberately, the same construction-over-
+// convention shape as RestoreCascadeRevokedDevice: a caller who skipped the candidate filter still cannot
+// re-home a revoked device and thereby hand it back onto a live gateway.
+func (q *Queries) TransferDeviceToNode(ctx context.Context, arg TransferDeviceToNodeParams) (Device, error) {
+	row := q.db.QueryRow(ctx, transferDeviceToNode, arg.ID, arg.OrgID, arg.NodeID)
+	var i Device
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.UserID,
+		&i.NodeID,
+		&i.Name,
+		&i.Platform,
+		&i.PublicKey,
+		&i.AssignedIp,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RevokedAt,
+		&i.DeletedAt,
+		&i.FullTunnel,
+		&i.ApprovedBy,
+		&i.HealthBlocked,
+		&i.Transport,
+		&i.ProvisioningMode,
+		&i.ProvisionedRanges,
+		&i.RevokedCause,
+		&i.ProvisionedIp,
+		&i.RevokedPrevStatus,
+		&i.ProvisionedNodeID,
+		&i.Kind,
+	)
+	return i, err
 }
