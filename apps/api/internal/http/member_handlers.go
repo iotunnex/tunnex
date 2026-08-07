@@ -41,13 +41,13 @@ func toAPIMember(r sqlc.ListOrgMembersWithUserRow) api.Member {
 	mc := int(r.MachineCredentials)
 	return api.Member{
 		MachineCredentials: &mc,
-		UserId:        r.UserID,
-		Email:         openapi_types.Email(r.Email),
-		Name:          r.Name,
-		Role:          api.MemberRole(r.Role),
-		Status:        api.MemberStatus(r.Status),
-		EmailVerified: r.EmailVerified,
-		JoinedAt:      r.JoinedAt,
+		UserId:             r.UserID,
+		Email:              openapi_types.Email(r.Email),
+		Name:               r.Name,
+		Role:               api.MemberRole(r.Role),
+		Status:             api.MemberStatus(r.Status),
+		EmailVerified:      r.EmailVerified,
+		JoinedAt:           r.JoinedAt,
 	}
 }
 
