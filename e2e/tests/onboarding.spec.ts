@@ -1,5 +1,20 @@
 import { test, expect, type Page } from "@playwright/test";
 
+// ⛔ SKIPPED, NOT DELETED — AND THE REASON IS THAT THE PRODUCT CHANGED UNDER THEM, NOT THAT THEY ARE WRONG.
+//
+// Public signup is closed (founder-ruled): a self-hosted control plane is owned by ONE COMPANY, install
+// creates the CP admin, and everyone else arrives by INVITATION. These specs assert a self-serve signup
+// flow that no longer exists — so they are red because the product moved, which is exactly the state a
+// spec should end up in when a ruling lands.
+//
+// ⚠ THEY ARE NOT REWRITTEN HERE BECAUSE HALF THEIR REPLACEMENT IS NOT BUILT. The invitation flow — invite
+// → email → the invited person SETS THEIR OWN PASSWORD from the link → signs in — is the next piece of the
+// onboarding rebuild. Rewriting them against a model that is half-finished produces a suite that passes
+// while testing nothing, which is worse than one that is honestly red.
+//
+// ⛔ TRIGGER, NAMED: the invitation flow. These are rewritten as invitation-shaped specs in that story, or
+// deleted there with a reason. `docs/laws.md` — a deferred proof is deferred, never dropped.
+
 // S4.7 Fresh-user onboarding funnel. The e2e stack is the OPEN edition. The seeded
 // users all already belong to the demo org, so the zero-org branches (create-org,
 // verify-pending, invitation-only) are driven by MOCKING GET /organizations to
@@ -37,7 +52,7 @@ async function signIn(page: Page, who: { email: string; pass: string }) {
   await page.getByRole("button", { name: "Sign in" }).click();
 }
 
-test("a verified user with no organization is routed to the create-org step (real backend)", async ({
+test.skip("a verified user with no organization is routed to the create-org step (real backend)", async ({
   page,
 }) => {
   // No mock — the real fresh user has zero memberships, so RequireOrg funnels them.
@@ -87,7 +102,7 @@ test("a user who already has an organization skips the funnel and lands on the d
   ).toHaveCount(0);
 });
 
-test("the open-build second-signup path ends on the invitation card with no usable create affordance (real backend)", async ({
+test.skip("the open-build second-signup path ends on the invitation card with no usable create affordance (real backend)", async ({
   page,
 }) => {
   // REAL open-edition proof: the fresh verified 0-membership user is routed to
@@ -112,7 +127,7 @@ test("the open-build second-signup path ends on the invitation card with no usab
   await expect(page.getByLabel("Slug")).toHaveCount(0);
 });
 
-test("a successful create routes the fresh user into the dashboard", async ({
+test.skip("a successful create routes the fresh user into the dashboard", async ({
   page,
 }) => {
   const ORG_OBJ = {
@@ -166,7 +181,7 @@ test("a successful create routes the fresh user into the dashboard", async ({
   await expect(page).toHaveURL(/\/dashboard$/);
 });
 
-test("org_limit_reached re-checks membership: a user who gained one meanwhile goes to the dashboard, not the dead-end", async ({
+test.skip("org_limit_reached re-checks membership: a user who gained one meanwhile goes to the dashboard, not the dead-end", async ({
   page,
 }) => {
   // #2: between the funnel routing the user to create-org (0 orgs) and the create
@@ -227,7 +242,7 @@ test("org_limit_reached re-checks membership: a user who gained one meanwhile go
   ).toHaveCount(0);
 });
 
-test("a user who already has an org visiting /create-org is re-routed at VISIT time (S4.8/F4)", async ({
+test.skip("a user who already has an org visiting /create-org is re-routed at VISIT time (S4.8/F4)", async ({
   page,
 }) => {
   // Real backend: the seeded owner belongs to the demo org, so /create-org must
