@@ -55,7 +55,7 @@ jobs:
             if git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
               CHANGED=$(git diff --name-only "${BASE}...HEAD" || true)
               if [ -n "$(printf '%s' "$CHANGED" | tr -d '[:space:]')" ]; then
-                if ! printf '%s\n' "$CHANGED" | grep -qE '(\.go$|go\.(mod|sum)$|\.sql$|Dockerfile|Makefile|\.github/|openapi/|apps/api/db/)'; then
+                if ! printf '%s\n' "$CHANGED" | grep -qE '(\.go$|go\.(mod|sum)$|\.sql$|Dockerfile|Makefile|\.github/|openapi/|apps/api/db/|apps/api/internal/mail/)'; then
                   RUN_GO=false
                 fi
               fi
