@@ -4106,7 +4106,10 @@ components:
         # is a question about the DEPLOYMENT — a permission granted inside org A cannot license an act
         # that creates org B. ⚠ The UI uses it ONLY to decide whether to offer the affordance; the server
         # refuses regardless, so a client that ignores this field gains nothing.
-        can_create_orgs: { type: boolean }
+        # ⛔ THE DEPLOYMENT-LEVEL AXIS, and the only field on this object that is not org-scoped.
+        # `cp_admin` implies creating organizations and granting roles in ANY org — it absorbed
+        # `can_create_orgs` rather than sitting beside it, because two booleans that must agree drift.
+        cp_admin: { type: boolean }
         # ⛔ The one-time bootstrap credential was printed to the logs, so it is compromised the moment it
         # works. The server refuses everything until it is changed; this field is what lets the CLIENT route
         # there instead of showing a red error on whatever page the user happened to land on.

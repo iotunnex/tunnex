@@ -220,8 +220,7 @@ function ForcedEnroll() {
 function RequireNoOrg({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<"loading" | "none" | "has">("loading");
   const { state } = useAuth();
-  const mayCreate =
-    state.status === "authed" && Boolean(state.user.can_create_orgs);
+  const mayCreate = state.status === "authed" && Boolean(state.user.cp_admin);
 
   useEffect(() => {
     let cancelled = false;
@@ -244,7 +243,7 @@ function RequireNoOrg({ children }: { children: React.ReactNode }) {
   // ⛔ THE FORM IS NEVER OFFERED TO SOMEONE WHO CANNOT USE IT.
   //
   // RequireNoOrg used to ask ONE question — "do you have an organization?" — and a brand-new account has
-  // none, so it rendered the form. That account does not hold `can_create_orgs`, so submitting it hit a
+  // none, so it rendered the form. That account does not hold `cp_admin`, so submitting it hit a
   // refusal. ⚠ A form offered to someone who cannot use it is worse than no form: it costs them the
   // attempt to learn what the screen could have said first.
   //

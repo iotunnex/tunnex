@@ -42,14 +42,24 @@ func SessionAuth(store *session.Store, q *sqlc.Queries) AuthFunc {
 			roles[m.OrgID] = m.Role
 		}
 		return &authctx.Principal{
-			UserID:             user.ID,
-			SessionID:          sess.ID,
-			Email:              user.Email,
-			EmailVerified:      user.EmailVerifiedAt.Valid,
-			AuthMethod:         sess.AuthMethod, // rides the session's mint-time method (immutable)
-			Roles:              roles,
-			MustChangePassword: user.MustChangePassword,
-			CanCreateOrgs:      user.CanCreateOrgs,
+			UserID:        user.ID,
+			SessionID:     sess.ID,
+			Email:         user.Email,
+			EmailVerified: user.EmailVerifiedAt.Valid,
+			AuthMethod:    sess.AuthMethod, // rides the session's mint-time method (immutable)
+			Roles:         roles,
+			// ⛔ ONLY ACCOUNTS THAT HAVE A LOCAL PASSWORD CAN BE ASKED TO CHANGE ONE.
+			//
+			// An SSO user has no password_hash at all — they authenticate through their IdP. If the flag
+			// were ever set on such an account they would be walled out of every route with
+			// `password_change_required` and sent to a screen whose only action is "enter your CURRENT
+			// password", which does not exist. A trap with no exit.
+			//
+			// ⚠ It is not reachable today (only bootstrap sets the flag, and that account has a password),
+			// which is exactly why it is guarded HERE rather than left to the setter: the next thing that
+			// sets it — a password-rotation policy, an admin-forced reset — will not remember this.
+			MustChangePassword: user.MustChangePassword && user.PasswordHash != nil,
+			CPAdmin:            user.CpAdmin,
 		}
 	}
 }

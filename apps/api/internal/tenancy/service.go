@@ -89,7 +89,7 @@ func (s *Service) SetupComplete(ctx context.Context) (bool, error) {
 //     first org exists, which is why it needs no flag: the condition that opens it is destroyed by using
 //     it, exactly once, forever.
 //
-//  2. A HOLDER of `users.can_create_orgs` — the deployment itself has said this person may.
+//  2. A HOLDER of `users.cp_admin` — the deployment itself has said this person may.
 //
 //     ⛔ NOT "IS A MEMBER OF SOMETHING", WHICH IS WHAT THIS ACCEPTED BEFORE AND IS THE WRONG SEAM.
 //     Membership in org A is authority INSIDE org A; it cannot license creating org B, which A has no
@@ -111,7 +111,7 @@ func (s *Service) checkMayCreateOrg(ctx context.Context, creator uuid.UUID) erro
 	if ever == 0 {
 		return nil // bootstrap: this deployment has never been set up
 	}
-	may, err := s.q.UserMayCreateOrgs(ctx, creator)
+	may, err := s.q.UserIsCPAdmin(ctx, creator)
 	if err != nil {
 		return err
 	}
@@ -235,7 +235,7 @@ func (s *Service) CreateOrganization(ctx context.Context, creator uuid.UUID, nam
 		// window it came from, and the window itself stays shut forever.
 		//
 		// ⚠ Idempotent and harmless for an existing holder: this path is only reachable when `ever == 0`.
-		if e = q.GrantOrgCreation(ctx, creator); e != nil {
+		if e = q.GrantCPAdmin(ctx, creator); e != nil {
 			return e
 		}
 		return writeAudit(ctx, q, org.ID, &creator, "org.created", "organization", org.ID.String(),

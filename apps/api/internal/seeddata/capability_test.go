@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// ⛔ THE SEED MUST STATE `can_create_orgs` FOR EVERY ACCOUNT IT CREATES — and this test reads the SEED,
+// ⛔ THE SEED MUST STATE `cp_admin` FOR EVERY ACCOUNT IT CREATES — and this test reads the SEED,
 // not a database.
 //
 // ⚠ THAT CHOICE IS THE WHOLE POINT, AND IT IS WHY THE DEFECT SURVIVED. Migration 0073 backfills the
@@ -53,9 +53,9 @@ func TestSeedStatesOrgCreationCapability(t *testing.T) {
 		if calls == 0 {
 			continue
 		}
-		stated := strings.Count(src, "CanCreateOrgs:")
+		stated := strings.Count(src, "CpAdmin:")
 		if stated < calls {
-			t.Errorf("⛔ cmd/%s creates %d users and states can_create_orgs for only %d.\n\n"+
+			t.Errorf("⛔ cmd/%s creates %d users and states cp_admin for only %d.\n\n"+
 				"The unstated ones take the column DEFAULT (false). On YOUR rig migration 0073 has "+
 				"already backfilled the capability for existing owners, so this looks fine — on a FRESH "+
 				"install the backfill matches nothing and that account cannot create an organization.\n\n"+
@@ -75,7 +75,7 @@ func TestSeedGrantsTheCapabilityToExactlyOneAccount(t *testing.T) {
 	if !ok {
 		t.Skip("cmd/seed not present")
 	}
-	granted := strings.Count(src, "CanCreateOrgs: true")
+	granted := strings.Count(src, "CpAdmin: true")
 	if granted != 1 {
 		t.Errorf("⛔ cmd/seed grants org creation to %d accounts, want exactly 1 (the demo owner).\n\n"+
 			"Every account holding it makes the fixture unrepresentative: signup creates an account and "+
@@ -91,7 +91,7 @@ func TestSeedGrantsTheCapabilityToExactlyOneAccount(t *testing.T) {
 		t.Skip("no no-org fixture in this seeder")
 	}
 	window := src[i:min(i+900, len(src))]
-	if strings.Contains(window, "CanCreateOrgs: true") {
+	if strings.Contains(window, "CpAdmin: true") {
 		t.Error("⛔ the no-org onboarding fixture was granted org creation — it exists to model an " +
 			"account that has NOT been admitted, and that is the state signup now produces for everyone")
 	}
