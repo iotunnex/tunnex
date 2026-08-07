@@ -1,19 +1,17 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// ⛔ SKIPPED, NOT DELETED — AND THE REASON IS THAT THE PRODUCT CHANGED UNDER THEM, NOT THAT THEY ARE WRONG.
+// ⭐ REWRITTEN AGAINST THE PRODUCT AS IT IS (S12.6). The funnel these specs were written for asked ONE
+// question — "do you have an organization?" — and offered a create form to everyone who did not. Two
+// rulings changed that, and the specs were skipped in a batch rather than re-pointed:
 //
-// Public signup is closed (founder-ruled): a self-hosted control plane is owned by ONE COMPANY, install
-// creates the CP admin, and everyone else arrives by INVITATION. These specs assert a self-serve signup
-// flow that no longer exists — so they are red because the product moved, which is exactly the state a
-// spec should end up in when a ruling lands.
+//   1. THERE IS NO PUBLIC SIGNUP. A verified account with no membership is not a founder-in-waiting; they
+//      are somebody awaiting an invitation, and `create-org` shows them the invitation card FIRST rather
+//      than a form that would refuse them after they filled it in.
+//   2. `cp_admin` IS THE CAPABILITY. A holder reaches this route deliberately, from the switcher's "+ New",
+//      WITH organizations already in hand — so "already has an org → bounce" became wrong for exactly the
+//      people the route now exists for.
 //
-// ⚠ THEY ARE NOT REWRITTEN HERE BECAUSE HALF THEIR REPLACEMENT IS NOT BUILT. The invitation flow — invite
-// → email → the invited person SETS THEIR OWN PASSWORD from the link → signs in — is the next piece of the
-// onboarding rebuild. Rewriting them against a model that is half-finished produces a suite that passes
-// while testing nothing, which is worse than one that is honestly red.
-//
-// ⛔ TRIGGER, NAMED: the invitation flow. These are rewritten as invitation-shaped specs in that story, or
-// deleted there with a reason. `docs/laws.md` — a deferred proof is deferred, never dropped.
+// ⚠ ONE OF THE SEVEN IS DELETED RATHER THAN REWRITTEN, with its reason recorded where it stood.
 
 // S4.7 Fresh-user onboarding funnel. The e2e stack is the OPEN edition. The seeded
 // users all already belong to the demo org, so the zero-org branches (create-org,
@@ -37,6 +35,11 @@ const UNVERIFIED = {
   email: "unverified-admin@demo.tunnex.local",
   pass: "tunnex-demo-password",
 };
+// Has the demo org, holds NO capability — the "already inside, may not create" state.
+const MEMBER = {
+  email: "member@demo.tunnex.local",
+  pass: "tunnex-demo-password",
+};
 const ORG = "01900000-0000-7000-8000-000000000001"; // seeddata.DemoOrgID
 
 // Matches …/api/v1/organizations exactly (optional query) — NOT the sub-resource
@@ -52,23 +55,27 @@ async function signIn(page: Page, who: { email: string; pass: string }) {
   await page.getByRole("button", { name: "Sign in" }).click();
 }
 
-test.skip("a verified user with no organization is routed to the create-org step (real backend)", async ({
+test("a verified user with no organization and no capability lands on the invitation card (real backend)", async ({
   page,
 }) => {
-  // No mock — the real fresh user has zero memberships, so RequireOrg funnels them.
+  // No mock — the real fresh user has zero memberships and does NOT hold cp_admin, which is the state
+  // every invited-but-not-yet-admitted account is in.
   await signIn(page, FRESH);
-  await expect(
-    page.getByRole("heading", { name: "Create your organization" }),
-  ).toBeVisible();
   await expect(page).toHaveURL(/\/create-org$/);
-
-  // A manually-typed hyphenated slug must survive left-to-right typing — the
-  // sanitizer must not strip a trailing hyphen mid-word (else "acme-corp" would
-  // collapse to "acmecorp"). pressSequentially fires one onChange per key.
-  const slug = page.getByLabel("Slug");
-  await slug.click();
-  await slug.pressSequentially("acme-corp");
-  await expect(slug).toHaveValue("acme-corp");
+  // ⛔ THE CARD IS THE FIRST THING THEY SEE, NOT THE LAST. It used to be one FAILED SUBMIT away: the
+  // funnel routed them to a form, the server refused `invitation_required`, and only then were they told
+  // how to actually get in. A form offered to someone who cannot use it costs them an attempt to learn
+  // what the screen could have said first.
+  await expect(
+    page.getByRole("heading", { name: "Invitation required" }),
+  ).toBeVisible();
+  // ⚠ NO USABLE CREATE AFFORDANCE SURVIVES — form, fields and button all absent. Asserting only the
+  // heading would pass on a page that rendered the card ABOVE a working form.
+  await expect(
+    page.getByRole("button", { name: "Create organization" }),
+  ).toHaveCount(0);
+  await expect(page.getByLabel("Organization name")).toHaveCount(0);
+  await expect(page.getByLabel("Slug")).toHaveCount(0);
 });
 
 test("an unverified user with no organization is routed to verify-pending, not create-org", async ({
@@ -102,32 +109,18 @@ test("a user who already has an organization skips the funnel and lands on the d
   ).toHaveCount(0);
 });
 
-test.skip("the open-build second-signup path ends on the invitation card with no usable create affordance (real backend)", async ({
-  page,
-}) => {
-  // REAL open-edition proof: the fresh verified 0-membership user is routed to
-  // create-org, but the deployment's single-org slot is taken by the demo org, so
-  // the REAL POST returns org_limit_reached and the UI lands on the invitation-only
-  // dead-end — with the create form (and any create control) gone.
-  await signIn(page, FRESH);
-  await expect(
-    page.getByRole("heading", { name: "Create your organization" }),
-  ).toBeVisible();
-  await page.getByLabel("Organization name").fill("Second Org");
-  await page.getByRole("button", { name: "Create organization" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Invitation required" }),
-  ).toBeVisible();
-  // No usable create affordance survives: the form, its fields, and the submit
-  // button are all gone — the user cannot attempt a create from the dead-end.
-  await expect(
-    page.getByRole("button", { name: "Create organization" }),
-  ).toHaveCount(0);
-  await expect(page.getByLabel("Organization name")).toHaveCount(0);
-  await expect(page.getByLabel("Slug")).toHaveCount(0);
-});
+// ⛔ DELETED, WITH ITS REASON KEPT WHERE IT STOOD: "the open-build second-signup path ends on the
+// invitation card with no usable create affordance (real backend)".
+//
+// It proved that a fresh user who FILLS IN the create form is refused and lands on the invitation card
+// with every create control gone. Its trigger no longer exists — that user never reaches a form, because
+// the card is now what `create-org` renders for anyone without `cp_admin`. Every assertion it made about
+// the destination is made by the spec above, at the earlier moment.
+//
+// ⚠ Kept as a comment rather than dropped silently: the next person to read this file will otherwise ask
+// where the open-edition second-org proof went.
 
-test.skip("a successful create routes the fresh user into the dashboard", async ({
+test("a successful create routes the fresh user into the dashboard", async ({
   page,
 }) => {
   const ORG_OBJ = {
@@ -169,24 +162,50 @@ test.skip("a successful create routes the fresh user into the dashboard", async 
       }),
     }),
   );
+  // ⚠ THE OWNER, BECAUSE THIS SPEC NEEDS A CAPABILITY HOLDER. The form is only rendered to `cp_admin`
+  // now, and the seeded owner is the deployment's holder; the mock supplies the zero-org half.
   await signIn(page, OWNER);
   await expect(
     page.getByRole("heading", { name: "Create your organization" }),
   ).toBeVisible();
+
+  // A manually-typed hyphenated slug must survive left-to-right typing — the sanitizer must not strip a
+  // trailing hyphen mid-word (else "acme-corp" would collapse to "acmecorp"). pressSequentially fires one
+  // onChange per key. ⚠ MOVED HERE from the fresh-user spec, which no longer renders a form at all.
+  const typed = page.getByLabel("Slug");
+  await typed.click();
+  await typed.pressSequentially("acme-corp");
+  await expect(typed).toHaveValue("acme-corp");
+
   await page.getByLabel("Organization name").fill("Funnel Org");
+  await page.getByLabel("Slug").fill(""); // unlatch back to name-derived
   await expect(page.getByLabel("Slug")).toHaveValue("funnel-org"); // auto-derived
   await page.getByRole("button", { name: "Create organization" }).click();
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  await expect(page.getByText("Funnel Org")).toBeVisible();
+  // ⛔ THE SWITCHER, NOT A BARE TEXT MATCH. S12.5 renders the org name in the header too, so
+  // getByText("Funnel Org") now resolves to two elements and trips strict mode — and the switcher is the
+  // stronger assertion anyway: the newly created org is the one SELECTED, not merely mentioned.
+  await expect(page.getByRole("combobox", { name: "Organization" })).toHaveValue(
+    ORG,
+  );
   await expect(page).toHaveURL(/\/dashboard$/);
 });
 
-test.skip("org_limit_reached re-checks membership: a user who gained one meanwhile goes to the dashboard, not the dead-end", async ({
+// ⭐ RE-POINTED AT THE BRANCH THAT IS NOW REACHABLE. This spec used to prove the OTHER arm of
+// `org_limit_reached`: a zero-org user whose membership appeared between the funnel and the refusal is
+// re-checked and sent to the dashboard instead of the dead-end card.
+//
+// ⛔ THAT ARM CAN NO LONGER BE REACHED THROUGH THE UI, and a spec that drives it would have to fake the
+// product to do so. A user without `cp_admin` never sees the form — `create-org` renders the invitation
+// card to them — so nobody without the capability can submit and be refused. REGISTERED as a finding
+// rather than fixed here: the re-check branch in CreateOrg.tsx is now dead code, and dead defensive code
+// is exactly what stops being true without anybody noticing.
+//
+// What IS reachable, and what a paying customer actually hits, is the holder's arm: the person who CAN
+// install a licence must be offered the route rather than the invitation card written for a stranger.
+test("a capability holder who hits the organization ceiling is offered the upgrade route, not a dead end", async ({
   page,
 }) => {
-  // #2: between the funnel routing the user to create-org (0 orgs) and the create
-  // refusal, they gained a membership (invite accepted elsewhere / JIT / admin add).
-  // The 403 handler must re-check and send them to the dashboard — NOT the card.
   const ORG_OBJ = {
     id: ORG,
     name: "Joined Org",
@@ -235,19 +254,30 @@ test.skip("org_limit_reached re-checks membership: a user who gained one meanwhi
   ).toBeVisible();
   await page.getByLabel("Organization name").fill("Whatever Org");
   await page.getByRole("button", { name: "Create organization" }).click();
-  // Re-check found a membership → dashboard, and the invitation dead-end is NOT shown.
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  // The server's own refusal text — it names the band, the ceiling and what is unaffected — plus a route
+  // out of it. ⛔ The invitation card must NOT appear: it tells a holder to ask an administrator for an
+  // invitation, and they ARE the administrator.
+  await expect(
+    page.getByRole("heading", { name: "Organization limit reached" }),
+  ).toBeVisible();
+  await expect(page.getByText("single organization only")).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Install a licence key" }),
+  ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Invitation required" }),
   ).toHaveCount(0);
 });
 
-test.skip("a user who already has an org visiting /create-org is re-routed at VISIT time (S4.8/F4)", async ({
+// ⛔ BOTH DIRECTIONS, BECAUSE THE RULE ITSELF SPLIT IN TWO. S4.8/F4 bounced anyone with an organization
+// away from /create-org, so the form could not render pointlessly. S12.5 made this route the ONLY place
+// org creation lives, reached from the switcher's "+ New" — so bouncing a capability holder would make
+// that affordance a dead link, while bouncing everyone else is still exactly right.
+test("/create-org bounces a member who already has an org, and admits a capability holder (S4.8/F4)", async ({
   page,
 }) => {
-  // Real backend: the seeded owner belongs to the demo org, so /create-org must
-  // bounce to the dashboard without ever rendering the form.
-  await signIn(page, OWNER);
+  // Real backend. The demo member belongs to the demo org and holds no capability.
+  await signIn(page, MEMBER);
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
   await page.goto("/create-org");
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
@@ -255,6 +285,17 @@ test.skip("a user who already has an org visiting /create-org is re-routed at VI
   await expect(
     page.getByRole("heading", { name: "Create your organization" }),
   ).toHaveCount(0);
+
+  // The holder reaches the same URL deliberately and must NOT be bounced.
+  await page.goto("/logout").catch(() => {});
+  await page.context().clearCookies();
+  await signIn(page, OWNER);
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await page.goto("/create-org");
+  await expect(
+    page.getByRole("heading", { name: "Create your organization" }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/create-org$/);
 });
 
 test("enrolling a gateway shows the join token exactly once (one-time-secret ceremony)", async ({
