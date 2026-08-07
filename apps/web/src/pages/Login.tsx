@@ -3,11 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, apiErrorMessage, type Meta } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { AuthLayout } from "../components/AuthLayout";
-import {
-  GENERIC_202_NOTE,
-  recoveryCountLabel,
-  recoveryWarning,
-} from "../lib/authhero";
+import { recoveryCountLabel, recoveryWarning } from "../lib/authhero";
 import { Button, ErrorText, Field, Input } from "../components/ui";
 
 // Human-readable text for SSO callback reject codes (watch-item d) — the server
@@ -240,16 +236,15 @@ function BrowserLogin() {
             First sign-in to this deployment
           </p>
           <p className="mt-1 text-cell text-ink-secondary">
-            The control plane created an administrator account and printed its
-            one-time password to the server logs. Retrieve it with:
+            Sign in as <span className="font-mono">admin@tunnex.local</span>{" "}
+            with the one-time password in:
           </p>
           <code className="mt-2 block overflow-x-auto rounded-input bg-ink-900 px-2.5 py-2 font-mono text-badge text-ink-body">
-            docker compose logs api | grep bootstrap_admin_created
+            /var/lib/tunnex/secrets/first-run-password.txt
           </code>
           <p className="mt-2 text-badge text-ink-tertiary">
-            Sign in as <span className="font-mono">admin@tunnex.local</span>.
-            You will be asked to set a new password immediately, and this
-            message will disappear.
+            You will set your own password next. This file is deleted then, and
+            this message disappears.
           </p>
         </div>
       )}
@@ -285,7 +280,6 @@ function BrowserLogin() {
       {/* ⛔ A SECURITY PROPERTY, NOT REASSURANCE. Sign-up and reset answer the same 202 whether or
           not the address exists, so "check your email" must not be read as "that address was
           recognised". Same no-oracle rule the 401s follow. */}
-      <p className="mt-4 text-xs text-slate-600">{GENERIC_202_NOTE}</p>
 
       <div className="mt-5 flex justify-between text-xs text-slate-400">
         {/* ⛔ THERE IS NO PUBLIC SIGNUP. EVER. (founder-ruled)
@@ -352,29 +346,28 @@ function SsoSection({
           placeholder="your-company"
         />
         <p className="mt-1 text-badge text-ink-secondary">
-          Routes you to your organization&rsquo;s identity provider. Signing in
-          with a password does not use this.
+          Only for single sign-on.
         </p>
       </Field>
-      <div className="mt-3 space-y-2">
+      <div className="mt-3 flex gap-2">
         {providers.includes("google") && (
           <button
             type="button"
             onClick={() => start("google")}
-            className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-white/10 bg-ink-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-white/5"
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-white/10 bg-ink-900 px-3 py-2.5 text-sm font-medium text-white transition-colors hover:bg-white/5"
           >
             <GoogleMark />
-            Continue with Google
+            Google
           </button>
         )}
         {providers.includes("microsoft") && (
           <button
             type="button"
             onClick={() => start("microsoft")}
-            className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-white/10 bg-ink-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-white/5"
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-white/10 bg-ink-900 px-3 py-2.5 text-sm font-medium text-white transition-colors hover:bg-white/5"
           >
             <MicrosoftMark />
-            Continue with Microsoft
+            Microsoft
           </button>
         )}
       </div>
