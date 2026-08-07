@@ -153,6 +153,13 @@ type Querier interface {
 	CountDevicesForUserCap(ctx context.Context, arg CountDevicesForUserCapParams) (int64, error)
 	// Any origin — the refuse-unless-empty guard (D1) must see a hand-added member too.
 	CountGroupMembers(ctx context.Context, arg CountGroupMembersParams) (int64, error)
+	// lint:cross-org — deliberately spans organizations: deactivation is a DEPLOYMENT-wide act on a person,
+	// so every credential they own stops, wherever it lives. Counting one org would under-report the blast
+	// radius on the screen that exists to state it.
+	//
+	// ⛔ THIS IS THE WARNING'S NUMBER. Deactivating someone now stops every GitOps operator they own, at that
+	// moment, and nothing else in the product would have said so.
+	CountLiveMachineCredentialsOwnedBy(ctx context.Context, userID pgtype.UUID) (int64, error)
 	// lint:cross-org — DELIBERATELY SPANS EVERY ORGANIZATION. This is the count the licence ceiling is
 	// checked against, and the licence is a property of the DEPLOYMENT, not of a tenant.
 	//
@@ -421,25 +428,24 @@ type Querier interface {
 	// Returns the row regardless of revoked state — the auth path applies the NO-ORACLE check (revoked /
 	// unknown are indistinguishable at the wire), exactly like the CLI credential path.
 	GetMachineCredentialByHash(ctx context.Context, tokenHash []byte) (MachineCredential, error)
-	// ⛔ D23: IS THE OWNER OF THIS CREDENTIAL STILL ACCOUNTABLE FOR IT?
+	// ⛔ D23 (RULED): IS THE OWNER DEACTIVATED? Nothing else.
 	//
-	// D14 bound machine credentials to a human so accountability exists. The binding was checked at REST (the
-	// column is set) and never at USE — so a credential whose owner was deactivated, soft-deleted, or removed
-	// from the organization kept authenticating indefinitely. That is the ruling with its point removed: the
-	// owner stops being accountable and nothing stops the credential.
+	// D14 bound machine credentials to a human so accountability exists; the binding was checked at REST and
+	// never at USE, so a credential outlived its owner's deactivation indefinitely. This is the arm that ends
+	// that, and it is deliberately the ONLY one:
 	//
-	// ⚠ ONE QUERY, THREE FACTS, because they are one question. Two round trips would invite a caller to check
-	// the cheap one and skip the other.
-	//   - no row at all      => the owner is soft-deleted (users are read `deleted_at IS NULL` everywhere)
-	//   - active = false     => deactivated, which SessionAuth and the CLI bearer already refuse for humans
-	//   - in_org = false     => removed from the organization this credential acts in
+	//   ⛔ REMOVED-FROM-ORG IS NOT A REACHABLE STATE. The exposed offboarding is DEACTIVATION, which preserves
+	//     the membership row and its role; `RemoveMember` hard-deletes but has no HTTP endpoint. A check for a
+	//     state nothing can produce is dormant machinery — it never fires, so it is never proven, and it reads
+	//     as protection that has been tested.
+	//   ⛔ UNVERIFIED IS UNREACHABLE FOR THIS SUBJECT. An operator credential is minted by someone already
+	//     inside, so the invite-to-verify window does not exist for them — and a machine is exempt from the
+	//     human email gate by construction anyway.
 	//
-	// ⛔ EMAIL VERIFICATION IS DELIBERATELY NOT HERE. A machine principal is EXEMPT from the human email gate
-	// by construction (authorize() skips it for IsMachine), the bootstrap administrator is pre-verified by
-	// design, and an invited operator can be mid-flow — refusing on it would contradict a ruling rather than
-	// enforce one.
-	// lint:cross-org — reads a membership for the credential's OWN org, passed in by the caller.
-	GetMachineOwnerStanding(ctx context.Context, arg GetMachineOwnerStandingParams) (GetMachineOwnerStandingRow, error)
+	// ⚠ NO ROW = REFUSE, and that is fail-closed rather than a second check: users are read `deleted_at IS
+	// NULL` everywhere, so a soft-deleted owner simply is not here, and "we could not confirm the owner is
+	// active" must never resolve to "carry on".
+	GetMachineOwnerStanding(ctx context.Context, id uuid.UUID) (bool, error)
 	GetMembership(ctx context.Context, arg GetMembershipParams) (Membership, error)
 	// lint:cross-org — user-scoped login challenge; the token itself is the credential.
 	// Verify path: fetch a LIVE challenge under a row lock (attempt-count + burn serialize here).
@@ -854,6 +860,13 @@ type Querier interface {
 	// UI has name/email/status/verified in one query. Soft-deleted users are
 	// excluded (their membership row survives a soft-delete); deactivated members
 	// stay on the roster (status carries that).
+	// ⛔ AND IT CARRIES WHAT DEACTIVATING THIS PERSON WOULD STOP (D23). A machine credential dies with its
+	// owner's deactivation — that is the whole point of the ownership binding — and until this column existed
+	// nothing in the product could tell an operator that BEFORE they clicked. A routine offboarding took down
+	// a GitOps pipeline and the two acts were never connected.
+	//
+	// ⚠ COUNTED ACROSS EVERY ORGANIZATION, because deactivation is a deployment-wide act on a person. A count
+	// scoped to this org would under-report the blast radius on the one screen that exists to state it.
 	ListOrgMembersWithUser(ctx context.Context, orgID uuid.UUID) ([]ListOrgMembersWithUserRow, error)
 	// Admin/system listing of all orgs; user-facing listing uses
 	// ListOrganizationsForUser (membership-scoped).

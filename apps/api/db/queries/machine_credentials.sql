@@ -93,26 +93,33 @@ WHERE m.org_id = $1 AND m.user_id = $2
   AND u.deleted_at IS NULL AND u.status = 'active';
 
 -- name: GetMachineOwnerStanding :one
--- ⛔ D23: IS THE OWNER OF THIS CREDENTIAL STILL ACCOUNTABLE FOR IT?
+-- ⛔ D23 (RULED): IS THE OWNER DEACTIVATED? Nothing else.
 --
--- D14 bound machine credentials to a human so accountability exists. The binding was checked at REST (the
--- column is set) and never at USE — so a credential whose owner was deactivated, soft-deleted, or removed
--- from the organization kept authenticating indefinitely. That is the ruling with its point removed: the
--- owner stops being accountable and nothing stops the credential.
+-- D14 bound machine credentials to a human so accountability exists; the binding was checked at REST and
+-- never at USE, so a credential outlived its owner's deactivation indefinitely. This is the arm that ends
+-- that, and it is deliberately the ONLY one:
 --
--- ⚠ ONE QUERY, THREE FACTS, because they are one question. Two round trips would invite a caller to check
--- the cheap one and skip the other.
---   - no row at all      => the owner is soft-deleted (users are read `deleted_at IS NULL` everywhere)
---   - active = false     => deactivated, which SessionAuth and the CLI bearer already refuse for humans
---   - in_org = false     => removed from the organization this credential acts in
+--   ⛔ REMOVED-FROM-ORG IS NOT A REACHABLE STATE. The exposed offboarding is DEACTIVATION, which preserves
+--     the membership row and its role; `RemoveMember` hard-deletes but has no HTTP endpoint. A check for a
+--     state nothing can produce is dormant machinery — it never fires, so it is never proven, and it reads
+--     as protection that has been tested.
+--   ⛔ UNVERIFIED IS UNREACHABLE FOR THIS SUBJECT. An operator credential is minted by someone already
+--     inside, so the invite-to-verify window does not exist for them — and a machine is exempt from the
+--     human email gate by construction anyway.
 --
--- ⛔ EMAIL VERIFICATION IS DELIBERATELY NOT HERE. A machine principal is EXEMPT from the human email gate
--- by construction (authorize() skips it for IsMachine), the bootstrap administrator is pre-verified by
--- design, and an invited operator can be mid-flow — refusing on it would contradict a ruling rather than
--- enforce one.
--- lint:cross-org — reads a membership for the credential's OWN org, passed in by the caller.
-SELECT
-  (u.status = 'active')::boolean AS active,
-  EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = u.id AND m.org_id = $2)::boolean AS in_org
+-- ⚠ NO ROW = REFUSE, and that is fail-closed rather than a second check: users are read `deleted_at IS
+-- NULL` everywhere, so a soft-deleted owner simply is not here, and "we could not confirm the owner is
+-- active" must never resolve to "carry on".
+SELECT (u.status = 'active')::boolean AS active
 FROM users u
 WHERE u.id = $1 AND u.deleted_at IS NULL;
+
+-- name: CountLiveMachineCredentialsOwnedBy :one
+-- lint:cross-org — deliberately spans organizations: deactivation is a DEPLOYMENT-wide act on a person,
+-- so every credential they own stops, wherever it lives. Counting one org would under-report the blast
+-- radius on the screen that exists to state it.
+--
+-- ⛔ THIS IS THE WARNING'S NUMBER. Deactivating someone now stops every GitOps operator they own, at that
+-- moment, and nothing else in the product would have said so.
+SELECT count(*) FROM machine_credentials
+WHERE user_id = $1 AND revoked_at IS NULL;

@@ -1235,10 +1235,13 @@ type Member struct {
 	Email         openapi_types.Email `json:"email"`
 	EmailVerified bool                `json:"email_verified"`
 	JoinedAt      time.Time           `json:"joined_at"`
-	Name          string              `json:"name"`
-	Role          MemberRole          `json:"role"`
-	Status        MemberStatus        `json:"status"`
-	UserId        openapi_types.UUID  `json:"user_id"`
+
+	// MachineCredentials Live machine credentials this person OWNS, across every organization. Deactivating them stops every one of these immediately (D23) — the roster carries the number so the confirmation can say what the act will break, rather than an operator finding out from a broken pipeline.
+	MachineCredentials *int               `json:"machine_credentials,omitempty"`
+	Name               string             `json:"name"`
+	Role               MemberRole         `json:"role"`
+	Status             MemberStatus       `json:"status"`
+	UserId             openapi_types.UUID `json:"user_id"`
 }
 
 // MemberRole defines model for Member.Role.

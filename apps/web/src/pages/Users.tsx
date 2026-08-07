@@ -232,6 +232,28 @@ export default function Users() {
       "Could not change the role.",
     );
 
+  /**
+   * ⛔ THE WARNING THE DEACTIVATE PATH DID NOT HAVE (D23).
+   *
+   * Returns false when the operator declines. ⚠ Silent when nobody selected owns a credential — a confirm
+   * that always fires is one people click through, and this one has to be read.
+   */
+  function confirmMachineCredentialLoss(ms: Member[]): boolean {
+    const owners = ms.filter((m) => (m.machine_credentials ?? 0) > 0);
+    if (owners.length === 0) return true;
+    const total = owners.reduce((n, m) => n + (m.machine_credentials ?? 0), 0);
+    const who = owners
+      .map((m) => `${m.email} (${m.machine_credentials})`)
+      .join("\n  ");
+    return window.confirm(
+      `${total} machine credential${total === 1 ? "" : "s"} will STOP WORKING IMMEDIATELY.\n\n` +
+        `  ${who}\n\n` +
+        `Machine credentials are owned by a person, and deactivating that person stops every credential ` +
+        `they own — including GitOps operators that are reconciling right now, in any organization. ` +
+        `Nothing is revoked: reactivating restores them.\n\nDeactivate anyway?`,
+    );
+  }
+
   const setActive = (m: Member, activate: boolean) => {
     const path = {
       params: { path: { orgId: org!.id, userId: m.user_id } },
@@ -373,6 +395,14 @@ export default function Users() {
                               ? "An organization must always have at least one owner."
                               : null,
                     run: (ms: Member[]) => {
+                      // ⛔ D23 — SAY WHAT THIS BREAKS, AT THE MOMENT OF THE ACT. A machine credential dies
+                      // with its owner's deactivation, and nothing in the product used to say so: a routine
+                      // offboarding took down a GitOps pipeline and nobody connected the two acts.
+                      //
+                      // ⚠ THE COUNT IS SERVED WITH THE ROSTER rather than fetched here, so the sentence
+                      // cannot be shown against a stale or missing number. The server refuses the
+                      // credentials either way — this exists so the refusal is not a surprise.
+                      if (!confirmMachineCredentialLoss(ms)) return;
                       void Promise.all(ms.map((m) => setActive(m, false)));
                     },
                   },

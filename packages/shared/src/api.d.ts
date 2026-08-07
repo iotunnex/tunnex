@@ -3051,6 +3051,8 @@ export interface components {
             email_verified: boolean;
             /** Format: date-time */
             joined_at: string;
+            /** @description Live machine credentials this person OWNS, across every organization. Deactivating them stops every one of these immediately (D23) — the roster carries the number so the confirmation can say what the act will break, rather than an operator finding out from a broken pipeline. */
+            machine_credentials?: number;
         };
         ChangeRoleRequest: {
             /** @enum {string} */

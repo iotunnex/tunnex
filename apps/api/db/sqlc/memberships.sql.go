@@ -160,7 +160,9 @@ func (q *Queries) ListMembershipsByUser(ctx context.Context, userID uuid.UUID) (
 
 const listOrgMembersWithUser = `-- name: ListOrgMembersWithUser :many
 SELECT m.user_id, m.role, m.created_at AS joined_at,
-       u.email, u.name, u.status, (u.email_verified_at IS NOT NULL)::boolean AS email_verified
+       u.email, u.name, u.status, (u.email_verified_at IS NOT NULL)::boolean AS email_verified,
+       (SELECT count(*) FROM machine_credentials mc
+         WHERE mc.user_id = m.user_id AND mc.revoked_at IS NULL)::bigint AS machine_credentials
 FROM memberships m
 JOIN users u ON u.id = m.user_id
 WHERE m.org_id = $1 AND u.deleted_at IS NULL
@@ -168,19 +170,27 @@ ORDER BY m.created_at
 `
 
 type ListOrgMembersWithUserRow struct {
-	UserID        uuid.UUID `json:"user_id"`
-	Role          string    `json:"role"`
-	JoinedAt      time.Time `json:"joined_at"`
-	Email         string    `json:"email"`
-	Name          string    `json:"name"`
-	Status        string    `json:"status"`
-	EmailVerified bool      `json:"email_verified"`
+	UserID             uuid.UUID `json:"user_id"`
+	Role               string    `json:"role"`
+	JoinedAt           time.Time `json:"joined_at"`
+	Email              string    `json:"email"`
+	Name               string    `json:"name"`
+	Status             string    `json:"status"`
+	EmailVerified      bool      `json:"email_verified"`
+	MachineCredentials int64     `json:"machine_credentials"`
 }
 
 // The org roster for the Users page: membership joined to the user record so the
 // UI has name/email/status/verified in one query. Soft-deleted users are
 // excluded (their membership row survives a soft-delete); deactivated members
 // stay on the roster (status carries that).
+// ⛔ AND IT CARRIES WHAT DEACTIVATING THIS PERSON WOULD STOP (D23). A machine credential dies with its
+// owner's deactivation — that is the whole point of the ownership binding — and until this column existed
+// nothing in the product could tell an operator that BEFORE they clicked. A routine offboarding took down
+// a GitOps pipeline and the two acts were never connected.
+//
+// ⚠ COUNTED ACROSS EVERY ORGANIZATION, because deactivation is a deployment-wide act on a person. A count
+// scoped to this org would under-report the blast radius on the one screen that exists to state it.
 func (q *Queries) ListOrgMembersWithUser(ctx context.Context, orgID uuid.UUID) ([]ListOrgMembersWithUserRow, error) {
 	rows, err := q.db.Query(ctx, listOrgMembersWithUser, orgID)
 	if err != nil {
@@ -198,6 +208,7 @@ func (q *Queries) ListOrgMembersWithUser(ctx context.Context, orgID uuid.UUID) (
 			&i.Name,
 			&i.Status,
 			&i.EmailVerified,
+			&i.MachineCredentials,
 		); err != nil {
 			return nil, err
 		}

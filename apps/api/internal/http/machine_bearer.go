@@ -31,8 +31,8 @@ import (
 type machineCredStore interface {
 	GetMachineCredentialByHash(ctx context.Context, tokenHash []byte) (sqlc.MachineCredential, error)
 	TouchMachineCredentialUsed(ctx context.Context, id uuid.UUID) error
-	// D23: is the owner still accountable? See the arm in MachineAuth.
-	GetMachineOwnerStanding(ctx context.Context, arg sqlc.GetMachineOwnerStandingParams) (sqlc.GetMachineOwnerStandingRow, error)
+	// D23: is the owner deactivated? See the arm in MachineAuth.
+	GetMachineOwnerStanding(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
 func MachineAuth(q machineCredStore) BearerAuthFunc {
@@ -67,34 +67,29 @@ func MachineAuth(q machineCredStore) BearerAuthFunc {
 		if !cred.UserID.Valid {
 			return nil, nil
 		}
-		// ⛔ D23 — AN OWNER WHO IS NO LONGER ACCOUNTABLE CANNOT LEND THEIR ACCOUNTABILITY TO A CREDENTIAL.
+		// ⛔ D23 (RULED) — A DEACTIVATED OWNER'S CREDENTIAL STOPS. Nothing else is checked here.
 		//
-		// The binding was checked AT REST (the column is set) and never AT USE, so a credential outlived its
-		// owner's deactivation, soft-deletion, or removal from the org — indefinitely. D14 bound credentials
-		// to humans SO THAT accountability exists; without this arm the binding is a column, not a control.
+		// The binding was verified AT REST (the column is set) and never AT USE, so a credential outlived
+		// its owner's deactivation indefinitely. D14 bound credentials to humans SO THAT accountability
+		// exists; a binding nothing re-reads at use is the ruling with its point removed.
 		//
-		// ⚠ THE OPERATIONAL COST IS REAL AND IS NOT MITIGATED HERE: deactivating a departing employee now
-		// stops every GitOps operator they owned, AT THAT MOMENT, with no warning anywhere. Neither the
-		// deactivation path nor its UI mentions machine credentials, and nothing in the product lists the
-		// credentials a given person owns. That is the S13.1 class — a live thing stopping during ordinary
-		// maintenance — and the honest statement is that the warning does not exist yet, not that this is
-		// safe because the refusal is correct. Registered; re-assignment before deactivation is the remedy
-		// and there is no screen for it.
+		// ⛔ AND THE OTHER STATES ARE DELIBERATELY ABSENT. Removed-from-org is not reachable — the exposed
+		// offboarding is deactivation, which PRESERVES the membership row, and RemoveMember has no HTTP
+		// endpoint. Unverified is not reachable for this subject — an operator credential is minted by
+		// somebody already inside. Building for a state nothing can produce is dormant machinery: it never
+		// fires, so it is never proven, and it reads as protection that has been tested.
+		//
+		// ⚠ THE OPERATIONAL COST IS REAL: deactivating a departing employee stops every GitOps operator
+		// they own, at that moment. The warning now lives where the act happens — the roster carries the
+		// count and the deactivate confirmation states it — because a refusal an operator meets later, on
+		// a pipeline, is one nobody connects to the deactivation they performed.
 		//
 		// ⛔ REFUSED THE SAME WAY AS EVERY OTHER ARM: `nil, nil` → a generic 401. "Your owner was
 		// deactivated" would be an oracle about a person to whoever holds a stolen token.
-		//
-		// ⚠ EMAIL VERIFICATION IS NOT PART OF THIS. A machine is exempt from the human email gate by
-		// construction, and the bootstrap admin is pre-verified by design — refusing on it would contradict
-		// a ruling rather than enforce one.
-		standing, err := q.GetMachineOwnerStanding(r.Context(), sqlc.GetMachineOwnerStandingParams{
-			ID: cred.UserID.Bytes, OrgID: cred.OrgID,
-		})
-		if err != nil {
-			// Includes ErrNoRows: the owner is soft-deleted. Fail closed, no oracle.
-			return nil, nil
-		}
-		if !standing.Active || !standing.InOrg {
+		active, err := q.GetMachineOwnerStanding(r.Context(), cred.UserID.Bytes)
+		if err != nil || !active {
+			// ⚠ ErrNoRows lands here too — a soft-deleted owner is simply not there, and "we could not
+			// confirm the owner is active" must never resolve to "carry on".
 			return nil, nil
 		}
 		_ = q.TouchMachineCredentialUsed(r.Context(), cred.ID) // best-effort telemetry

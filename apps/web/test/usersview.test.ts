@@ -125,6 +125,11 @@ type UnaccountedMemberField = Exclude<
   | "status"
   | "email_verified"
   | "joined_at"
+  // ⛔ D23: ACCOUNTED FOR, because it has a producer and a consumer. The roster serves the count of live
+  // machine credentials this person OWNS, and the deactivate confirmation states what stopping them
+  // breaks. Listing it here is the tripwire working as designed — a new Member field must be claimed by
+  // something, or it is a projection nobody renders.
+  | "machine_credentials"
 >;
 const _memberHasNoAuthField: UnaccountedMemberField extends never
   ? true
