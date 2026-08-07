@@ -87,7 +87,11 @@ has never suppressed delivery. The defect was entirely in what it was called.
 ⭐ **MAIL PROVEN ON THE WIRE 2026-08-07: a real invitation reached a Gmail inbox from `support@tunnex.io`
 via Spacemail.** SPF/DKIM fine. This closes the walk's delivery leg; the accept→membership legs remain.
 
-**CURRENT (2026-08-07): S12.14 BRANDED PRODUCT EMAIL — PR #99, content tip `<post-merge sha>` (`a41dabac` pre-merge).**
+**CURRENT (2026-08-07): S12.14 BRANDED PRODUCT EMAIL — PR #99, content tip `<post-merge sha>` (`3093c59d` pre-merge).**
+
+⚠ **RE-POINTED, NOT RE-DATED — the third instance of the sequencing failure rule 6 names.** The checkpoint
+was written at `a41dabac` and the go:embed classifier fix landed after it. Re-pointed in the same breath
+rather than at merge time, which is what the rule asks; the rule was fine and the SEQUENCING was wrong, again.
 
 Ported from `tunnex-web`'s `src/lib/email/{palette,layout}.ts` — same shell, colours and footer. Covers
 invite, resend, password reset, email verification, account-exists, MFA-reset notice.
