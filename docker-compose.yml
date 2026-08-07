@@ -76,6 +76,10 @@ services:
       SMTP_FROM: ${SMTP_FROM:-no-reply@tunnex.local}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # ⛔ OFF UNLESS ASKED FOR (S12.13 D1). The tee logs message BODIES, which are working links; it used
+      # to switch itself on whenever TUNNEX_ENV was not "production", so every dev box, staging box and
+      # founder rig got it silently. It has never suppressed sending — the confusion was the label.
+      MAIL_DEV_LOG: ${MAIL_DEV_LOG:-false}
     volumes:
       # Dedicated volume for roots of trust — kept separate from app data so
       # S11.2's backup story can scope it cleanly.
