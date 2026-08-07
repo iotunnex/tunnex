@@ -54,10 +54,19 @@ func (s apiServer) GetMeta(ctx context.Context, _ api.GetMetaRequestObject) (api
 			setup = done
 		}
 	}
+	// ⛔ THE FIRST-RUN HINT. An operator should not have to know that a credential is hiding in
+	// `docker compose logs` — the product must say where it is, on the page they are already staring at.
+	// ⚠ Fail-open to FALSE: a query blip must not print a first-run banner on a claimed deployment.
+	pending := false
+	if s.orgs != nil {
+		if p, e := s.orgs.BootstrapPending(ctx); e == nil {
+			pending = p
+		}
+	}
 	base := s.appBaseURL    // S8.2c: the CP's authoritative public URL for the gateway-enroll command
 	img := s.nodeAgentImage // WF-2: the (digest-pinnable) agent image the emitted command uses
 	return api.GetMeta200JSONResponse{
-		Body:    api.Meta{Edition: api.MetaEdition(s.editionName()), SsoProviders: providers, ProtocolVersion: policyspec.ProtocolVersion, PublicBaseUrl: &base, SetupComplete: &setup, NodeAgentImage: &img},
+		Body:    api.Meta{Edition: api.MetaEdition(s.editionName()), SsoProviders: providers, ProtocolVersion: policyspec.ProtocolVersion, PublicBaseUrl: &base, SetupComplete: &setup, BootstrapPending: &pending, NodeAgentImage: &img},
 		Headers: api.GetMeta200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }
