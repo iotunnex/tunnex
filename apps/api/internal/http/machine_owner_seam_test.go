@@ -46,11 +46,11 @@ func (s stubMachineQ) TouchMachineCredentialUsed(_ context.Context, _ uuid.UUID)
 	return nil
 }
 
-func (s stubMachineQ) GetMachineOwnerStanding(_ context.Context, _ sqlc.GetMachineOwnerStandingParams) (sqlc.GetMachineOwnerStandingRow, error) {
+func (s stubMachineQ) GetMachineOwnerStanding(_ context.Context, _ uuid.UUID) (bool, error) {
 	if s.ownerGone {
-		return sqlc.GetMachineOwnerStandingRow{}, pgx.ErrNoRows // soft-deleted: users are read deleted_at IS NULL
+		return false, pgx.ErrNoRows // soft-deleted: users are read deleted_at IS NULL
 	}
-	return sqlc.GetMachineOwnerStandingRow{Active: !s.ownerDeactivated, InOrg: !s.ownerOutOfOrg}, nil
+	return !s.ownerDeactivated, nil
 }
 
 func req(tok string) *http.Request {
@@ -99,7 +99,12 @@ func TestSeamRefusesAnUnassignedMachineCredential(t *testing.T) {
 	}
 }
 
-// ⛔ D23 — THE BINDING WAS A COLUMN, NOT A CONTROL.
+// ⛔ D23 (RULED) — THE BINDING WAS A COLUMN, NOT A CONTROL.
+//
+// ⚠ ONE STATE, DELIBERATELY. An earlier draft also refused removed-from-org and carried a fixture for it;
+// the ruling removed both, because the exposed offboarding is DEACTIVATION and it preserves the membership
+// row — so that arm could never have fired. A guard for an unreachable state is dormant machinery, and a
+// test for it is a green that proves nothing.
 //
 // MachineAuth checked that `user_id` was SET and never that the person behind it was still accountable, so
 // a credential outlived its owner's deactivation, soft-deletion or removal from the organization —
@@ -132,8 +137,6 @@ func TestSeamRefusesACredentialWhoseOwnerIsNoLongerAccountable(t *testing.T) {
 	}{
 		{"a DEACTIVATED owner — the state SessionAuth and the CLI bearer already refuse for humans",
 			stubMachineQ{cred: live, ownerDeactivated: true}},
-		{"an owner REMOVED FROM THE ORGANIZATION this credential acts in",
-			stubMachineQ{cred: live, ownerOutOfOrg: true}},
 		{"a SOFT-DELETED owner — no user row at all",
 			stubMachineQ{cred: live, ownerGone: true}},
 	} {

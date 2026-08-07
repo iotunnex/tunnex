@@ -35,7 +35,12 @@ func (s apiServer) ListMembers(ctx context.Context, req api.ListMembersRequestOb
 }
 
 func toAPIMember(r sqlc.ListOrgMembersWithUserRow) api.Member {
+	// ⛔ WHAT DEACTIVATION WOULD STOP, ON THE ROSTER THAT OFFERS THE BUTTON (D23). A machine credential
+	// dies with its owner's deactivation; until this number reached the screen, an operator could not learn
+	// that before acting, and a broken GitOps pipeline was never connected back to the offboarding.
+	mc := int(r.MachineCredentials)
 	return api.Member{
+		MachineCredentials: &mc,
 		UserId:        r.UserID,
 		Email:         openapi_types.Email(r.Email),
 		Name:          r.Name,
