@@ -25,13 +25,25 @@ func (m *captureMailer) Send(_ context.Context, msg mail.Message) error {
 	return nil
 }
 func (m *captureMailer) last() mail.Message { return m.msgs[len(m.msgs)-1] }
+
+// lastToken lifts a token out of the PLAINTEXT body, the way a person copying a link does.
+//
+// ⛔ A TOKEN ENDS AT WHITESPACE. This used to take everything to the end of the body, which worked only
+// while the link happened to be the last thing in it. The identical version in invites_test.go went red the
+// moment S12.14 added a closing sentence after the link — this one survived by luck, on bodies where the
+// order happened to still suit it. Fixed as the CLASS rather than the instance that failed: an extractor
+// whose correctness depends on the copy around it is a trap waiting for the next copy change.
 func (m *captureMailer) lastToken() string {
 	body := m.last().Text
 	i := strings.Index(body, "token=")
 	if i < 0 {
 		return ""
 	}
-	return strings.TrimSpace(body[i+len("token="):])
+	tok := body[i+len("token="):]
+	if end := strings.IndexAny(tok, " \t\r\n"); end >= 0 {
+		tok = tok[:end]
+	}
+	return strings.TrimSpace(tok)
 }
 
 func newTestAuth(t *testing.T) (*Service, *captureMailer, func()) {

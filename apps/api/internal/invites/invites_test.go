@@ -29,9 +29,24 @@ func TestDecideAcceptMatrix(t *testing.T) {
 type captureMailer struct{ tokens []string }
 
 func (m *captureMailer) Kind() string { return "capture" }
+
+// Send lifts the accept token out of the PLAINTEXT body — the same thing a person does when they copy a
+// link out of an email, which is what makes this a real instrument rather than a mock.
+//
+// ⛔ IT USED TO TAKE EVERYTHING TO THE END OF THE BODY, and that only worked because the token happened to
+// be the last characters in it. S12.14 gave the invitation a second and third line ("The link works once
+// and expires...") and the extraction silently started returning the token PLUS the rest of the email —
+// which the accept path then rejected as `invalid_invite`. The message was fine; the reader was wrong.
+//
+// ⚠ A TOKEN ENDS AT WHITESPACE, because it is a URL query value. Saying so makes the extraction independent
+// of where in the body the link sits, which is the property the old version was silently relying on.
 func (m *captureMailer) Send(_ context.Context, msg mail.Message) error {
 	if i := strings.Index(msg.Text, "token="); i >= 0 {
-		m.tokens = append(m.tokens, strings.TrimSpace(msg.Text[i+len("token="):]))
+		tok := msg.Text[i+len("token="):]
+		if end := strings.IndexAny(tok, " \t\r\n"); end >= 0 {
+			tok = tok[:end]
+		}
+		m.tokens = append(m.tokens, strings.TrimSpace(tok))
 	}
 	return nil
 }
