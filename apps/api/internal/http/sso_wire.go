@@ -12,6 +12,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
+	"github.com/tunnexio/tunnex/apps/api/internal/licence"
 	"github.com/tunnexio/tunnex/apps/api/internal/sso"
 )
 
@@ -24,11 +25,14 @@ type ssoAdapter struct {
 
 // NewSSOPort builds the enterprise SSO port. Present only in the enterprise
 // build; the open build's stub returns nil (see sso_wire_open.go).
-func NewSSOPort(pool *pgxpool.Pool, sealer *crypto.Sealer, rdb *redis.Client, baseURL string, logger *slog.Logger) ssoPort {
+// ⚠ THE LICENCE MANAGER IS A PARAMETER, NOT A LOOKUP. SSO onboarding (JIT provisioning, domain-capture
+// auto-join) stops when the entitlement lapses — see sso.Service.mayOnboard — and a service that reached
+// for a package-level manager would be untestable at exactly the boundary that matters.
+func NewSSOPort(pool *pgxpool.Pool, sealer *crypto.Sealer, rdb *redis.Client, baseURL string, lic *licence.Manager, logger *slog.Logger) ssoPort {
 	configs := sso.NewConfigService(pool, sealer)
 	flows := sso.NewFlowStore(rdb, 10*time.Minute)
 	domains := sso.NewDomainService(pool)
-	svc := sso.NewService(pool, configs, flows, domains, sso.DefaultProviderFactory, baseURL, logger)
+	svc := sso.NewService(pool, configs, flows, domains, sso.DefaultProviderFactory, baseURL, logger).WithLicence(lic)
 	return &ssoAdapter{pool: pool, svc: svc}
 }
 

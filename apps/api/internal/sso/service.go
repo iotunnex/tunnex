@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/licence"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
@@ -40,6 +42,26 @@ type Service struct {
 	factory ProviderFactory
 	baseURL string
 	logger  *slog.Logger
+	// licence answers "may this deployment still ONBOARD somebody through SSO". ⚠ nil => permitted, the
+	// fail-open default every other consumer uses: a deployment that upgrades into this code keeps working.
+	licence *licence.Manager
+}
+
+// WithLicence wires the entitlement source. Optional; without it, onboarding is permitted.
+func (s *Service) WithLicence(m *licence.Manager) *Service { s.licence = m; return s }
+
+// mayOnboard reports whether SSO may bring a NEW person into this deployment.
+//
+// ⛔ THIS IS NOT "MAY SSO LOGIN WORK". Login is never gated and must never be — an org whose only identity
+// source is Entra would otherwise lose access to the screen where the licence is renewed, and the refusal
+// would delete the remedy along with the capability.
+//
+// ⭐ WHAT IT GATES IS ADMISSION: minting a local account for an identity we have never seen (JIT), and
+// auto-joining a captured domain. Both CREATE something; neither is something an existing person already
+// depends on. That line is what makes the trial's SSO grant bounded rather than permanent — a lapsed
+// trial keeps the humans it had and stops collecting new ones.
+func (s *Service) mayOnboard() bool {
+	return s.licence == nil || s.licence.Has(licence.FeatSSO, time.Now())
 }
 
 // NewService builds the SSO service.
@@ -130,6 +152,15 @@ func (s *Service) resolveUser(ctx context.Context, id Identity, orgID uuid.UUID)
 			return apierr.New(409, "sso_link_required",
 				"an account with this email exists; sign in and link SSO from settings")
 		case LinkCreate:
+			// ⛔ ADMISSION IS WHAT LAPSES, NOT ACCESS. A deployment past its licence keeps every person it
+			// already has — they sign in exactly as before — and stops minting accounts for identities it
+			// has never seen. The refusal is 403 with a reason a human can act on, not a silent no-op.
+			if !s.mayOnboard() {
+				return apierr.New(403, "edition_required",
+					"This deployment's licence does not cover adding new people through SSO. Existing "+
+						"sign-ins are unaffected — install a licence, or have an administrator invite "+
+						"this person.")
+			}
 			created, e := q.CreateUser(ctx, sqlc.CreateUserParams{Email: id.Email, Name: id.Name, PasswordHash: nil})
 			if e != nil {
 				return e
@@ -150,7 +181,11 @@ func (s *Service) resolveUser(ctx context.Context, id Identity, orgID uuid.UUID)
 		// Domain capture: also auto-join any org that has verified-captured the
 		// email's domain. This runs AFTER the linking decision above (a rejected
 		// identity never reaches here), so capture never bypasses DecideLink.
-		if s.domains != nil {
+		// ⛔ AND CAPTURE STOPS AT LAPSE TOO, for the same reason: auto-join CREATES a membership. ⚠ It is
+		// checked separately from LinkCreate rather than sharing its branch — an EXISTING user logging in
+		// through a captured domain would otherwise be silently joined to an org the licence no longer
+		// covers, which is the same admission wearing a different path.
+		if s.domains != nil && s.mayOnboard() {
 			if capOrg, ok := s.domains.capturingOrgTx(ctx, q, id.Email); ok && capOrg != orgID {
 				if e := s.ensureMembership(ctx, q, capOrg, userID, "domain_capture", id); e != nil {
 					return e

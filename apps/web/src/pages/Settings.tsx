@@ -361,7 +361,11 @@ function DangerZone({
         params: { path: { orgId: org.id } },
       })
       .then(({ data }) => {
-        if (!off && data) setPre({ deletable: data.deletable, blockers: data.blockers });
+        // ⚠ THE ARRAY IS DEFAULTED AT THE SEAM. A body without `blockers` crashed the whole Settings page
+        // on `.join` — caught by the wiring test, and it is not a test artifact: any proxy, older server
+        // or partial response produces the same white screen on the page holding the delete control.
+        if (!off && data)
+          setPre({ deletable: data.deletable, blockers: data.blockers ?? [] });
       })
       .catch(() => {});
     return () => {
@@ -421,9 +425,14 @@ function DangerZone({
       {blocked && (
         <div className="mt-3 rounded-card border border-warn/30 bg-warn/5 p-3">
           <p className="text-cell text-ink-body">
-            This organization still has {pre.blockers.join(", ")}. Remove them
-            first — deleting now would leave them running with no organization
-            to manage them from.
+            {/* ⚠ THE SERVER'S LIST WHEN IT HAS ONE, A TRUTHFUL SENTENCE WHEN IT DOES NOT. "still has ."
+                would be the shape a naive join produces, and it reads as a rendering bug on the one
+                screen where the operator most needs to trust what they are told. */}
+            {pre.blockers.length > 0
+              ? `This organization still has ${pre.blockers.join(", ")}.`
+              : "This organization still owns resources."}{" "}
+            Remove them first — deleting now would leave them running with no
+            organization to manage them from.
           </p>
         </div>
       )}
@@ -1479,6 +1488,8 @@ function SsoProvider({
   const [configured, setConfigured] = useState(false);
   // Third arm: the read failed, so neither "configured" nor "not configured" is known.
   const [loadFailed, setLoadFailed] = useState(false);
+  // Fourth arm: the plan does not include SSO. Knowable, not unknown — and not retryable.
+  const [gated, setGated] = useState(false);
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [tenantId, setTenantId] = useState("");
@@ -1515,10 +1526,28 @@ function SsoProvider({
       if (apiErrorCode(error) === "sso_not_configured") {
         setConfigured(false); // a real, knowable state
         setLoadFailed(false);
+        setGated(false);
+        return;
+      }
+      // ⛔ A REFUSAL THAT NAMES ITSELF IS NOT AN UNKNOWN, AND CALLING IT ONE MISINFORMS TWICE.
+      //
+      // `edition_required` means the plan does not include SSO — as knowable as `sso_not_configured`, and
+      // the server said so in one word. Routed into the unknown arm it rendered "the settings could not be
+      // read" beside a RETRY BUTTON THAT CAN NEVER SUCCEED: the operator is told we have a problem reading
+      // their config, and invited to keep asking.
+      //
+      // ⚠ The unknown arm is still right for everything else, and still must not offer Configure. This
+      // adds a fourth state rather than widening the third — "we could not read it" and "you are not
+      // entitled to it" have different remedies, and only one of them is retryable.
+      if (apiErrorCode(error) === "edition_required") {
+        setGated(true);
+        setLoadFailed(false);
+        setConfigured(false);
         return;
       }
       // ⛔ WE DO NOT KNOW. Never offer Configure here — offering it invites the destructive path.
       setLoadFailed(true);
+      setGated(false);
       return;
     }
     if (!data) {
@@ -1568,6 +1597,31 @@ function SsoProvider({
 
   // Display name for the provider — also the label prefix that keeps each provider's fields uniquely named.
   const providerName = provider === "microsoft" ? "Microsoft" : "Google";
+
+  // ⛔ THE PLAN ANSWER COMES FIRST, because it is the only one of the four that is certain and static.
+  // ⚠ NO RETRY BUTTON: nothing about this changes by asking again, and a retry offered here trains an
+  // operator to treat a definite answer as a flaky one.
+  if (gated)
+    return (
+      <Card>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-white capitalize">
+            {provider}
+          </h3>
+          <span className="text-xs text-slate-500">not in your plan</span>
+        </div>
+        <p className="mt-2 text-xs text-slate-400">
+          {providerName} SSO is a paid Tunnex capability and this deployment's
+          licence does not include it. Existing sign-ins are unaffected.
+        </p>
+        <a
+          href="#licence"
+          className="mt-3 inline-block text-xs font-medium text-accent hover:underline"
+        >
+          Install a licence key
+        </a>
+      </Card>
+    );
 
   // ⛔ THE THIRD ARM RENDERS INSTEAD OF THE FORM. Offering "Configure" over an unknown state is the
   // destructive path itself: an admin fills it in and overwrites a live IdP config that was there all along.

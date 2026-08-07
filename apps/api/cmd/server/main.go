@@ -325,7 +325,7 @@ func main() {
 		K8s:                   k8sSvc,
 		Sessions:              sessions,
 		Mfa:                   mfaSvc,
-		SSO:                   apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, logger),
+		SSO:                   apphttp.NewSSOPort(pool, sealer, sessions.Client(), cfg.AppBaseURL, licenceMgr, logger),
 		Policy:                apphttp.NewPolicyPort(pool, pushHub),
 		AccessLog:             apphttp.NewAccessLogPort(pool, flowHealth),
 		IdpSync:               idpSyncPort,

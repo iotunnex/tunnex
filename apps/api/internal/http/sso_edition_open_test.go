@@ -39,7 +39,7 @@ func TestGetSsoConfigEditionGatedInOpenBuild(t *testing.T) {
 // passes unchanged. That is not the code being untouched — the CAUSE moved from "the port is nil" to "the
 // licence does not grant SSO", and only the census can tell those apart.
 func TestSSOPortIsWiredAndGatedByLicence(t *testing.T) {
-	if NewSSOPort(nil, nil, nil, "", slog.Default()) == nil {
+	if NewSSOPort(nil, nil, nil, "", nil, slog.Default()) == nil {
 		t.Fatal("the SSO port must be wired in the single binary")
 	}
 	// ⛔ Community configures nothing.
