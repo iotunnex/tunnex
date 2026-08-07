@@ -108,11 +108,7 @@ func (s *Service) AdminReset(ctx context.Context, orgID, actorAdmin, targetUser 
 	// Notify the target (best-effort — never fail the reset on a mail error).
 	if s.mailer != nil {
 		if u, e := s.q.GetUserByID(ctx, targetUser); e == nil {
-			_ = s.mailer.Send(ctx, mail.Message{
-				To:      u.Email,
-				Subject: "Your two-factor authentication was reset",
-				Text:    "An administrator reset the two-factor authentication (MFA) on your Tunnex account. If your organization requires MFA, you will be asked to set it up again at your next sign-in. If you did not expect this, contact your administrator immediately.",
-			})
+			_ = s.mailer.Send(ctx, mail.MFAResetMessage(u.Email))
 		}
 	}
 	return nil

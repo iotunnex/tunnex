@@ -118,8 +118,7 @@ func (s *Service) Create(ctx context.Context, actor, orgID uuid.UUID, email, rol
 	// ⭐ THE INVITE SURVIVES A DELIVERY FAILURE, and the caller is told. The row is real and the link is
 	// valid; destroying it because mail is down would throw away the one thing the operator can still hand
 	// over by another route.
-	if err := s.mail(ctx, email, "You're invited to Tunnex",
-		"You've been invited to join an organization on Tunnex: "+s.baseURL+"/accept-invite?token="+raw); err != nil {
+	if err := s.send(ctx, mail.InviteMessage(email, s.baseURL+"/accept-invite?token="+raw, "")); err != nil {
 		return raw, ErrNotDelivered
 	}
 	return raw, nil
@@ -238,8 +237,7 @@ func (s *Service) Resend(ctx context.Context, actor, orgID uuid.UUID, email stri
 	if err != nil {
 		return err
 	}
-	if err := s.mail(ctx, email, "Your Tunnex invitation",
-		"Your invitation link: "+s.baseURL+"/accept-invite?token="+raw); err != nil {
+	if err := s.send(ctx, mail.ResendInviteMessage(email, s.baseURL+"/accept-invite?token="+raw, "")); err != nil {
 		return ErrNotDelivered // the token was re-minted; only the delivery failed
 	}
 	return nil
@@ -271,9 +269,11 @@ func (s *Service) Revoke(ctx context.Context, actor, orgID uuid.UUID, email stri
 // ⭐ "INVITE CREATED, DELIVERY FAILED" IS TWO FACTS AND BOTH ARE TRUE. The row is real and the link is
 // valid — it can be sent another way — so the invitation is kept and the RESPONSE stops claiming it was
 // delivered.
-func (s *Service) mail(ctx context.Context, to, subject, body string) error {
-	if err := s.mailer.Send(ctx, mail.Message{To: to, Subject: subject, Text: body}); err != nil {
-		s.logger.Error("invite_email_failed", slog.String("to", to), slog.String("error", err.Error()))
+// send delivers a rendered message. The logo's base URL is resolved by the mailer, not here — see
+// mail.brandedMailer for why that is not each caller's job.
+func (s *Service) send(ctx context.Context, msg mail.Message) error {
+	if err := s.mailer.Send(ctx, msg); err != nil {
+		s.logger.Error("invite_email_failed", slog.String("to", msg.To), slog.String("error", err.Error()))
 		return err
 	}
 	return nil
