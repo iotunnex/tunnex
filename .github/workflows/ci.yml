@@ -77,7 +77,15 @@ jobs:
       # "go:embed" --include="*.go"`), both now covered:
       #   apps/api/db/embed.go            -> migrations/*.sql   COVERED by `apps/api/db/`
       #   apps/api/cmd/seed-fixtures/     -> fixtures.sql        COVERED by `\.sql$`   <- was the hole
+      #   apps/api/internal/mail/         -> tunnex-logo.png     COVERED by `apps/api/internal/mail/`
       # (No cgo C/H/S sources exist — apps/helper's cgo is inline — so embeds are the whole class today.)
+      #
+      # ⭐ THE PNG IS WHY THE CENSUS EARNS ITS KEEP. S12.14 embedded a logo so branded email carries its own
+      # image instead of fetching one, and NO suffix in this pattern covers `.png` — a diff touching only
+      # that file would have set go=false and skipped build-editions, the one step a missing embed target
+      # fails. The guard caught it on the PR that introduced it, which is the whole point of a census that
+      # runs rather than a list that is maintained. The scope is the DIRECTORY, not `\.png$`: every file in
+      # that package is a compile input, and a bare suffix would drag every web asset into the Go legs.
       #
       # ⛔ AND A SUFFIX IS STILL A GUESS ABOUT THE FUTURE, so the list alone is not the fix. `TestGoEmbed
       # TargetsAreGoRelevantToCI` (apps/api/cmd/) re-derives the embed set from source on every run and fails
@@ -111,7 +119,7 @@ jobs:
                 # api / cli / node / operator / helper builds — only its ABSENCE can, which DELETED covers.
                 GO_RELEVANT=$(printf '%s\n' "$CHANGED" \
                   | grep -vxF 'apps/api/cmd/seed-fixtures/fixtures.sql' \
-                  | grep -E '(\.go$|go\.(mod|sum)$|\.sql$|Dockerfile|Makefile|\.github/|openapi/|apps/api/db/)' || true)
+                  | grep -E '(\.go$|go\.(mod|sum)$|\.sql$|Dockerfile|Makefile|\.github/|openapi/|apps/api/db/|apps/api/internal/mail/)' || true)
                 DELETED_GO=$(printf '%s\n' "$DELETED" | grep -E '.' || true)
                 if [ -z "$(printf '%s' "$GO_RELEVANT$DELETED_GO" | tr -d '[:space:]')" ]; then
                   RUN_GO=false
