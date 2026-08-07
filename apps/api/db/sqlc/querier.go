@@ -153,6 +153,11 @@ type Querier interface {
 	CountDevicesForUserCap(ctx context.Context, arg CountDevicesForUserCapParams) (int64, error)
 	// Any origin — the refuse-unless-empty guard (D1) must see a hand-added member too.
 	CountGroupMembers(ctx context.Context, arg CountGroupMembersParams) (int64, error)
+	// lint:cross-org — keyed by node_id, which the caller resolved from an org-scoped node row.
+	// ⛔ THE PREDICATE THAT MAKES A REVOKE REFUSABLE (S12.12 D1). Exactly the set RevokeDevicesForNode would
+	// sweep, asked BEFORE the sweep instead of after it. The two must stay identical: a count that is narrower
+	// than the cascade lets a revoke through that still disconnects someone, which is the whole defect.
+	CountLiveDevicesForNode(ctx context.Context, nodeID uuid.UUID) (int64, error)
 	// lint:cross-org — deliberately spans organizations: deactivation is a DEPLOYMENT-wide act on a person,
 	// so every credential they own stops, wherever it lives. Counting one org would under-report the blast
 	// radius on the screen that exists to state it.
@@ -794,6 +799,19 @@ type Querier interface {
 	// agree BY CONSTRUCTION (L2): a zone the gateway would REFUSE for (no Service yet) is never handed to a client
 	// as a resolver. DISTINCT collapses a multi-Service cluster to one zone row.
 	ListK8sServedZonesForOrg(ctx context.Context, orgID uuid.UUID) ([]ListK8sServedZonesForOrgRow, error)
+	// lint:cross-org — keyed by node_id, which the caller resolved from an org-scoped node row.
+	// The TRANSFER candidate set (S12.12 D1/D4): the devices a revoke would cascade, named so they can be MOVED
+	// instead. Same predicate as CountLiveDevicesForNode and RevokeDevicesForNode — one definition of "homed
+	// here and live", read three ways.
+	//
+	// PENDING IS INCLUDED (D4). An outstanding approval is about the PERSON, not the gateway; leaving pending
+	// rows behind would strand an approval queue pointing at a gateway that is about to be revoked — the exact
+	// reason RevokeDevicesForNode sweeps pending rather than only active.
+	//
+	// Returns provisioning_mode because the CONSEQUENCE of the move differs by mode: a static export is a file
+	// that never polls and must be re-issued, while a managed device re-homes itself — but only through a
+	// hub-set member. The caller needs the mode to report which devices are broken until re-imported.
+	ListLiveDevicesForNode(ctx context.Context, nodeID uuid.UUID) ([]ListLiveDevicesForNodeRow, error)
 	// ⛔ owner_email IS RESOLVED HERE, FROM `users` AND NOT FROM `memberships` (S15.1, D22 ruled).
 	//
 	// The field was on the DTO, documented as "resolved from owner_user_id for display", and NEVER POPULATED —
@@ -1251,6 +1269,23 @@ type Querier interface {
 	TouchMachineCredentialUsed(ctx context.Context, id uuid.UUID) error
 	// lint:cross-org — keyed by id after cert authorization.
 	TouchNodeSeen(ctx context.Context, id uuid.UUID) error
+	// lint:cross-org — keyed by device id; the caller authorized both nodes via the org and read the candidate
+	// set from ListLiveDevicesForNode.
+	// Re-homes ONE live device onto another gateway (S12.12 D1).
+	//
+	// ⛔ STATUS IS NOT TOUCHED, and that is the difference from RestoreCascadeRevokedDevice. Restore RESURRECTS,
+	// so it must resolve what the row used to be; transfer moves a device that is already in a state a human
+	// chose. A pending device stays pending — the move is about the gateway, never about the approval.
+	//
+	// ⛔ AND assigned_ip IS NOT TOUCHED EITHER, because the pool is ORG-SCOPED (organizations.pool_cidr, one
+	// per org; uniqueness is devices_org_ip_key on (org_id, ip)). A same-org transfer therefore cannot collide:
+	// the device already holds that address and keeps holding it. Reallocating would cost every moved user a
+	// re-import for a contention that does not exist.
+	//
+	// The `status IN ('active','pending')` predicate is repeated here deliberately, the same construction-over-
+	// convention shape as RestoreCascadeRevokedDevice: a caller who skipped the candidate filter still cannot
+	// re-home a revoked device and thereby hand it back onto a live gateway.
+	TransferDeviceToNode(ctx context.Context, arg TransferDeviceToNodeParams) (Device, error)
 	// Revert an idp_sync group to a plain (empty) manual group. Members are cleared separately.
 	UnbindIdpGroup(ctx context.Context, arg UnbindIdpGroupParams) (UserGroup, error)
 	UnbindNode(ctx context.Context, arg UnbindNodeParams) (int64, error)

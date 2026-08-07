@@ -343,6 +343,13 @@ const (
 	SsoConfigViewProviderMicrosoft SsoConfigViewProvider = "microsoft"
 )
 
+// Defines values for TransferNodeDevicesResponseDevicesReissueCause.
+const (
+	DestinationNotHubSetMember   TransferNodeDevicesResponseDevicesReissueCause = "destination_not_hub_set_member"
+	DestinationSelfHomingUnknown TransferNodeDevicesResponseDevicesReissueCause = "destination_self_homing_unknown"
+	StaticExport                 TransferNodeDevicesResponseDevicesReissueCause = "static_export"
+)
+
 // Defines values for UserGroupIdpProvider.
 const (
 	UserGroupIdpProviderGoogle    UserGroupIdpProvider = "google"
@@ -1725,6 +1732,33 @@ type TokenRequest struct {
 	Token string `json:"token"`
 }
 
+// TransferNodeDevicesRequest defines model for TransferNodeDevicesRequest.
+type TransferNodeDevicesRequest struct {
+	// TargetNodeId The LIVE gateway the devices are moved to. Required rather than defaulted: there is no correct guess, and a wrong destination moves a fleet onto a gateway that cannot serve it.
+	TargetNodeId openapi_types.UUID `json:"target_node_id"`
+}
+
+// TransferDevicesResult defines model for TransferNodeDevicesResponse.
+type TransferDevicesResult struct {
+	Devices []struct {
+		Id           openapi_types.UUID `json:"id"`
+		Name         string             `json:"name"`
+		NeedsReissue bool               `json:"needs_reissue"`
+
+		// ReissueCause Why this device's config stopped working. `static_export` — a file that cannot be re-pointed. `destination_not_hub_set_member` — a managed device whose destination it cannot follow itself onto. `destination_self_homing_unknown` — the topology could not be read, reported as needing a re-issue because overstating the work is recoverable and understating it means the user finds out by failing to connect. Absent when needs_reissue is false.
+		ReissueCause *TransferNodeDevicesResponseDevicesReissueCause `json:"reissue_cause,omitempty"`
+	} `json:"devices"`
+
+	// Moved How many devices are now homed on the destination.
+	Moved int `json:"moved"`
+
+	// NeedsReissue How many of those moved devices hold a config that no longer works. THIS IS THE NUMBER THAT MATTERS, not `moved`: the row moving and the config following are different events. A static export bakes the gateway's endpoint and public key and never polls, so it is always in this count; a managed device re-homes itself ONLY when the destination is in the active hub set, so it is in this count otherwise.
+	NeedsReissue int `json:"needs_reissue"`
+}
+
+// TransferNodeDevicesResponseDevicesReissueCause Why this device's config stopped working. `static_export` — a file that cannot be re-pointed. `destination_not_hub_set_member` — a managed device whose destination it cannot follow itself onto. `destination_self_homing_unknown` — the topology could not be read, reported as needing a re-issue because overstating the work is recoverable and understating it means the user finds out by failing to connect. Absent when needs_reissue is false.
+type TransferNodeDevicesResponseDevicesReissueCause string
+
 // UnbindSiteNodeRequest defines model for UnbindSiteNodeRequest.
 type UnbindSiteNodeRequest struct {
 	NodeId *openapi_types.UUID `json:"node_id,omitempty"`
@@ -1952,6 +1986,9 @@ type SetHubPriorityJSONRequestBody = HubPriorityRequest
 
 // RestoreNodeDevicesJSONRequestBody defines body for RestoreNodeDevices for application/json ContentType.
 type RestoreNodeDevicesJSONRequestBody = RestoreNodeDevicesRequest
+
+// TransferNodeDevicesJSONRequestBody defines body for TransferNodeDevices for application/json ContentType.
+type TransferNodeDevicesJSONRequestBody = TransferNodeDevicesRequest
 
 // ExportOVPNProfileJSONRequestBody defines body for ExportOVPNProfile for application/json ContentType.
 type ExportOVPNProfileJSONRequestBody = ExportOVPNProfileRequest
@@ -2455,6 +2492,11 @@ type ClientInterface interface {
 
 	// RevokeNode request
 	RevokeNode(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// TransferNodeDevicesWithBody request with any body
+	TransferNodeDevicesWithBody(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	TransferNodeDevices(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body TransferNodeDevicesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetOrgOverview request
 	GetOrgOverview(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -4285,6 +4327,30 @@ func (c *Client) RestoreNodeDevices(ctx context.Context, orgId openapi_types.UUI
 
 func (c *Client) RevokeNode(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRevokeNodeRequest(c.Server, orgId, nodeId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) TransferNodeDevicesWithBody(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewTransferNodeDevicesRequestWithBody(c.Server, orgId, nodeId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) TransferNodeDevices(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body TransferNodeDevicesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewTransferNodeDevicesRequest(c.Server, orgId, nodeId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9084,6 +9150,60 @@ func NewRevokeNodeRequest(server string, orgId openapi_types.UUID, nodeId openap
 	return req, nil
 }
 
+// NewTransferNodeDevicesRequest calls the generic TransferNodeDevices builder with application/json body
+func NewTransferNodeDevicesRequest(server string, orgId openapi_types.UUID, nodeId openapi_types.UUID, body TransferNodeDevicesJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewTransferNodeDevicesRequestWithBody(server, orgId, nodeId, "application/json", bodyReader)
+}
+
+// NewTransferNodeDevicesRequestWithBody generates requests for TransferNodeDevices with any type of body
+func NewTransferNodeDevicesRequestWithBody(server string, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "nodeId", runtime.ParamLocationPath, nodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/nodes/%s/transfer-devices", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetOrgOverviewRequest generates requests for GetOrgOverview
 func NewGetOrgOverviewRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
 	var err error
@@ -11020,6 +11140,11 @@ type ClientWithResponsesInterface interface {
 
 	// RevokeNodeWithResponse request
 	RevokeNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RevokeNodeResponse, error)
+
+	// TransferNodeDevicesWithBodyWithResponse request with any body
+	TransferNodeDevicesWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*TransferNodeDevicesResponse, error)
+
+	TransferNodeDevicesWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body TransferNodeDevicesJSONRequestBody, reqEditors ...RequestEditorFn) (*TransferNodeDevicesResponse, error)
 
 	// GetOrgOverviewWithResponse request
 	GetOrgOverviewWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetOrgOverviewResponse, error)
@@ -13383,6 +13508,29 @@ func (r RevokeNodeResponse) StatusCode() int {
 	return 0
 }
 
+type TransferNodeDevicesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *TransferDevicesResult
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r TransferNodeDevicesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r TransferNodeDevicesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetOrgOverviewResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -15388,6 +15536,23 @@ func (c *ClientWithResponses) RevokeNodeWithResponse(ctx context.Context, orgId 
 		return nil, err
 	}
 	return ParseRevokeNodeResponse(rsp)
+}
+
+// TransferNodeDevicesWithBodyWithResponse request with arbitrary body returning *TransferNodeDevicesResponse
+func (c *ClientWithResponses) TransferNodeDevicesWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*TransferNodeDevicesResponse, error) {
+	rsp, err := c.TransferNodeDevicesWithBody(ctx, orgId, nodeId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseTransferNodeDevicesResponse(rsp)
+}
+
+func (c *ClientWithResponses) TransferNodeDevicesWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body TransferNodeDevicesJSONRequestBody, reqEditors ...RequestEditorFn) (*TransferNodeDevicesResponse, error) {
+	rsp, err := c.TransferNodeDevices(ctx, orgId, nodeId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseTransferNodeDevicesResponse(rsp)
 }
 
 // GetOrgOverviewWithResponse request returning *GetOrgOverviewResponse
@@ -18857,6 +19022,39 @@ func ParseRevokeNodeResponse(rsp *http.Response) (*RevokeNodeResponse, error) {
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseTransferNodeDevicesResponse parses an HTTP response from a TransferNodeDevicesWithResponse call
+func ParseTransferNodeDevicesResponse(rsp *http.Response) (*TransferNodeDevicesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &TransferNodeDevicesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest TransferDevicesResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

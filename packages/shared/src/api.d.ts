@@ -650,6 +650,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/{orgId}/nodes/{nodeId}/transfer-devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move every live device homed on this gateway to another gateway
+         * @description S12.12 D1. Revoking a gateway CASCADES to every active and pending device homed on it, in the same transaction, and a revoked gateway is never active again — so retiring a gateway used to mean disconnecting everyone on it. This moves them first, and the revoke REFUSES (409 devices_still_homed) while any remain, which is what makes the step unskippable. Transfer-first is the ruled order because of the state the flow is ABANDONED in: "devices moved, old gateway still running" is harmless and resumable, whereas revoke-then-restore leaves a disconnected fleet and no un-revoke. PENDING devices move too and stay pending — an outstanding approval is about the person, not the gateway. Addresses are NOT reallocated: the pool is org-scoped, so a same-org move cannot collide. The response reports PER DEVICE whether its issued config must be re-imported, which is a different question from whether the row moved: a static export bakes the gateway's endpoint and never polls, and a managed device only re-homes itself onto a gateway in the active hub set.
+         */
+        post: operations["transferNodeDevices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/nodes/{nodeId}/hub-priority": {
         parameters: {
             query?: never;
@@ -2737,6 +2760,30 @@ export interface components {
         SsoRedirect: {
             redirect_url: string;
         };
+        TransferNodeDevicesRequest: {
+            /**
+             * Format: uuid
+             * @description The LIVE gateway the devices are moved to. Required rather than defaulted: there is no correct guess, and a wrong destination moves a fleet onto a gateway that cannot serve it.
+             */
+            target_node_id: string;
+        };
+        TransferNodeDevicesResponse: {
+            /** @description How many devices are now homed on the destination. */
+            moved: number;
+            /** @description How many of those moved devices hold a config that no longer works. THIS IS THE NUMBER THAT MATTERS, not `moved`: the row moving and the config following are different events. A static export bakes the gateway's endpoint and public key and never polls, so it is always in this count; a managed device re-homes itself ONLY when the destination is in the active hub set, so it is in this count otherwise. */
+            needs_reissue: number;
+            devices: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                needs_reissue: boolean;
+                /**
+                 * @description Why this device's config stopped working. `static_export` — a file that cannot be re-pointed. `destination_not_hub_set_member` — a managed device whose destination it cannot follow itself onto. `destination_self_homing_unknown` — the topology could not be read, reported as needing a re-issue because overstating the work is recoverable and understating it means the user finds out by failing to connect. Absent when needs_reissue is false.
+                 * @enum {string}
+                 */
+                reissue_cause?: "static_export" | "destination_not_hub_set_member" | "destination_self_homing_unknown";
+            }[];
+        };
         RestoreNodeDevicesRequest: {
             /**
              * Format: uuid
@@ -4172,6 +4219,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RestoreNodeDevicesResponse"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    transferNodeDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransferNodeDevicesRequest"];
+            };
+        };
+        responses: {
+            /** @description What moved. Zero moved is a normal answer, not an error. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransferNodeDevicesResponse"];
                 };
             };
             default: components["responses"]["Error"];

@@ -45,6 +45,21 @@ func (s apiServer) ListDevices(ctx context.Context, req api.ListDevicesRequestOb
 	if s.sites != nil {
 		current, _ = s.sites.ListRoutedRanges(ctx, req.OrgId)
 	}
+	// S12.12 D7 — the THIRD cause's managed half needs to know which gateways a managed device follows itself
+	// onto. Read ONCE per request, like the ranges, and best-effort for the same reason: a topology fault
+	// leaves the gateway cause uncompared for managed devices rather than failing the list.
+	//
+	// ⚠ AND THE FAILURE DIRECTION IS THE OPPOSITE OF THE TRANSFER'S, deliberately. The transfer reports a
+	// one-shot consequence, where an unknown must overstate the work. This is a STANDING surface, where an
+	// unknown that reports stale is a permanent false positive on a healthy fleet — the exact thing the
+	// unknown-is-not-stale rule was written for. So a fault here reads as self-homing (no gateway staleness),
+	// and the transfer's own report is what caught the case at the moment it was created.
+	selfHoming := map[uuid.UUID]bool{}
+	if s.nodes != nil {
+		if m, err := s.nodes.SelfHomingNodes(ctx, req.OrgId); err == nil {
+			selfHoming = m
+		}
+	}
 	out := make([]api.Device, 0, len(devs))
 	for _, d := range devs {
 		if !s.deviceHealthEnabled {
@@ -55,7 +70,8 @@ func (s apiServer) ListDevices(ctx context.Context, req api.ListDevicesRequestOb
 		// where the ranges half stays static-only and the address half does not. Gating out here is what hid
 		// managed devices from the signal.
 		stale := devices.ProfileStale(d.Device.ProvisioningMode, d.Device.ProvisionedRanges, current,
-			d.Device.ProvisionedIp, d.Device.AssignedIp, d.Device.ProvisionedNodeID, d.Device.NodeID)
+			d.Device.ProvisionedIp, d.Device.AssignedIp, d.Device.ProvisionedNodeID, d.Device.NodeID,
+			selfHoming[d.Device.NodeID])
 		ad.NeedsReexport = &stale
 		out = append(out, ad)
 	}

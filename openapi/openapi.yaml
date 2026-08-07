@@ -745,6 +745,46 @@ paths:
               schema: { $ref: "#/components/schemas/RestoreNodeDevicesResponse" }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/nodes/{nodeId}/transfer-devices:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: nodeId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: transferNodeDevices
+      summary: Move every live device homed on this gateway to another gateway
+      description: >-
+        S12.12 D1. Revoking a gateway CASCADES to every active and pending device homed on it, in the same
+        transaction, and a revoked gateway is never active again — so retiring a gateway used to mean
+        disconnecting everyone on it. This moves them first, and the revoke REFUSES (409 devices_still_homed)
+        while any remain, which is what makes the step unskippable. Transfer-first is the ruled order because
+        of the state the flow is ABANDONED in: "devices moved, old gateway still running" is harmless and
+        resumable, whereas revoke-then-restore leaves a disconnected fleet and no un-revoke. PENDING devices
+        move too and stay pending — an outstanding approval is about the person, not the gateway. Addresses
+        are NOT reallocated: the pool is org-scoped, so a same-org move cannot collide. The response reports
+        PER DEVICE whether its issued config must be re-imported, which is a different question from whether
+        the row moved: a static export bakes the gateway's endpoint and never polls, and a managed device
+        only re-homes itself onto a gateway in the active hub set.
+      tags: [nodes]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TransferNodeDevicesRequest" }
+      responses:
+        "200":
+          description: What moved. Zero moved is a normal answer, not an error.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransferNodeDevicesResponse" }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/nodes/{nodeId}/hub-priority:
     parameters:
       - name: orgId
@@ -3526,6 +3566,45 @@ components:
       additionalProperties: false
       properties:
         redirect_url: { type: string }
+
+    TransferNodeDevicesRequest:
+      type: object
+      required: [target_node_id]
+      additionalProperties: false
+      properties:
+        target_node_id:
+          type: string
+          format: uuid
+          description: "The LIVE gateway the devices are moved to. Required rather than defaulted: there is no correct guess, and a wrong destination moves a fleet onto a gateway that cannot serve it."
+
+    TransferNodeDevicesResponse:
+      # x-go-name for the SAME reason RestoreNodeDevicesResponse carries one: oapi-codegen derives a response
+      # wrapper named <operationId>Response, so this schema would collide with the wrapper for
+      # `transferNodeDevices` and apps/cli would not compile. Sixth-and-seventh instance of that class; the
+      # sweep that found the first six is why this one is here from the start rather than after a red.
+      x-go-name: TransferDevicesResult
+      type: object
+      required: [moved, needs_reissue, devices]
+      additionalProperties: false
+      properties:
+        moved: { type: integer, description: "How many devices are now homed on the destination." }
+        needs_reissue:
+          type: integer
+          description: "How many of those moved devices hold a config that no longer works. THIS IS THE NUMBER THAT MATTERS, not `moved`: the row moving and the config following are different events. A static export bakes the gateway's endpoint and public key and never polls, so it is always in this count; a managed device re-homes itself ONLY when the destination is in the active hub set, so it is in this count otherwise."
+        devices:
+          type: array
+          items:
+            type: object
+            required: [id, name, needs_reissue]
+            additionalProperties: false
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              needs_reissue: { type: boolean }
+              reissue_cause:
+                type: string
+                description: "Why this device's config stopped working. `static_export` — a file that cannot be re-pointed. `destination_not_hub_set_member` — a managed device whose destination it cannot follow itself onto. `destination_self_homing_unknown` — the topology could not be read, reported as needing a re-issue because overstating the work is recoverable and understating it means the user finds out by failing to connect. Absent when needs_reissue is false."
+                enum: [static_export, destination_not_hub_set_member, destination_self_homing_unknown]
 
     RestoreNodeDevicesRequest:
       type: object

@@ -435,3 +435,51 @@ ORDER BY d.created_at;
 UPDATE devices
 SET deleted_at = now(), updated_at = now()
 WHERE id = @id AND org_id = @org_id AND status = 'revoked' AND deleted_at IS NULL;
+
+-- name: CountLiveDevicesForNode :one
+-- lint:cross-org — keyed by node_id, which the caller resolved from an org-scoped node row.
+-- ⛔ THE PREDICATE THAT MAKES A REVOKE REFUSABLE (S12.12 D1). Exactly the set RevokeDevicesForNode would
+-- sweep, asked BEFORE the sweep instead of after it. The two must stay identical: a count that is narrower
+-- than the cascade lets a revoke through that still disconnects someone, which is the whole defect.
+SELECT count(*) FROM devices
+WHERE node_id = $1 AND status IN ('active', 'pending') AND deleted_at IS NULL;
+
+-- name: ListLiveDevicesForNode :many
+-- lint:cross-org — keyed by node_id, which the caller resolved from an org-scoped node row.
+-- The TRANSFER candidate set (S12.12 D1/D4): the devices a revoke would cascade, named so they can be MOVED
+-- instead. Same predicate as CountLiveDevicesForNode and RevokeDevicesForNode — one definition of "homed
+-- here and live", read three ways.
+--
+-- PENDING IS INCLUDED (D4). An outstanding approval is about the PERSON, not the gateway; leaving pending
+-- rows behind would strand an approval queue pointing at a gateway that is about to be revoked — the exact
+-- reason RevokeDevicesForNode sweeps pending rather than only active.
+--
+-- Returns provisioning_mode because the CONSEQUENCE of the move differs by mode: a static export is a file
+-- that never polls and must be re-issued, while a managed device re-homes itself — but only through a
+-- hub-set member. The caller needs the mode to report which devices are broken until re-imported.
+SELECT id, name, user_id, assigned_ip, transport, status, provisioning_mode
+FROM devices
+WHERE node_id = $1 AND status IN ('active', 'pending') AND deleted_at IS NULL
+ORDER BY id;
+
+-- name: TransferDeviceToNode :one
+-- lint:cross-org — keyed by device id; the caller authorized both nodes via the org and read the candidate
+-- set from ListLiveDevicesForNode.
+-- Re-homes ONE live device onto another gateway (S12.12 D1).
+--
+-- ⛔ STATUS IS NOT TOUCHED, and that is the difference from RestoreCascadeRevokedDevice. Restore RESURRECTS,
+-- so it must resolve what the row used to be; transfer moves a device that is already in a state a human
+-- chose. A pending device stays pending — the move is about the gateway, never about the approval.
+--
+-- ⛔ AND assigned_ip IS NOT TOUCHED EITHER, because the pool is ORG-SCOPED (organizations.pool_cidr, one
+-- per org; uniqueness is devices_org_ip_key on (org_id, ip)). A same-org transfer therefore cannot collide:
+-- the device already holds that address and keeps holding it. Reallocating would cost every moved user a
+-- re-import for a contention that does not exist.
+--
+-- The `status IN ('active','pending')` predicate is repeated here deliberately, the same construction-over-
+-- convention shape as RestoreCascadeRevokedDevice: a caller who skipped the candidate filter still cannot
+-- re-home a revoked device and thereby hand it back onto a live gateway.
+UPDATE devices
+SET node_id = $3, updated_at = now()
+WHERE id = $1 AND org_id = $2 AND status IN ('active', 'pending') AND deleted_at IS NULL
+RETURNING *;
