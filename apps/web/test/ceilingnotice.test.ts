@@ -10,10 +10,13 @@ describe("the standing ceiling notice", () => {
     // ⛔ THE CLAUSE THAT STOPS THIS READING AS HOUSEKEEPING. Revoking cascades to every device homed to
     // that gateway, so the remedy this notice recommends can disconnect fifty people. "Revoke a gateway
     // you no longer use" was TRUE and named none of that.
-    expect(s).toContain("disconnects every device homed to it");
+    expect(s).toContain("permanent and disconnects every device homed to it");
     // ⚠ AND IT SENDS THEM WHERE THE NUMBER IS, rather than promising a count it cannot compute: this
     // notice is deployment-scoped and does not know which gateway the operator will pick.
-    expect(s).toContain("says how many before you confirm");
+    expect(s).toContain("says how many");
+    // ⭐ AND THE WAY OUT, or the notice reads as a dead end and the operator either freezes or believes
+    // the disconnected people are unrecoverable. They are not — the device rows survive the cascade.
+    expect(s).toContain("moved to another gateway");
     // The old phrasing must not survive anywhere in the string.
     expect(s).not.toContain("you no longer use");
   });

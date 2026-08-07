@@ -287,11 +287,9 @@ export default function GatewaysPage() {
                 usually reaching for a licence slot, which is the worst moment to be surprised.
                 ⚠ SILENT WHEN THERE ARE NONE — same shape as the deactivate warning: a caution that fires
                 on the harmless case teaches people to click through the dangerous one. */}
-            {revokeConsequence(homedCounts, r.id) && (
-              <span className="max-w-[19rem] text-right text-micro text-warn">
-                {revokeConsequence(homedCounts, r.id)}
-              </span>
-            )}
+            <span className="max-w-[19rem] text-right text-micro text-warn">
+              {revokeConsequence(homedCounts, r.id)}
+            </span>
             <span className="flex items-center gap-2">
             <button
               type="button"

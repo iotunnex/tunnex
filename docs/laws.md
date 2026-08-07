@@ -5504,3 +5504,28 @@ the org renders.
 ⛔ **AND A SPEC THAT ASSERTS ONLY THE FIRST DESTINATION PASSES ON A PRODUCT WHERE INVITATIONS NEVER WORK.**
 `onboarding.spec.ts` already pinned membershipless → the invitation card against a real backend, and it was
 green throughout. Two states, two destinations, BOTH asserted, or the green half hides the broken half.
+
+
+## ⛔ A COUNT FROM ONE SOURCE AND ITS ROWS FROM ANOTHER ARE TWO TRUTHS ABOUT ONE SET
+
+Gateways, Devices and Sites each fetched their own rows while the badge beside the nav label came from a
+shared hook (`useNavCounts`). **Three pages made the same mistake independently** — which is what makes it a
+class and not a bug.
+
+⚠ **THEY AGREE RIGHT UP UNTIL A FILTER DIFFERS, AND THEN THEY DISAGREE SILENTLY.** Nothing errors. Both
+numbers are correctly computed from correctly fetched data; they are simply answers to two different
+questions wearing one label. The page counts what the page filtered, the badge counts what the hook
+filtered, and the operator reads them side by side as one fact.
+
+⛔ **THE SAME SHAPE ALREADY SHIPPED A MEASURED DEFECT:** the nav badge built its fraction from the CURRENT
+ORG's gateway list over the DEPLOYMENT's ceiling, so a newly created organization read `0 / 5` on a box that
+was already full and refusing the next enrolment. **A fraction whose halves answer different questions does
+not fail to inform — it actively misinforms**, and most confidently in the newest org. The fix was to serve
+the numerator from the same place the ceiling is enforced (`gateways_in_use`, `licence_handlers.go`).
+
+⭐ **THE RULE: ONE SET, ONE SOURCE.** A count rendered beside rows is DERIVED FROM THOSE ROWS, or it comes
+from a seam that both the count and the rows read. Never a second independent fetch — the second fetch is
+where the drift lives, and no test that checks either number alone can see it.
+
+⚠ **AND IT IS INVISIBLE TO PER-SURFACE TESTS BY CONSTRUCTION.** Both sides pass their own tests, because
+each is right about its own question. The guard has to compare them, or assert they share a source.
