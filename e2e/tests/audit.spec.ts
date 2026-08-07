@@ -1,20 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// ⛔ SKIPPED, NOT DELETED — AND THE REASON IS THAT THE PRODUCT CHANGED UNDER THEM, NOT THAT THEY ARE WRONG.
-//
-// Public signup is closed (founder-ruled): a self-hosted control plane is owned by ONE COMPANY, install
-// creates the CP admin, and everyone else arrives by INVITATION. These specs assert a self-serve signup
-// flow that no longer exists — so they are red because the product moved, which is exactly the state a
-// spec should end up in when a ruling lands.
-//
-// ⚠ THEY ARE NOT REWRITTEN HERE BECAUSE HALF THEIR REPLACEMENT IS NOT BUILT. The invitation flow — invite
-// → email → the invited person SETS THEIR OWN PASSWORD from the link → signs in — is the next piece of the
-// onboarding rebuild. Rewriting them against a model that is half-finished produces a suite that passes
-// while testing nothing, which is worse than one that is honestly red.
-//
-// ⛔ TRIGGER, NAMED: the invitation flow. These are rewritten as invitation-shaped specs in that story, or
-// deleted there with a reason. `docs/laws.md` — a deferred proof is deferred, never dropped.
-
 // S4.6 Audit log viewer. The seeded org has no audit events and sso.config_updated
 // needs an enterprise SSO write, so the feed render + keyset paging are asserted
 // against a MOCKED endpoint (like the other UI-render tests); the real page is
@@ -23,6 +8,20 @@ const OWNER = {
   email: "owner@demo.tunnex.local",
   pass: "tunnex-demo-password",
 };
+// ⛔ THE CROSS-TENANT CAST (S12.6). A deployment administrator who is a member of NOTHING, a second
+// organization they are not in, and an account with no memberships to be granted one. The demo owner
+// cannot play the administrator: they hold `cp_admin` AND belong to the demo org, so every grant they make
+// is an ordinary in-tenant act and proves nothing about the boundary.
+const CP_ADMIN = {
+  email: "cpadmin@demo.tunnex.local",
+  pass: "tunnex-demo-password",
+};
+const SANDBOX_OWNER = {
+  email: "sandbox-owner@demo.tunnex.local",
+  pass: "tunnex-demo-password",
+};
+const SANDBOX_ORG = "01900000-0000-7000-8000-000000000021"; // seeddata.DemoSandboxOrgID
+const GRANTEE = "01900000-0000-7000-8000-000000000023"; // seeddata.DemoGranteeUserID
 
 async function login(page: Page) {
   await page.goto("/login");
@@ -142,4 +141,80 @@ test("the feed renders actions + resolved actors + secret-free details, with key
   await expect(rows).toHaveCount(54);
   expect(sawCursorReq).toBe(true);
   await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0); // short last page → end
+});
+
+// ⛔ THE INVARIANT WITH THE WEAKEST COVERAGE, DRIVEN END TO END (S12.6).
+//
+// A deployment administrator can change a role in ANY organization. The rule is that the TARGET org's
+// owners see it in THEIR feed — the only feed they read — because a privilege change made inside your
+// tenant by somebody outside it is the event you are most owed sight of.
+//
+// ⚠ TWO HALVES, AND THE SECOND IS THE ONE A DATABASE TEST CANNOT SEE. The row landing in the right org is
+// the easy half (`audit_logs.org_id` carries no membership constraint). The half that nearly shipped wrong
+// is the RENDER: the screen resolves `actor_id` against the org ROSTER, and a deployment administrator is
+// on no roster — so the row would have read "former member 019fc421", a confident false claim about
+// somebody who was never a member at all, attached to exactly this event.
+test("a cross-tenant grant appears in the TARGET org's audit log, naming the deployment admin", async ({
+  page,
+}) => {
+  // 1. The administrator signs in. They belong to no organization, so they never reach the app shell —
+  //    the funnel holds them at /create-org — and that is precisely the account this surface is for.
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(CP_ADMIN.email);
+  await page.getByLabel("Password").fill(CP_ADMIN.pass);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(/\/create-org$/);
+
+  // 2. Two grants, so the spec proves a CHANGE on every run rather than only the first. A re-grant of the
+  //    role already held writes nothing (no audit row for an act that did not happen), so a single
+  //    idempotent call would stop producing evidence the second time this suite runs against a live DB.
+  //    ⚠ No web surface calls these routes yet — registered — so the spec drives the API with the session
+  //    the browser just minted, exactly as the unverified-admin server-refusal spec does.
+  for (const role of ["member", "admin"]) {
+    const resp = await page.request.put(
+      `/api/v1/admin/organizations/${SANDBOX_ORG}/members/${GRANTEE}/role`,
+      { headers: { "X-Tunnex-CSRF": "1" }, data: { role } },
+    );
+    expect(resp.status()).toBe(204);
+  }
+
+  // 3. The TARGET org's owner reads their own feed.
+  await page.context().clearCookies();
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(SANDBOX_OWNER.email);
+  await page.getByLabel("Password").fill(SANDBOX_OWNER.pass);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await page.getByRole("link", { name: "Audit Log" }).click();
+  await expect(page.getByRole("heading", { name: "Audit log" })).toBeVisible();
+
+  const row = page
+    .getByRole("row")
+    .filter({ hasText: "member.role_granted_by_cp_admin" })
+    .first();
+  await expect(row).toBeVisible();
+
+  // ⛔ NAMED, AND NAMED AS WHAT THEY ARE. The kind is asserted from the DOM attribute, not inferred from
+  // the words, so a label that happens to contain the right email by coincidence cannot pass.
+  const actor = row.getByTestId("audit-actor");
+  await expect(actor).toHaveAttribute("data-actor-kind", "cp_admin");
+  await expect(actor).toContainText(CP_ADMIN.email);
+  await expect(actor).toContainText("deployment admin");
+  await expect(actor).not.toContainText("former member");
+  await expect(actor).not.toContainText("not recorded");
+
+  // 4. ⛔ AND IT IS NOT IN ANYONE ELSE'S FEED. "Which org" is half the ruling: a deployment-wide event
+  //    filed under an arbitrary tenant would put one org's history in another's. The demo owner — a
+  //    different tenant entirely — must see nothing of this.
+  await page.context().clearCookies();
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(OWNER.email);
+  await page.getByLabel("Password").fill(OWNER.pass);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await page.getByRole("link", { name: "Audit Log" }).click();
+  await expect(page.getByRole("heading", { name: "Audit log" })).toBeVisible();
+  await expect(
+    page.getByRole("row").filter({ hasText: "member.role_granted_by_cp_admin" }),
+  ).toHaveCount(0);
 });
