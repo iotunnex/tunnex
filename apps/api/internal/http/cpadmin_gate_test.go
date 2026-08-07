@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 )
@@ -50,6 +51,47 @@ func TestRequireCPAdmin(t *testing.T) {
 	assertRefusal(t, "an unverified account", 403, "email_not_verified", requireCPAdminErr(ctxWith(p)))
 
 	assertRefusal(t, "an unauthenticated caller", 401, "unauthenticated", requireCPAdminErr(context.Background()))
+}
+
+// ⛔ THE GATE IN PLACE, NOT THE GATE IN ISOLATION — and this session is why.
+//
+// TestRequireCPAdmin above calls the function directly, so every arm of it can be right while the
+// COMPOSITION is wrong. The one real defect found while building this surface lived exactly there: both
+// routes answered `400 validation_failed` to a sessionless caller because the spec validator ran ahead of
+// authentication, and no test of the gate itself could have seen it.
+//
+// ⚠ THE SERVICE IS NIL ON PURPOSE. If a refusal ever stops happening before the service call, this panics
+// instead of quietly passing — the failure is structural rather than an assertion nobody wrote.
+func TestTheAdminHandlersRefuseBeforeDoingAnything(t *testing.T) {
+	s := apiServer{} // no orgs service: reaching it is the failure
+	org, user := uuid.New(), uuid.New()
+	role := api.ChangeRoleRequestRole("member")
+
+	nonHolder := &authctx.Principal{UserID: uuid.New(), EmailVerified: true, CPAdmin: false}
+	walled := &authctx.Principal{UserID: uuid.New(), EmailVerified: true, CPAdmin: true, MustChangePassword: true}
+
+	for _, tc := range []struct {
+		who  string
+		p    *authctx.Principal
+		code string
+	}{
+		{"a signed-in member of some org", nonHolder, "cp_admin_required"},
+		{"the un-rotated bootstrap credential", walled, "password_change_required"},
+	} {
+		ctx := authctx.WithPrincipal(context.Background(), tc.p)
+
+		_, err := s.AdminSetOrgRole(ctx, api.AdminSetOrgRoleRequestObject{
+			OrgId: org, UserId: user,
+			Body: &api.ChangeRoleRequest{Role: role},
+		})
+		assertRefusal(t, tc.who+" (grant a role)", 403, tc.code, err)
+
+		_, err = s.AdminSetCpAdmin(ctx, api.AdminSetCpAdminRequestObject{
+			UserId: user,
+			Body:   &api.CpAdminRequest{Granted: true},
+		})
+		assertRefusal(t, tc.who+" (grant the capability)", 403, tc.code, err)
+	}
 }
 
 func requireCPAdminErr(ctx context.Context) error {
