@@ -70,6 +70,49 @@ describe("resolveActor", () => {
     expect(a.kind).toBe("system");
   });
 
+  // ⛔ THE CROSS-TENANT ACTOR (S12.6). A deployment administrator can change a role in an
+  // organization they are not a member of — so their id is not on the roster this screen resolves
+  // against, and every other arm would have called them a FORMER MEMBER of a tenant they were never
+  // in. It is attached to the one event class an org's owners most need to read correctly: someone
+  // from outside their tenant changed a privilege inside it.
+  it("⛔ names a deployment administrator instead of calling them a former member", () => {
+    const a = resolveActor(
+      {
+        actor_id: "cafe-0000",
+        action: "member.role_granted_by_cp_admin",
+        details: { actor_kind: "cp_admin", actor_email: "admin@tunnex.local" },
+      },
+      members,
+    );
+    expect(a.kind).toBe("cp_admin");
+    expect(a.label).toContain("admin@tunnex.local");
+    expect(a.label).toMatch(/deployment admin/i);
+    expect(a.label).not.toMatch(/former member/i);
+    expect(a.gap).toBe(false); // fully attributed — the row says who
+  });
+
+  it("⛔ a cp_admin row with no email is still not a former member", () => {
+    // The metadata is written by us; if the email were ever missing, the honest answer is "we know
+    // what kind of actor this was and not their name" — never a false claim about membership.
+    const a = resolveActor(
+      { actor_id: "cafe-0000", action: "x", details: { actor_kind: "cp_admin" } },
+      members,
+    );
+    expect(a.kind).toBe("cp_admin");
+    expect(a.label).not.toMatch(/former member/i);
+  });
+
+  it("does not treat ordinary metadata as an actor claim", () => {
+    // Only `actor_kind: "cp_admin"` opens this arm — a row whose details merely mention a role must
+    // resolve through the roster like any other.
+    const a = resolveActor(
+      { actor_id: "u1", action: "x", details: { role: { to: "owner" } } },
+      members,
+    );
+    expect(a.kind).toBe("human");
+    expect(a.label).toBe("Ada Lovelace");
+  });
+
   it("treats a blank actor field as absent, not as a name", () => {
     expect(
       resolveActor({ actor_system: "   ", action: "x" }, members).kind,

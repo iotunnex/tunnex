@@ -291,7 +291,12 @@ export default function AuditLog() {
                         ? "text-warn"
                         : actor.kind === "system"
                           ? "font-mono text-accent-400"
-                          : "text-slate-500")
+                          : // ⛔ A DEPLOYMENT ADMINISTRATOR DOES NOT READ AS A COLLEAGUE. They acted
+                            // inside this tenant from outside it, which is the fact the row exists to
+                            // convey — rendering them in the same grey as a member would bury it.
+                            actor.kind === "cp_admin"
+                            ? "text-accent-400"
+                            : "text-slate-500")
                     }
                   >
                     {actor.label}

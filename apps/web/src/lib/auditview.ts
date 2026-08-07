@@ -22,6 +22,8 @@ export type AuditRow = {
   actor_id?: string | null;
   actor_system?: string | null;
   action: string;
+  /** Event metadata. Carries the actor's identity when the roster cannot supply it (see below). */
+  details?: Record<string, unknown> | null;
 };
 
 /**
@@ -34,7 +36,24 @@ export type AuditRow = {
  * human insert path with a NULL actor instead of `InsertSystemAuditLog`. Registered separately;
  * this screen must not hide it while it is unfixed.
  */
-export type ActorKind = "human" | "system" | "unknown_human" | "unattributed";
+export type ActorKind =
+  | "human"
+  | "system"
+  | "unknown_human"
+  | "unattributed"
+  /**
+   * ⛔ A FIFTH ARM, BECAUSE THE FOURTH WOULD HAVE LIED ABOUT A REAL PERSON.
+   *
+   * S12.6 gave deployment administrators the power to change a role in ANY organization. They are
+   * typically a member of NONE of them — so their `actor_id` is not on the roster this screen
+   * resolves against, and the existing arms would have rendered *"former member 019fc421"*: a
+   * confident false claim about somebody who was never a member at all, attached to the one event
+   * class an org's owners most need to read correctly.
+   *
+   * The row names them (`actor_email` + `actor_kind` in the metadata) precisely because the roster
+   * cannot.
+   */
+  | "cp_admin";
 
 export type ResolvedActor = {
   kind: ActorKind;
@@ -63,6 +82,15 @@ export function resolveActor(
   // fallback and must never render as the generic word.
   if (row.actor_system && row.actor_system.trim() !== "") {
     return { kind: "system", label: row.actor_system.trim(), gap: false };
+  }
+  // ⛔ BEFORE THE ROSTER LOOKUP, because the roster is the thing that cannot answer here. A
+  // deployment administrator acting inside a tenant they do not belong to is FULLY attributed — the
+  // row carries who they are — and must not be resolved by absence from a list they were never on.
+  const kind = row.details?.["actor_kind"];
+  if (kind === "cp_admin") {
+    const email = row.details?.["actor_email"];
+    const who = typeof email === "string" && email !== "" ? email : "unnamed";
+    return { kind: "cp_admin", label: `${who} (deployment admin)`, gap: false };
   }
   if (row.actor_id && row.actor_id.trim() !== "") {
     const m = members.find((mm) => mm.user_id === row.actor_id);
