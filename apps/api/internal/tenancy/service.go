@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -318,8 +319,79 @@ func (s *Service) UpdateOrganization(ctx context.Context, id uuid.UUID, name str
 	return org, nil
 }
 
+// OrgResources is what an organization still owns. Zero everywhere is the only state in which it may be
+// deleted.
+type OrgResources struct {
+	Gateways           int64 `json:"gateways"`
+	Devices            int64 `json:"devices"`
+	Sites              int64 `json:"sites"`
+	Clusters           int64 `json:"clusters"`
+	MachineCredentials int64 `json:"machine_credentials"`
+}
+
+// Empty reports whether nothing is left to strand.
+func (r OrgResources) Empty() bool {
+	return r.Gateways == 0 && r.Devices == 0 && r.Sites == 0 && r.Clusters == 0 && r.MachineCredentials == 0
+}
+
+// Blockers lists what is in the way, in the operator's words, largest obstacle first.
+func (r OrgResources) Blockers() []string {
+	var out []string
+	add := func(n int64, one, many string) {
+		if n == 1 {
+			out = append(out, fmt.Sprintf("1 %s", one))
+		} else if n > 1 {
+			out = append(out, fmt.Sprintf("%d %s", n, many))
+		}
+	}
+	add(r.Gateways, "gateway", "gateways")
+	add(r.Sites, "site", "sites")
+	add(r.Devices, "device", "devices")
+	add(r.Clusters, "Kubernetes cluster", "Kubernetes clusters")
+	add(r.MachineCredentials, "machine credential", "machine credentials")
+	return out
+}
+
+// OrgResourceCount reports what an organization still owns, for the preflight the delete screen shows
+// BEFORE anyone types a confirmation.
+func (s *Service) OrgResourceCount(ctx context.Context, id uuid.UUID) (OrgResources, error) {
+	r, err := s.q.CountOrgResources(ctx, id)
+	if err != nil {
+		return OrgResources{}, err
+	}
+	return OrgResources{
+		Gateways: r.Gateways, Devices: r.Devices, Sites: r.Sites,
+		Clusters: r.Clusters, MachineCredentials: r.MachineCredentials,
+	}, nil
+}
+
 // SoftDeleteOrganization soft-deletes an org and records org.deleted atomically.
+//
+// ⛔ IT REFUSES WHILE THE ORGANIZATION STILL OWNS ANYTHING, and the reason is what "delete" does here.
+// This is a SOFT delete: the row gets `deleted_at` and nothing else happens. Every gateway keeps running
+// on the customer's own server, every device keeps its pool address, every machine credential keeps
+// authenticating — all of it now owned by an organization no screen will ever show again.
+//
+// > ## ⛔ **THAT IS NOT A DELETION, IT IS AN ABANDONMENT** — and the resources it strands are the ones
+// > ## carrying live traffic.
+//
+// ⚠ THE REFUSAL NAMES EVERY BLOCKER AT ONCE. Revealing one per attempt turns a destructive verb into a
+// guessing game, and each attempt is a fresh chance to type the confirmation on the wrong organization.
+//
+// ⭐ NOT A FORCE FLAG. A cascade would have to revoke gateways, strand device configs and kill credentials
+// across a tenant in one click, with no undo — the blast radius belongs to the operator doing it
+// deliberately, one surface at a time, where each of those acts already has its own confirmation.
 func (s *Service) SoftDeleteOrganization(ctx context.Context, id uuid.UUID) error {
+	res, err := s.OrgResourceCount(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !res.Empty() {
+		return apierr.Conflict("org_not_empty",
+			"This organization still has "+strings.Join(res.Blockers(), ", ")+". Deleting it would leave "+
+				"them running with no organization to manage them from — gateways keep carrying traffic and "+
+				"credentials keep authenticating. Remove them first, then delete the organization.")
+	}
 	return s.withTx(ctx, func(q *sqlc.Queries) error {
 		n, e := q.SoftDeleteOrganization(ctx, id)
 		if e != nil {

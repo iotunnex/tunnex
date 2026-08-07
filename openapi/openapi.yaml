@@ -2262,7 +2262,11 @@ paths:
           $ref: "#/components/responses/Error"
     delete:
       operationId: deleteOrganization
-      summary: Soft-delete an organization
+      summary: Soft-delete an organization (refused while it still owns resources)
+      description: >-
+        Owner-only (`org:delete`). Refuses with 409 `org_not_empty` while the organization still has
+        gateways, sites, devices, Kubernetes clusters or machine credentials — a soft delete leaves them
+        running with no organization to manage them from. There is no force flag.
       tags: [organizations]
       responses:
         "204":
@@ -2270,6 +2274,29 @@ paths:
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/v1/organizations/{orgId}/deletion-preflight:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: orgDeletionPreflight
+      summary: What still blocks deleting this organization
+      description: >-
+        The counts the delete refusal is derived from, read BEFORE anyone types a confirmation. Same
+        permission as the delete itself — a preflight is only actionable to someone who could act on it.
+      tags: [organizations]
+      responses:
+        "200":
+          description: Preflight.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgDeletionPreflight" }
         default:
           $ref: "#/components/responses/Error"
 
@@ -4092,6 +4119,27 @@ components:
       additionalProperties: false
       properties:
         role: { type: string, enum: [owner, admin, member] }
+
+    OrgDeletionPreflight:
+      type: object
+      additionalProperties: false
+      required: [deletable, gateways, devices, sites, clusters, machine_credentials, blockers]
+      properties:
+        deletable:
+          type: boolean
+          description: True only when every count below is zero.
+        gateways: { type: integer }
+        devices: { type: integer }
+        sites: { type: integer }
+        clusters: { type: integer }
+        machine_credentials: { type: integer }
+        blockers:
+          type: array
+          description: >-
+            Every blocker, already worded and pluralised for a human ("2 gateways", "1 site"). Served as
+            text so the screen and the refusal message cannot drift into describing the same state
+            differently.
+          items: { type: string }
 
     CpAdminRequest:
       type: object

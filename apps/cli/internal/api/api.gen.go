@@ -1377,6 +1377,20 @@ type OVPNSetting struct {
 	Enabled bool `json:"enabled"`
 }
 
+// OrgDeletionPreflight defines model for OrgDeletionPreflight.
+type OrgDeletionPreflight struct {
+	// Blockers Every blocker, already worded and pluralised for a human ("2 gateways", "1 site"). Served as text so the screen and the refusal message cannot drift into describing the same state differently.
+	Blockers []string `json:"blockers"`
+	Clusters int      `json:"clusters"`
+
+	// Deletable True only when every count below is zero.
+	Deletable          bool `json:"deletable"`
+	Devices            int  `json:"devices"`
+	Gateways           int  `json:"gateways"`
+	MachineCredentials int  `json:"machine_credentials"`
+	Sites              int  `json:"sites"`
+}
+
 // OrgOverview defines model for OrgOverview.
 type OrgOverview struct {
 	Devices        int             `json:"devices"`
@@ -2212,6 +2226,9 @@ type ClientInterface interface {
 
 	// ListAuditLogs request
 	ListAuditLogs(ctx context.Context, orgId openapi_types.UUID, params *ListAuditLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// OrgDeletionPreflight request
+	OrgDeletionPreflight(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetDeviceApproval request
 	GetDeviceApproval(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3287,6 +3304,18 @@ func (c *Client) ListAgents(ctx context.Context, orgId openapi_types.UUID, reqEd
 
 func (c *Client) ListAuditLogs(ctx context.Context, orgId openapi_types.UUID, params *ListAuditLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListAuditLogsRequest(c.Server, orgId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) OrgDeletionPreflight(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewOrgDeletionPreflightRequest(c.Server, orgId)
 	if err != nil {
 		return nil, err
 	}
@@ -6527,6 +6556,40 @@ func NewListAuditLogsRequest(server string, orgId openapi_types.UUID, params *Li
 		}
 
 		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewOrgDeletionPreflightRequest generates requests for OrgDeletionPreflight
+func NewOrgDeletionPreflightRequest(server string, orgId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/deletion-preflight", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
 	}
 
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
@@ -10729,6 +10792,9 @@ type ClientWithResponsesInterface interface {
 	// ListAuditLogsWithResponse request
 	ListAuditLogsWithResponse(ctx context.Context, orgId openapi_types.UUID, params *ListAuditLogsParams, reqEditors ...RequestEditorFn) (*ListAuditLogsResponse, error)
 
+	// OrgDeletionPreflightWithResponse request
+	OrgDeletionPreflightWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*OrgDeletionPreflightResponse, error)
+
 	// GetDeviceApprovalWithResponse request
 	GetDeviceApprovalWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetDeviceApprovalResponse, error)
 
@@ -11987,6 +12053,29 @@ func (r ListAuditLogsResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r ListAuditLogsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type OrgDeletionPreflightResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *OrgDeletionPreflight
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r OrgDeletionPreflightResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r OrgDeletionPreflightResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -14586,6 +14675,15 @@ func (c *ClientWithResponses) ListAuditLogsWithResponse(ctx context.Context, org
 	return ParseListAuditLogsResponse(rsp)
 }
 
+// OrgDeletionPreflightWithResponse request returning *OrgDeletionPreflightResponse
+func (c *ClientWithResponses) OrgDeletionPreflightWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*OrgDeletionPreflightResponse, error) {
+	rsp, err := c.OrgDeletionPreflight(ctx, orgId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseOrgDeletionPreflightResponse(rsp)
+}
+
 // GetDeviceApprovalWithResponse request returning *GetDeviceApprovalResponse
 func (c *ClientWithResponses) GetDeviceApprovalWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetDeviceApprovalResponse, error) {
 	rsp, err := c.GetDeviceApproval(ctx, orgId, reqEditors...)
@@ -16964,6 +17062,39 @@ func ParseListAuditLogsResponse(rsp *http.Response) (*ListAuditLogsResponse, err
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest []AuditLogEntry
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseOrgDeletionPreflightResponse parses an HTTP response from a OrgDeletionPreflightWithResponse call
+func ParseOrgDeletionPreflightResponse(rsp *http.Response) (*OrgDeletionPreflightResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &OrgDeletionPreflightResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest OrgDeletionPreflight
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

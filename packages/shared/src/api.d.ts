@@ -1700,12 +1700,37 @@ export interface paths {
         get: operations["getOrganization"];
         put?: never;
         post?: never;
-        /** Soft-delete an organization */
+        /**
+         * Soft-delete an organization (refused while it still owns resources)
+         * @description Owner-only (`org:delete`). Refuses with 409 `org_not_empty` while the organization still has gateways, sites, devices, Kubernetes clusters or machine credentials — a soft delete leaves them running with no organization to manage them from. There is no force flag.
+         */
         delete: operations["deleteOrganization"];
         options?: never;
         head?: never;
         /** Update organization settings (name only; slug is immutable) */
         patch: operations["updateOrganization"];
+        trace?: never;
+    };
+    "/api/v1/organizations/{orgId}/deletion-preflight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * What still blocks deleting this organization
+         * @description The counts the delete refusal is derived from, read BEFORE anyone types a confirmation. Same permission as the delete itself — a preflight is only actionable to someone who could act on it.
+         */
+        get: operations["orgDeletionPreflight"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/organizations/{orgId}/pool-cidr": {
@@ -3030,6 +3055,17 @@ export interface components {
         ChangeRoleRequest: {
             /** @enum {string} */
             role: "owner" | "admin" | "member";
+        };
+        OrgDeletionPreflight: {
+            /** @description True only when every count below is zero. */
+            deletable: boolean;
+            gateways: number;
+            devices: number;
+            sites: number;
+            clusters: number;
+            machine_credentials: number;
+            /** @description Every blocker, already worded and pluralised for a human ("2 gateways", "1 site"). Served as text so the screen and the refusal message cannot drift into describing the same state differently. */
+            blockers: string[];
         };
         CpAdminRequest: {
             granted: boolean;
@@ -5946,6 +5982,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Organization"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    orgDeletionPreflight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Preflight. */
+            200: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgDeletionPreflight"];
                 };
             };
             default: components["responses"]["Error"];
