@@ -5,6 +5,7 @@ import {
   apiErrorMessage,
   loadOne,
   type Loaded,
+  type Device,
   type Node,
   type Org,
   type Site,
@@ -22,6 +23,7 @@ import {
   groupNotes,
   type GatewayFilter,
   type GatewayRow,
+  revokeConsequence,
 } from "../lib/gatewaysview";
 
 // ── S14.6 — GATEWAYS, THE SECTION PASS ──────────────────────────────────────────────────────────────────
@@ -92,6 +94,10 @@ export default function GatewaysPage() {
   // in a table row is a modal over a list, and the row is the thing being acted on.
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
   const [revoking, setRevoking] = useState(false);
+  // node id -> devices homed there that would be disconnected. NULL = the count could not be read.
+  const [homedCounts, setHomedCounts] = useState<Record<string, number> | null>(
+    null,
+  );
 
   /** Revoke, then reload — the row must stop looking live the moment the server says it is not. */
   async function revokeGateway(nodeId: string) {
@@ -140,6 +146,33 @@ export default function GatewaysPage() {
     const lRes = await loadOne(() => api.GET("/api/v1/license"));
     if (lRes.ok)
       setLic(lRes.data as { tier: string; gateway_ceiling?: number | null });
+    // ⛔ THE DEVICES HOMED TO EACH GATEWAY — read so the revoke confirm can COUNT THE PEOPLE IT
+    // DISCONNECTS. Revoking cascades (`RevokeDevicesForNode`, in the same transaction as the node revoke),
+    // so the act is not the tidy-up the ceiling notice made it sound like: it is a disconnection, and the
+    // operator must be told the size of it at the moment they click.
+    //
+    // ⚠ COUNTED OVER `active` + `pending` ONLY — the two states the cascade actually sweeps
+    // (devices.sql:174). Counting revoked rows here would inflate the warning with devices that already
+    // cannot connect, and a warning that overstates is disbelieved the second time.
+    //
+    // ⚠ A FAILED READ LEAVES THE MAP NULL, NOT EMPTY. `{}` renders every gateway as "0 devices" — a silent
+    // all-clear produced by a failure, on the one sentence whose whole job is to stop a destructive click.
+    // Null makes the confirm say it could not count instead.
+    const dRes = (await loadOne(() =>
+      api.GET("/api/v1/organizations/{orgId}/devices", {
+        params: { path: { orgId: first.id } },
+      }),
+    )) as Loaded<Device[]>;
+    setHomedCounts(
+      dRes.ok
+        ? dRes.data.reduce<Record<string, number>>((acc, d) => {
+            if (!d.node_id) return acc;
+            if (d.status !== "active" && d.status !== "pending") return acc;
+            acc[d.node_id] = (acc[d.node_id] ?? 0) + 1;
+            return acc;
+          }, {})
+        : null,
+    );
     const sRes = (await loadOne(() =>
       api.GET("/api/v1/organizations/{orgId}/sites", {
         params: { path: { orgId: first.id } },
@@ -248,7 +281,18 @@ export default function GatewaysPage() {
        */
       cell: (r: GatewayRow) =>
         r.status === "revoked" ? null : confirmRevoke === r.id ? (
-          <span className="flex items-center gap-2">
+          <span className="flex flex-col items-end gap-1">
+            {/* ⛔ THE COST OF THE ACT, AT THE MOMENT OF THE ACT. Revoking cascades to every device homed
+                here, so this is a disconnection, not a tidy-up — and the operator reaching for it is
+                usually reaching for a licence slot, which is the worst moment to be surprised.
+                ⚠ SILENT WHEN THERE ARE NONE — same shape as the deactivate warning: a caution that fires
+                on the harmless case teaches people to click through the dangerous one. */}
+            {revokeConsequence(homedCounts, r.id) && (
+              <span className="max-w-[19rem] text-right text-micro text-warn">
+                {revokeConsequence(homedCounts, r.id)}
+              </span>
+            )}
+            <span className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => void revokeGateway(r.id)}
@@ -264,6 +308,7 @@ export default function GatewaysPage() {
             >
               Cancel
             </button>
+            </span>
           </span>
         ) : (
           <button
