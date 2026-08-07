@@ -40,6 +40,9 @@ func (s apiServer) editionName() string {
 // (hide SSO without a licence) from one bundle — no build-time web fork. SSO
 // providers are advertised only when the SSO port is wired.
 func (s apiServer) GetMeta(ctx context.Context, _ api.GetMetaRequestObject) (api.GetMetaResponseObject, error) {
+	// ⚠ UNAUTHENTICATED, like everything else here, and that is safe: "this deployment cannot send mail"
+	// is not a secret — it is a fact any visitor discovers the moment a reset email does not arrive.
+	smtp := s.smtpConfigured
 	providers := []api.MetaSsoProviders{}
 	if s.sso != nil {
 		providers = []api.MetaSsoProviders{api.MetaSsoProvidersGoogle, api.MetaSsoProvidersMicrosoft}
@@ -57,7 +60,7 @@ func (s apiServer) GetMeta(ctx context.Context, _ api.GetMetaRequestObject) (api
 	base := s.appBaseURL    // S8.2c: the CP's authoritative public URL for the gateway-enroll command
 	img := s.nodeAgentImage // WF-2: the (digest-pinnable) agent image the emitted command uses
 	return api.GetMeta200JSONResponse{
-		Body:    api.Meta{Edition: api.MetaEdition(s.editionName()), SsoProviders: providers, ProtocolVersion: policyspec.ProtocolVersion, PublicBaseUrl: &base, SetupComplete: &setup, NodeAgentImage: &img},
+		Body:    api.Meta{Edition: api.MetaEdition(s.editionName()), SsoProviders: providers, ProtocolVersion: policyspec.ProtocolVersion, PublicBaseUrl: &base, SetupComplete: &setup, NodeAgentImage: &img, SmtpConfigured: &smtp},
 		Headers: api.GetMeta200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }

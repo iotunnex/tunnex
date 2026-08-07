@@ -1,16 +1,18 @@
 // Package mail provides a pluggable mailer used by the local-auth flows
 // (email verification, password reset — S2.1).
 //
-// Selection (S0.3):
-//   - No SMTP host configured  -> LogMailer: logs the message (and any link) so
-//     development works with zero mail infra.
-//   - SMTP host configured      -> SMTPMailer (Mailpit in dev, real SMTP in prod).
-//   - SMTP host + non-production -> the SMTP mailer is wrapped to ALSO log, so
-//     developers can grab links from logs even while mail lands in Mailpit.
+// Selection:
+//   - No SMTP host configured   -> disabledMailer: REFUSES with ErrNotConfigured and logs the recipient
+//     and subject (never the body — it carries links). ⛔ It used to log the whole message and return nil,
+//     so a deployment with no mail reported success on every invitation it silently dropped.
+//   - SMTP host configured      -> SMTPMailer.
+//   - SMTP host + dev logging   -> the SMTP mailer wrapped to ALSO log, so a developer can grab links
+//     from logs. ⚠ DevLogging is opt-in and must never be set on a deployment.
 package mail
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/smtp"
@@ -41,16 +43,47 @@ type Config struct {
 	DevLogging bool   // when true, also log messages for convenience
 }
 
+// ErrNotConfigured is returned by every send on a deployment with no SMTP host.
+//
+// ⛔ IT IS AN ERROR AND IT USED TO BE `nil`. The disabled mailer logged the message and reported SUCCESS,
+// so every invitation, verification link and password reset "sent" and vanished — while the API answered
+// 202 and the screen said Sent. Invitations are now the ONLY way anyone joins a deployment, so a silent
+// mail failure is a deployment nobody can get into, reporting success on every screen.
+var ErrNotConfigured = errors.New("no SMTP host configured — email is disabled on this deployment")
+
+// Configured reports whether this deployment can send mail at all. ⭐ Read at STARTUP and by /meta, so an
+// operator learns the state when they install rather than when a recipient does not receive something.
+func Configured(cfg Config) bool { return strings.TrimSpace(cfg.Host) != "" }
+
 // New builds the appropriate Mailer for the given configuration.
 func New(cfg Config, logger *slog.Logger) Mailer {
-	if strings.TrimSpace(cfg.Host) == "" {
-		return &LogMailer{logger: logger, reason: "no SMTP host configured"}
+	if !Configured(cfg) {
+		return &disabledMailer{logger: logger}
 	}
 	smtpMailer := &SMTPMailer{cfg: cfg}
 	if cfg.DevLogging {
 		return &teeMailer{primary: smtpMailer, log: &LogMailer{logger: logger, reason: "dev tee"}}
 	}
 	return smtpMailer
+}
+
+// disabledMailer is what a deployment with no SMTP gets. It REFUSES, and says so.
+//
+// ⚠ IT LOGS THE RECIPIENT AND SUBJECT AND NOT THE BODY. The previous behaviour logged `msg.Text` — which
+// carries invitation links, password-reset links and verification links — into `docker compose logs`,
+// shipped and searchable. A credential in a log is the class this repo has already ruled on once, for the
+// bootstrap password.
+type disabledMailer struct{ logger *slog.Logger }
+
+func (m *disabledMailer) Kind() string { return "disabled" }
+
+func (m *disabledMailer) Send(_ context.Context, msg Message) error {
+	m.logger.Error("email_not_sent_no_smtp",
+		slog.String("to", msg.To),
+		slog.String("subject", msg.Subject),
+		slog.String("fix", "set SMTP_HOST/SMTP_PORT/SMTP_FROM (and SMTP_USERNAME/SMTP_PASSWORD if your "+
+			"provider needs auth) and restart the api service"))
+	return ErrNotConfigured
 }
 
 // LogMailer writes messages to the logger instead of sending them.

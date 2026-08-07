@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -88,6 +89,30 @@ func main() {
 	if err := crypto.SelfTest(sealer); err != nil {
 		logger.Error("crypto_selftest_failed", slog.String("error", err.Error()))
 		os.Exit(1)
+	}
+
+	// ⛔ A DEPLOYMENT WITH NO SMTP SAYS SO AT STARTUP, LOUDLY — not when an invitation is sent and an
+	// operator is watching a spinner while a recipient waits for a link that never comes.
+	//
+	// ⚠ INVITATIONS ARE NOW THE ONLY WAY ANYONE JOINS. Without mail, a fresh deployment cannot admit a
+	// second person at all — the CP admin can create invitations and nobody ever receives one. That is a
+	// deployment which looks healthy on every screen and is unusable.
+	if !mail.Configured(mail.Config{Host: cfg.SMTP.Host}) {
+		fmt.Fprint(os.Stdout, "\n"+
+			"==========================================================================\n"+
+			"  ⛔ EMAIL IS NOT CONFIGURED — invitations cannot be delivered\n"+
+			"==========================================================================\n\n"+
+			"  Invitations are the only way people join this deployment, and password\n"+
+			"  resets and email verification also depend on mail.\n\n"+
+			"  Set these in .env and restart:\n"+
+			"    SMTP_HOST      your provider's server, e.g. smtp.example.net\n"+
+			"    SMTP_PORT      usually 587\n"+
+			"    SMTP_FROM      the address mail is sent as\n"+
+			"    SMTP_USERNAME  if your provider requires auth\n"+
+			"    SMTP_PASSWORD  if your provider requires auth\n\n"+
+			"  Until then, invitations are still CREATED and the dashboard shows a\n"+
+			"  copyable link you can send yourself. Nothing silently succeeds.\n\n"+
+			"==========================================================================\n\n")
 	}
 
 	mailer := mail.New(mail.Config{
@@ -335,6 +360,7 @@ func main() {
 		CookieSecure:          cfg.CookieSecure,
 		AppBaseURL:            cfg.AppBaseURL,
 		NodeAgentImage:        cfg.NodeAgentImage,
+		SMTPConfigured:        mail.Configured(mail.Config{Host: cfg.SMTP.Host}),
 		CORSAllowedOrigins:    cfg.CORSAllowedOrigins,
 		AuthFn:                apphttp.SessionAuth(sessions, sqlc.New(pool)),
 		BearerFn:              apphttp.BearerAuth(sqlc.New(pool)),

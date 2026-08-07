@@ -3513,6 +3513,12 @@ components:
             (origin + /accept-invite?token=…) for the admin to hand to the invitee
             — the SMTP-less delivery path. Also emailed when SMTP is configured.
             Shown once; not retrievable later.
+        delivered:
+          type: boolean
+          description: >-
+            Whether the invitation email actually left. ⛔ False means the invitation EXISTS and delivery
+            FAILED — two facts, both true. The token is still valid and can be handed over another way, so
+            the invitation is kept; what changes is that the response stops claiming a send happened.
 
     SsoRedirect:
       type: object
@@ -4388,6 +4394,13 @@ components:
       additionalProperties: false
       properties:
         edition: { type: string, enum: [open, enterprise] }
+        smtp_configured:
+          type: boolean
+          description: >-
+            Whether this deployment can send email at all. ⛔ False means invitations, password resets and
+            email verification cannot be delivered — and invitations are the only way anyone joins. The
+            screens that send mail say so BEFORE the operator acts, rather than after a recipient does not
+            receive something.
         public_base_url:
           type: string
           description: >-

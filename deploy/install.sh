@@ -109,8 +109,12 @@ configure)
 	[ -n "$SMTP_HOST" ] || die "TUNNEX_SMTP=configure but SMTP_HOST is not set (export SMTP_HOST/SMTP_USERNAME/SMTP_PASSWORD for a non-interactive run)."
 	;;
 skip)
-	say ">> SMTP skipped — email features are disabled (local sign-in still works; enable later by"
-	say "   setting SMTP_* in .env and re-running \`docker compose -f tunnex.yml up -d\`)."
+	say ">> ⛔ SMTP SKIPPED — NOBODY CAN BE INVITED TO THIS DEPLOYMENT."
+	say "   Invitations are the only way people join, and they are delivered by email. Password resets"
+	say "   and address verification need it too. You can still sign in as the administrator, and the"
+	say "   dashboard shows a copyable invitation link you can send by hand."
+	say "   Enable it later: set SMTP_HOST/SMTP_PORT/SMTP_FROM (and SMTP_USERNAME/SMTP_PASSWORD if your"
+	say "   provider needs auth) in .env, then \`docker compose -f tunnex.yml up -d api\`."
 	;;
 *)
 	die "TUNNEX_SMTP must be 'skip' or 'configure' (got '${SMTP_MODE}')."

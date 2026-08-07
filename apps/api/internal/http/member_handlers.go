@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"errors"
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
@@ -11,6 +12,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
+	"github.com/tunnexio/tunnex/apps/api/internal/invites"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
@@ -135,13 +137,30 @@ func (s apiServer) CreateInvitation(ctx context.Context, req api.CreateInvitatio
 	}
 	p, _ := authctx.PrincipalFrom(ctx)
 	token, err := s.invites.Create(ctx, p.UserID, req.OrgId, string(req.Body.Email), string(req.Body.Role))
+	// ⛔ TWO FACTS, BOTH TRUE: the invitation exists and the email did not leave. This used to answer 202
+	// "Invitation created." whatever happened to delivery — and invitations are now the ONLY way anyone
+	// joins a deployment, so a silently dropped one is a person who never gets in and an operator with no
+	// reason to look.
+	//
+	// ⭐ STILL A 202 WITH THE TOKEN, because the link is valid and the operator can hand it over another
+	// way — that is exactly what the copyable accept link is for. What changes is that the message stops
+	// claiming a send happened.
+	delivered := true
+	if errors.Is(err, invites.ErrNotDelivered) {
+		delivered, err = false, nil
+	}
 	if err != nil {
 		return nil, err
+	}
+	msg := "Invitation created."
+	if !delivered {
+		msg = "Invitation created — BUT THE EMAIL COULD NOT BE SENT. Copy the link below and send it to " +
+			"them yourself. Check this deployment's SMTP settings."
 	}
 	// Return the raw token so the dashboard can show a copyable accept link (the
 	// SMTP-less delivery path). Shown once; never retrievable again.
 	return api.CreateInvitation202JSONResponse{
-		Body:    api.InviteCreated{Message: "Invitation created.", InviteToken: token},
+		Body:    api.InviteCreated{Message: msg, InviteToken: token, Delivered: &delivered},
 		Headers: api.CreateInvitation202ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }
@@ -180,11 +199,18 @@ func (s apiServer) ResendInvitation(ctx context.Context, req api.ResendInvitatio
 		return nil, err
 	}
 	p, _ := authctx.PrincipalFrom(ctx)
+	msg := "Invitation re-sent."
 	if err := s.invites.Resend(ctx, p.UserID, req.OrgId, string(req.Body.Email)); err != nil {
-		return nil, err
+		if !errors.Is(err, invites.ErrNotDelivered) {
+			return nil, err
+		}
+		// ⚠ The token WAS re-minted — only the delivery failed. Saying "re-sent" here would be the same
+		// lie one endpoint over.
+		msg = "The invitation was renewed, but the email could not be sent. Check this deployment's SMTP " +
+			"settings, or copy the link from the invitations list and send it yourself."
 	}
 	return api.ResendInvitation202JSONResponse{
-		Body:    api.GenericMessage{Message: "Invitation re-sent."},
+		Body:    api.GenericMessage{Message: msg},
 		Headers: api.ResendInvitation202ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }
