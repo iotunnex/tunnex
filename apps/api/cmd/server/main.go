@@ -126,9 +126,6 @@ func main() {
 		// correctly still produced a mailer labelled `smtp+log` and a log line that said mail was not sent.
 		// It was sending. One flag must not govern two unrelated things.
 		DevLogging: cfg.SMTP.DevLog,
-		// The branded template's logo is served from the DEPLOYMENT, never from tunnex.io — a control plane
-		// whose pitch is that it never contacts us must not make its customers' invitation mail do so.
-		BaseURL: cfg.AppBaseURL,
 	}
 	mailer := mail.New(mailCfg, logger)
 

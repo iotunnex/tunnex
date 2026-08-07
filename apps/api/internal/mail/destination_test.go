@@ -119,10 +119,8 @@ func TestSuccessLineClaimsAcceptanceNotDelivery(t *testing.T) {
 	}
 }
 
-// sendPathEnd unwraps the branding wrapper so a test can assert on where mail actually goes.
-func sendPathEnd(m Mailer) Mailer {
-	if b, ok := m.(*brandedMailer); ok {
-		return b.inner
-	}
-	return m
-}
+// sendPathEnd is now the identity — the branding wrapper is GONE, because embedding the logo removed the
+// only deployment-specific value a rendered message carried. Kept as a seam so the assertions above read
+// as "where does the send path end" rather than "what is the top-level type", which is the question that
+// matters and the one a future wrapper must not silently change the answer to.
+func sendPathEnd(m Mailer) Mailer { return m }

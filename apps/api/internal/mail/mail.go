@@ -22,12 +22,44 @@ package mail
 
 import (
 	"context"
+	_ "embed"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime/quotedprintable"
 	"net/smtp"
 	"strings"
 )
+
+// ⛔ THE LOGO TRAVELS WITH THE MESSAGE. IT IS NEVER FETCHED.
+//
+// The first version of this pointed the <img> at tunnex.io — a phone-home on the most private mail the
+// product sends, from a control plane whose whole pitch is that it never contacts us. The second pointed it
+// at APP_BASE_URL, which fixed the phone-home and left three problems standing:
+//
+//  1. ⛔ IT DOES NOT RESOLVE. The default APP_BASE_URL is `http://localhost`, so the recipient's client
+//     tries to load the logo from THEIR OWN machine. Every invitation from a default deployment ships a
+//     broken image — and the same is true for any control plane that is internal-only, air-gapped, or
+//     behind a VPN, which is a large share of who runs this.
+//  2. ⛔ IT IS AN ACCIDENTAL TRACKING PIXEL. A remote image means the org's own server logs a hit — time,
+//     IP, user agent — each time an invitee opens their mail. Nobody asked for open-tracking, and a
+//     privacy-positioned product must not start doing it as a side effect of a logo.
+//  3. ⚠ IT IS BLOCKED ANYWAY in Outlook, Thunderbird and most corporate gateways, which refuse remote
+//     images by default.
+//
+// A cid: part has none of them: no fetch, so nothing to resolve, nothing to log, nothing to block. It costs
+// ~7KB per message after base64 and it renders with no network at all — which is the same claim the licence
+// email makes one layer up ("your deployment verifies this offline — it never contacts us").
+//
+// ⚠ data: URIs were considered and are NOT an option: Gmail and Outlook both strip them from <img src>.
+//
+//go:embed tunnex-logo.png
+var logoPNG []byte
+
+// logoCID is the Content-ID the template's <img src="cid:..."> refers to. The two must agree; a mismatch is
+// a broken image with no error anywhere, which is why they are named once here.
+const logoCID = "tunnex-logo"
 
 // Message is one outgoing email.
 //
@@ -60,12 +92,6 @@ type Config struct {
 	// DevLogging tees a copy of every message to the log. It NEVER suppresses the send. Opt-in via
 	// MAIL_DEV_LOG; see the package doc for why it is not derived from the environment name.
 	DevLogging bool
-	// BaseURL is the DEPLOYMENT's public URL (APP_BASE_URL), used to resolve the branded template's logo.
-	//
-	// ⛔ IT LIVES ON THE MAILER, NOT ON EACH CALLER, AND THAT IS THE POINT. Stamping it at the four send
-	// sites meant a fifth sender could forget — and mfa.Service, which has no base URL at all, already
-	// would have. One place, applied to every message, impossible to omit.
-	BaseURL string
 }
 
 // ErrNotConfigured is returned by every send on a deployment with no SMTP host.
@@ -86,27 +112,14 @@ func New(cfg Config, logger *slog.Logger) Mailer {
 		return &disabledMailer{logger: logger}
 	}
 	smtpMailer := &SMTPMailer{cfg: cfg, logger: logger}
-	var m Mailer = smtpMailer
 	if cfg.DevLogging {
-		m = &teeMailer{primary: smtpMailer, log: &LogMailer{logger: logger, reason: "MAIL_DEV_LOG"}}
+		return &teeMailer{primary: smtpMailer, log: &LogMailer{logger: logger, reason: "MAIL_DEV_LOG"}}
 	}
-	return &brandedMailer{inner: m, baseURL: cfg.BaseURL}
-}
-
-// brandedMailer resolves the branded template's logo against THIS deployment before delegating.
-//
-// ⛔ IT WRAPS EVERY MAILER RATHER THAN LIVING IN THE TEMPLATES, so a message cannot reach the wire with an
-// unresolved logo no matter which service sent it. The templates stay pure — same inputs, same bytes — and
-// the one deployment-specific value is applied at the only seam that always runs.
-type brandedMailer struct {
-	inner   Mailer
-	baseURL string
-}
-
-func (m *brandedMailer) Kind() string { return m.inner.Kind() }
-
-func (m *brandedMailer) Send(ctx context.Context, msg Message) error {
-	return m.inner.Send(ctx, WithBaseURL(msg, m.baseURL))
+	// ⭐ NO BRANDING WRAPPER ANY MORE. An earlier version wrapped every mailer to stamp APP_BASE_URL into the
+	// logo's src, precisely so a caller could not forget. Embedding the logo DELETES the question: a rendered
+	// message carries no deployment-specific value, so there is nothing to forget and no wrapper to carry it.
+	// Reducing rather than patching.
+	return smtpMailer
 }
 
 // Destination names WHERE MAIL ACTUALLY GOES, in one sentence an operator can act on (S12.13 D2).
@@ -238,11 +251,16 @@ func (m *teeMailer) Send(ctx context.Context, msg Message) error {
 
 // buildRFC822 renders the wire message.
 //
-// ⚠ multipart/alternative ONLY WHEN THERE IS AN ALTERNATIVE. With no HTML this produces exactly the bytes
-// it produced before S12.14 — a plain text/plain message — so adding the branded path could not change
-// what an unbranded caller sends.
+// ⚠ THREE SHAPES, AND THE FIRST IS UNCHANGED FROM BEFORE ANY OF THIS.
 //
-// ⚠ TEXT COMES FIRST INSIDE THE MULTIPART, which is not cosmetic: RFC 2046 orders alternatives
+//	no HTML   -> text/plain, byte-for-byte what every caller sent before S12.14.
+//	HTML      -> multipart/related [ multipart/alternative [ text, html ], logo ]
+//
+// The related wrapper exists ONLY to carry the logo; the alternative wrapper inside it is what a client
+// chooses between. Nesting them the other way round would offer the client "HTML" and "an image" as
+// equivalent renderings of the same message, which is not what either is.
+//
+// ⚠ TEXT COMES FIRST INSIDE THE ALTERNATIVE, which is not cosmetic: RFC 2046 orders alternatives
 // least-to-most preferred, so a client picks the LAST part it understands. Reversing them serves plaintext
 // to clients that could have rendered the branded version.
 func buildRFC822(from string, msg Message) []byte {
@@ -257,19 +275,75 @@ func buildRFC822(from string, msg Message) []byte {
 		b.WriteString(msg.Text)
 		return []byte(b.String())
 	}
-	// A FIXED BOUNDARY, and it is safe because both parts are generated by this repo: the templates escape
-	// user input into HTML entities, so no interpolated value can reproduce this string. A random boundary
-	// would make every rendered message differ from the last and the renderer untestable, which is the same
-	// trade the dropped CSP nonce lost.
-	const boundary = "tunnex-alt-boundary-8f2c1d"
-	b.WriteString("Content-Type: multipart/alternative; boundary=\"" + boundary + "\"\r\n")
+	// FIXED BOUNDARIES, and they are safe because both bodies are generated by this repo: the templates
+	// escape user input into HTML entities, so no interpolated value can reproduce either string. Random
+	// boundaries would make every rendered message differ from the last and the renderer untestable — the
+	// same trade the dropped CSP nonce lost.
+	const (
+		relBoundary = "tunnex-rel-boundary-4a7e93"
+		altBoundary = "tunnex-alt-boundary-8f2c1d"
+	)
+	b.WriteString("Content-Type: multipart/related; type=\"multipart/alternative\"; boundary=\"" + relBoundary + "\"\r\n")
 	b.WriteString("\r\n")
-	b.WriteString("--" + boundary + "\r\n")
-	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
-	b.WriteString(msg.Text)
-	b.WriteString("\r\n--" + boundary + "\r\n")
-	b.WriteString("Content-Type: text/html; charset=UTF-8\r\n\r\n")
-	b.WriteString(msg.HTML)
-	b.WriteString("\r\n--" + boundary + "--\r\n")
+
+	b.WriteString("--" + relBoundary + "\r\n")
+	b.WriteString("Content-Type: multipart/alternative; boundary=\"" + altBoundary + "\"\r\n\r\n")
+	b.WriteString("--" + altBoundary + "\r\n")
+	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+	b.WriteString(quotedPrintable(msg.Text))
+	b.WriteString("\r\n--" + altBoundary + "\r\n")
+	b.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
+	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+	b.WriteString(quotedPrintable(msg.HTML))
+	b.WriteString("\r\n--" + altBoundary + "--\r\n")
+
+	// THE LOGO, INLINE. Content-Disposition: inline asks the client to render it in place rather than list
+	// it as an attachment. Some clients (Outlook, historically) show a paperclip anyway — a cosmetic cost
+	// accepted deliberately, because the alternative it replaces is an image that does not appear at all.
+	b.WriteString("\r\n--" + relBoundary + "\r\n")
+	b.WriteString("Content-Type: image/png\r\n")
+	b.WriteString("Content-ID: <" + logoCID + ">\r\n")
+	b.WriteString("Content-Disposition: inline; filename=\"tunnex-logo.png\"\r\n")
+	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
+	b.WriteString(base64Lines(logoPNG))
+	b.WriteString("\r\n--" + relBoundary + "--\r\n")
 	return []byte(b.String())
+}
+
+// quotedPrintable encodes a text body for the wire.
+//
+// ⛔ TWO REASONS, AND BOTH WERE LATENT BUGS BEFORE A TEST ASKED.
+//
+//  1. LINE LENGTH. RFC 5321 caps an SMTP line at 998 octets and the branded HTML has 2,000-character lines
+//     (one long inline-styled <div> is a single line). A server that enforces the cap either rejects the
+//     message or inserts its own break — mid-attribute, corrupting the markup — and the symptom is "the
+//     email looks broken" with nothing in any log. quoted-printable inserts SOFT breaks (`=` + CRLF) that
+//     the recipient's client removes, so the rendered body is unchanged.
+//  2. 8-BIT CONTENT OVER A 7-BIT CHANNEL. These bodies contain em-dashes and `·`, which are multi-byte
+//     UTF-8. A part with no Content-Transfer-Encoding is 7bit by default, so declaring nothing was a claim
+//     that happened to be false on every message this product sends.
+func quotedPrintable(s string) string {
+	var b strings.Builder
+	w := quotedprintable.NewWriter(&b)
+	_, _ = w.Write([]byte(s))
+	_ = w.Close()
+	return b.String()
+}
+
+// base64Lines encodes to base64 wrapped at 76 characters.
+//
+// ⚠ THE WRAP IS REQUIRED, NOT TIDINESS. RFC 2045 caps an encoded line at 76 characters, and SMTP itself
+// caps a line at 998; a 7KB single-line attachment violates both, and the servers that enforce it reject
+// or silently mangle the message rather than explaining why.
+func base64Lines(data []byte) string {
+	enc := base64.StdEncoding.EncodeToString(data)
+	var b strings.Builder
+	for len(enc) > 76 {
+		b.WriteString(enc[:76])
+		b.WriteString("\r\n")
+		enc = enc[76:]
+	}
+	b.WriteString(enc)
+	return b.String()
 }
