@@ -88,10 +88,10 @@ var tierFeatures = map[Tier]map[Feature]bool{
 	// otherwise buy PERMANENT free SSO for anyone who takes one: the trial-band law, exactly. What stops
 	// at lapse is everything that ONBOARDS SOMEBODY NEW — JIT provisioning and domain-capture auto-join —
 	// so the free-forever surface is capped at the humans who already existed during the trial.
-	TierTrial: {FeatMultiGateway: true, FeatSSO: true, FeatIdpSync: true},
-	TierStarter:   {FeatMultiGateway: true, FeatMultiOrg: true, FeatSSO: true, FeatIdpSync: true},
-	TierGrowth:    {FeatMultiGateway: true, FeatMultiOrg: true, FeatSSO: true, FeatIdpSync: true},
-	TierScale:     {FeatMultiGateway: true, FeatMultiOrg: true, FeatSSO: true, FeatIdpSync: true},
+	TierTrial:   {FeatMultiGateway: true, FeatSSO: true, FeatIdpSync: true},
+	TierStarter: {FeatMultiGateway: true, FeatMultiOrg: true, FeatSSO: true, FeatIdpSync: true},
+	TierGrowth:  {FeatMultiGateway: true, FeatMultiOrg: true, FeatSSO: true, FeatIdpSync: true},
+	TierScale:   {FeatMultiGateway: true, FeatMultiOrg: true, FeatSSO: true, FeatIdpSync: true},
 }
 
 // GatewayCeilingFor is the number of gateways a tier may ENROL. nil means unlimited.
