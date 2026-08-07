@@ -368,8 +368,7 @@ func (s *Service) ceilingRefusal(tier licence.Tier, ceiling int, live int64) str
 		"This deployment is on the %s band, which allows %d %s, and %d %s already enrolled. "+
 			"Nothing running is affected — existing gateways keep working, and this refusal applies only "+
 			"to enrolling a new one. To add another: upgrade the licence, or revoke a gateway you no "+
-			"longer use to free a slot. Note that this join token has been used up — mint a new one "+
-			"before retrying.",
+			"longer use to free a slot. Your join token is still valid — retry with it once there is room.",
 		tier, ceiling, unit, live, verb)
 }
 
@@ -401,7 +400,20 @@ func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentV
 		return res, e
 	}
 	err := s.withTx(ctx, func(q *sqlc.Queries) error {
-		tok, e := q.ConsumeJoinToken(ctx, hashToken(rawToken))
+		// ⛔ PEEK, VALIDATE, THEN CONSUME — AND THE ORDER IS THE FIX.
+		//
+		// This used to consume FIRST, so every refusal below destroyed the token. `node_name_mismatch`
+		// burned one twice in a single session: the operator names a gateway in the UI, the agent registers
+		// under its container hostname, they disagree — a five-second fix, except the token is now gone and
+		// the retry fails `invalid_join_token`, which describes a different problem entirely.
+		//
+		// > ⛔ **A REFUSAL THE OPERATOR CAN FIX MUST NOT DESTROY WHAT THEY NEED TO RETRY.**
+		//
+		// ⚠ SINGLE-USE IS UNCHANGED. ConsumeJoinToken still performs the atomic claim and is still the only
+		// thing that marks the token spent; the peek merely lets the checks that an operator can ACT on run
+		// before the point of no return. Both are inside one transaction, so a concurrent redeemer cannot
+		// slip between them.
+		tok, e := q.PeekJoinToken(ctx, hashToken(rawToken))
 		if errors.Is(e, pgx.ErrNoRows) {
 			return apierr.New(401, "invalid_join_token", "the join token is invalid, used, or expired")
 		}
@@ -427,6 +439,15 @@ func (s *Service) Enroll(ctx context.Context, rawToken, csrPEM, nodeName, agentV
 		// ⚠ AND THE REFUSAL SAYS WHICH BAND AND WHICH CEILING. A bare failure here is the first thing a
 		// real customer meets, and "enrolment failed" tells them nothing they can act on.
 		if e := s.checkGatewayCeiling(ctx, q, tok.OrgID); e != nil {
+			return e
+		}
+		// ⛔ THE POINT OF NO RETURN. Every refusal above is one the operator can fix and retry with the SAME
+		// token; everything below has either succeeded or is a state they cannot correct by re-running.
+		if _, e := q.ConsumeJoinToken(ctx, hashToken(rawToken)); e != nil {
+			if errors.Is(e, pgx.ErrNoRows) {
+				// ⚠ Lost the race to a concurrent redeemer between peek and claim.
+				return apierr.New(401, "invalid_join_token", "the join token is invalid, used, or expired")
+			}
 			return e
 		}
 		iss, e := s.ca.SignCSR([]byte(csrPEM), nodeName)

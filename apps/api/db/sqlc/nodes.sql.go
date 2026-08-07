@@ -905,6 +905,39 @@ func (q *Queries) MarkCertDelivered(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const peekJoinToken = `-- name: PeekJoinToken :one
+SELECT id, org_id, node_name, token_hash, expires_at, consumed_at, consumed_node_id, created_at, issued_by, enrols_kind FROM node_join_tokens
+WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now()
+`
+
+// lint:cross-org — the token itself is the credential; the org comes from the returned row.
+//
+// ⛔ READ WITHOUT CONSUMING, so a refusal that the operator can FIX does not destroy their token.
+// `node_name_mismatch` burned it twice in one session: the operator names a gateway in the UI, the agent
+// registers under its container hostname, and the two disagree — a mistake fixed in five seconds, except
+// the token is gone and the next attempt fails with `invalid_join_token`, which describes a completely
+// different problem and sends them looking in the wrong place.
+//
+// ⚠ THIS DOES NOT WEAKEN SINGLE-USE. ConsumeJoinToken still performs the atomic claim; this only lets the
+// pre-flight checks run first, and both happen inside one transaction.
+func (q *Queries) PeekJoinToken(ctx context.Context, tokenHash []byte) (NodeJoinToken, error) {
+	row := q.db.QueryRow(ctx, peekJoinToken, tokenHash)
+	var i NodeJoinToken
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.NodeName,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.ConsumedNodeID,
+		&i.CreatedAt,
+		&i.IssuedBy,
+		&i.EnrolsKind,
+	)
+	return i, err
+}
+
 const rekeyNode = `-- name: RekeyNode :one
 UPDATE nodes
 SET cert_serial = $2, cert_public_key = $3, cert_not_after = $4, agent_version = $5, last_seen_at = now(),
