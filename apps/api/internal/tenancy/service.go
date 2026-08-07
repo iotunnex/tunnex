@@ -78,13 +78,6 @@ func (s *Service) SetupComplete(ctx context.Context) (bool, error) {
 	return ever > 0, err
 }
 
-// BootstrapPending reports whether an account still holds its one-time bootstrap password.
-//
-// ⚠ Deliberately a boolean and deliberately anonymous — it is served to an UNAUTHENTICATED caller.
-func (s *Service) BootstrapPending(ctx context.Context) (bool, error) {
-	return s.q.BootstrapPending(ctx)
-}
-
 // checkMayCreateOrg answers WHO may bring an organization into existence, which is a different question
 // from HOW MANY may exist (that is checkOrgCeiling, and it is commercial).
 //

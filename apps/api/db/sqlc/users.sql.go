@@ -11,23 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const bootstrapPending = `-- name: BootstrapPending :one
-SELECT EXISTS (
-  SELECT 1 FROM users WHERE must_change_password = true AND deleted_at IS NULL
-)
-`
-
-// ⚠ Is there an account still holding its one-time bootstrap password?
-// ⛔ Answers a BOOLEAN and never identifies the account. The login page renders a hint from this to an
-// UNAUTHENTICATED visitor, so it must reveal nothing beyond "this deployment has not been claimed yet" —
-// which is already obvious to anyone who can reach a login page with no accounts behind it.
-func (q *Queries) BootstrapPending(ctx context.Context) (bool, error) {
-	row := q.db.QueryRow(ctx, bootstrapPending)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
 const clearMustChangePassword = `-- name: ClearMustChangePassword :exec
 UPDATE users SET must_change_password = false, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL

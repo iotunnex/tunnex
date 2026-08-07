@@ -3,7 +3,6 @@ package bootstrap
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -24,16 +23,19 @@ func (f *fakeStore) CreateBootstrapAdmin(_ context.Context, p sqlc.CreateBootstr
 	return sqlc.User{Email: p.Email}, nil
 }
 
-func capture() (*slog.Logger, *bytes.Buffer) {
-	var buf bytes.Buffer
-	return slog.New(slog.NewJSONHandler(&buf, nil)), &buf
+// ⚠ TWO SINKS, AND THE TEST WATCHES THE ONE THE OPERATOR WATCHES. The credential goes to `out` (stdout in
+// production); the logger records only that the event happened. A test reading the logger would pass while
+// the banner was empty.
+func capture() (*slog.Logger, *bytes.Buffer, *bytes.Buffer) {
+	var logBuf, outBuf bytes.Buffer
+	return slog.New(slog.NewJSONHandler(&logBuf, nil)), &logBuf, &outBuf
 }
 
 // ⭐ A FRESH DEPLOYMENT MINTS EXACTLY ONE ADMIN AND PRINTS THE CREDENTIAL.
 func TestFreshDeploymentMintsOneAdminAndPrintsIt(t *testing.T) {
 	f := &fakeStore{users: 0}
-	log, buf := capture()
-	if err := EnsureAdmin(context.Background(), f, log); err != nil {
+	log, logBuf, out := capture()
+	if err := EnsureAdmin(context.Background(), f, log, out); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.created) != 1 {
@@ -48,15 +50,31 @@ func TestFreshDeploymentMintsOneAdminAndPrintsIt(t *testing.T) {
 		t.Error("⛔ the bootstrap password was not stored as an argon2id hash")
 	}
 
-	out := buf.String()
-	var rec map[string]any
-	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &rec); err != nil {
-		t.Fatalf("log line is not parseable: %v", err)
+	banner := out.String()
+	if banner == "" {
+		t.Fatal("⛔ NO BANNER WAS PRINTED. There is no public signup, so an operator who cannot read the " +
+			"password on their terminal has no way into their own deployment at all")
 	}
-	pw, _ := rec["password"].(string)
+	// The plaintext the row hashed must be the one on screen.
+	pw := ""
+	for _, line := range strings.Split(banner, "\n") {
+		if strings.Contains(line, "password ") {
+			pw = strings.TrimSpace(strings.SplitN(line, "password ", 2)[1])
+		}
+	}
 	if pw == "" {
-		t.Fatal("⛔ NO CREDENTIAL WAS PRINTED. There is no public signup, so an operator who cannot read " +
-			"the password from the logs has no way into their own deployment at all")
+		t.Fatal("⛔ the banner does not carry a password line")
+	}
+	// ⛔ AND THE CREDENTIAL IS NOT IN THE LOG. A banner scrolls off a terminal; log aggregation keeps a
+	// searchable copy forever, so printing it twice doubles the exposure for no benefit.
+	if strings.Contains(logBuf.String(), pw) {
+		t.Error("⛔ THE PASSWORD WAS ALSO WRITTEN TO THE STRUCTURED LOG — it will be shipped to log " +
+			"aggregation and searchable long after the terminal is closed")
+	}
+	for _, want := range []string{"SHOWN ONCE", "down -v", AdminEmail} {
+		if !strings.Contains(banner, want) {
+			t.Errorf("the banner never says %q", want)
+		}
 	}
 	// ⚠ It must be the REAL password, not the hash — printing the hash would look right and be useless.
 	if strings.HasPrefix(pw, "$argon2") {
@@ -66,11 +84,7 @@ func TestFreshDeploymentMintsOneAdminAndPrintsIt(t *testing.T) {
 		t.Errorf("printed credential is only %d chars — it is copied from a log, never typed from "+
 			"memory, so there is no reason to trade entropy for brevity", len(pw))
 	}
-	// ⭐ AND THE OPERATOR IS TOLD IT IS UNRECOVERABLE, at the only moment they can act on it.
-	if w, _ := rec["warning"].(string); !strings.Contains(w, "down -v") {
-		t.Error("the banner does not say what recovery costs — an operator must not discover at 2am " +
-			"that losing this means resetting the database")
-	}
+
 }
 
 // ⛔ THE BRANCH THAT MATTERS. Containers restart constantly — crashes, deploys, host reboots.
@@ -82,18 +96,18 @@ func TestFreshDeploymentMintsOneAdminAndPrintsIt(t *testing.T) {
 // > ## ⛔ **A RESTART MUST NOT BE A SECURITY EVENT.**
 func TestDeploymentWithUsersMintsNothingAndPrintsNothing(t *testing.T) {
 	f := &fakeStore{users: 1}
-	log, buf := capture()
-	if err := EnsureAdmin(context.Background(), f, log); err != nil {
+	log, _, out := capture()
+	if err := EnsureAdmin(context.Background(), f, log, out); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.created) != 0 {
 		t.Fatal("⛔ A SECOND ADMIN WAS MINTED ON A DEPLOYMENT THAT ALREADY HAS USERS — every restart " +
 			"would create another account with deployment-level authority and nobody asked for it")
 	}
-	if buf.Len() != 0 {
+	if out.Len() != 0 {
 		t.Fatalf("⛔ SOMETHING WAS PRINTED ON A RESTART: %s\n\nIf that is a credential it has just been "+
 			"republished to log aggregation; if it is noise it trains operators to ignore the one line "+
-			"that matters.", buf.String())
+			"that matters.", out.String())
 	}
 }
 
@@ -101,11 +115,11 @@ func TestDeploymentWithUsersMintsNothingAndPrintsNothing(t *testing.T) {
 // permissive way would mint an admin on a healthy deployment whose database blinked.
 func TestCountFailureMintsNothing(t *testing.T) {
 	f := &fakeStore{users: 0, err: errors.New("connection refused")}
-	log, buf := capture()
-	if err := EnsureAdmin(context.Background(), f, log); err == nil {
+	log, _, out := capture()
+	if err := EnsureAdmin(context.Background(), f, log, out); err == nil {
 		t.Error("a store failure was swallowed — the caller cannot tell bootstrap did not run")
 	}
-	if len(f.created) != 0 || buf.Len() != 0 {
+	if len(f.created) != 0 || out.Len() != 0 {
 		t.Fatal("⛔ an admin was minted despite not knowing whether users exist")
 	}
 }

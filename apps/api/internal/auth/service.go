@@ -14,7 +14,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
@@ -24,7 +23,6 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
-	"github.com/tunnexio/tunnex/apps/api/internal/bootstrap"
 	"github.com/tunnexio/tunnex/apps/api/internal/cliauth"
 	"github.com/tunnexio/tunnex/apps/api/internal/mail"
 	"github.com/tunnexio/tunnex/apps/api/internal/password"
@@ -333,12 +331,5 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, current,
 	}); e != nil {
 		return e
 	}
-	// ⛔ THE CREDENTIAL FILE DIES WITH THE CREDENTIAL. A log line scrolls away on its own; a file does not,
-	// and one holding a password that still worked would sit on disk indefinitely. Deleted AFTER the commit
-	// so a failed change never removes a credential the operator still needs.
-	//
-	// ⚠ Best-effort: the password in it no longer opens anything, so a failure to unlink is untidy rather
-	// than dangerous — and failing the whole change over it would strand a user who just set a good password.
-	_ = os.Remove(bootstrap.CredentialFile)
 	return nil
 }
