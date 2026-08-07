@@ -1,9 +1,25 @@
 package mail
 
 import (
+	"io"
+	"mime/quotedprintable"
 	"strings"
 	"testing"
 )
+
+// decodeQP undoes the wire encoding so an assertion can be made about what the RECIPIENT sees.
+//
+// ⛔ ASSERTING ON THE RAW WIRE BYTES WOULD BE ASSERTING THE WRONG THING. quoted-printable rewrites `=` as
+// `=3D` and may soft-break a long URL across lines, so `strings.Contains(raw, url)` is false on a perfectly
+// correct message. The question is whether the URL survives DECODING, which is what the client does.
+func decodeQP(t *testing.T, s string) string {
+	t.Helper()
+	out, err := io.ReadAll(quotedprintable.NewReader(strings.NewReader(s)))
+	if err != nil {
+		t.Fatalf("decode quoted-printable: %v", err)
+	}
+	return string(out)
+}
 
 const acceptURL = "https://vpn.acme.test/accept-invite?token=SECRET-TOKEN"
 
@@ -84,31 +100,74 @@ func TestEscapeOrderDoesNotDoubleEscape(t *testing.T) {
 	}
 }
 
-// TestLogoIsResolvedAgainstTheDeploymentNotTunnexIO — the port's ONE deliberate divergence.
+// TestLogoTravelsWithTheMessageAndIsNeverFetched — the port's ONE deliberate divergence, and the reason it
+// changed shape twice.
 //
-// ⛔ THE REFERENCE HARD-CODES https://tunnex.io/email/tunnex-logo-2x.png. That is right for a site we run
-// and wrong for software other people run: every invitation a customer sends would fetch an image from us —
-// a phone-home on the most private mail the product produces, from a control plane whose entire pitch is
-// that it never contacts us, and a broken image on an air-gapped deployment.
-func TestLogoIsResolvedAgainstTheDeploymentNotTunnexIO(t *testing.T) {
-	m := WithBaseURL(InviteMessage("a@b.test", acceptURL, ""), "https://vpn.acme.test/")
-	if !strings.Contains(m.HTML, `src="https://vpn.acme.test/email/tunnex-logo-2x.png"`) {
-		t.Fatalf("the logo must be served by the deployment:\n%s", m.HTML)
+// ⛔ v1 POINTED AT tunnex.io: a phone-home on the most private mail the product sends.
+// ⛔ v2 POINTED AT APP_BASE_URL: no phone-home, and three problems left standing — the DEFAULT is
+// `http://localhost`, which resolves to the RECIPIENT's machine, so every invitation from a default
+// deployment shipped a broken image; a remote fetch logs an open in the org's own access log, which is
+// open-tracking nobody asked for; and Outlook and most corporate gateways block remote images anyway.
+// ⭐ v3 EMBEDS IT. No fetch: nothing to resolve, nothing to log, nothing to block.
+func TestLogoTravelsWithTheMessageAndIsNeverFetched(t *testing.T) {
+	m := InviteMessage("a@b.test", acceptURL, "")
+	if !strings.Contains(m.HTML, `src="cid:tunnex-logo"`) {
+		t.Fatalf("the logo must be referenced by Content-ID:\n%s", m.HTML)
 	}
-	if strings.Contains(m.HTML, "tunnex.io/email/") {
-		t.Fatal("a customer's invitation must never fetch an asset from tunnex.io")
+	// ⛔ NO http(s) URL MAY POINT AT AN IMAGE ANYWHERE IN THE BODY. This is the assertion that would have
+	// caught v1 and v2 alike, and it is deliberately broader than "does not mention tunnex.io".
+	for _, bad := range []string{"src=\"http", "src='http", "/email/tunnex-logo"} {
+		if strings.Contains(m.HTML, bad) {
+			t.Fatalf("the message must fetch NOTHING when opened; found %q", bad)
+		}
 	}
-	// ⚠ AN EMPTY BASE LEAVES IT ROOT-RELATIVE — a broken image, which is a LOCAL failure. That is the safe
-	// direction: the alternative is falling back to our host, which is exactly what the divergence forbids.
-	unset := WithBaseURL(InviteMessage("a@b.test", acceptURL, ""), "")
-	if strings.Contains(unset.HTML, "tunnex.io/email/") {
-		t.Fatal("an unset base URL must not fall back to our host for the asset")
+
+	raw := string(buildRFC822("f@x.test", m))
+	if !strings.Contains(raw, "multipart/related") {
+		t.Fatal("an HTML message must be multipart/related so the logo can ride with it")
 	}
-	// ⚠ The footer's mailto:support@tunnex.io is a DIFFERENT thing and stays: it is an address to write to,
-	// not a request the recipient's client makes on open.
-	if !strings.Contains(unset.HTML, `src="/email/tunnex-logo-2x.png"`) {
-		t.Fatal("with no base URL the src must stay root-relative — a broken image is a LOCAL failure, and " +
-			"that is the safe direction")
+	if !strings.Contains(raw, "Content-ID: <tunnex-logo>") {
+		t.Fatal("the image part's Content-ID must match the src the HTML refers to — a mismatch is a broken " +
+			"image with no error anywhere")
+	}
+	if !strings.Contains(raw, "Content-Disposition: inline") {
+		t.Fatal("the logo must be offered as inline, not as an attachment")
+	}
+	if !strings.Contains(raw, "Content-Transfer-Encoding: base64") {
+		t.Fatal("binary must be base64 on the wire")
+	}
+	// ⚠ RFC 2045 CAPS AN ENCODED LINE AT 76 CHARACTERS and SMTP caps any line at 998. A 7KB single-line
+	// attachment violates both, and the servers that enforce it mangle or reject the message rather than
+	// explaining why — a failure that would look like "the logo is broken" and be an envelope bug.
+	for _, line := range strings.Split(raw, "\r\n") {
+		if len(line) > 998 {
+			t.Fatalf("a %d-character line will not survive SMTP", len(line))
+		}
+	}
+	if !strings.Contains(raw, "iVBORw0KGgo") { // the PNG magic, base64-encoded
+		t.Fatal("the embedded PNG is missing from the wire message")
+	}
+}
+
+// TestPlainTextAndHTMLSurviveTheRelatedWrapper — the alternative must stay nested inside the related part.
+//
+// ⛔ NESTING THEM THE OTHER WAY ROUND would offer a client "the HTML" and "an image" as equivalent
+// RENDERINGS of the same message, which neither is. related carries parts that belong together; alternative
+// carries parts the client chooses between.
+func TestPlainTextAndHTMLSurviveTheRelatedWrapper(t *testing.T) {
+	raw := string(buildRFC822("f@x.test", InviteMessage("a@b.test", acceptURL, "")))
+	relAt := strings.Index(raw, "multipart/related")
+	altAt := strings.Index(raw, "multipart/alternative; boundary")
+	if relAt < 0 || altAt < 0 || relAt > altAt {
+		t.Fatalf("multipart/alternative must be nested INSIDE multipart/related: rel=%d alt=%d", relAt, altAt)
+	}
+	if !strings.Contains(decodeQP(t, raw), acceptURL) {
+		t.Fatal("the plaintext half must still carry the URL through the extra wrapper and the encoding")
+	}
+	// ⛔ AND THE ENCODING IS DECLARED. A body encoded quoted-printable without the header is delivered as
+	// literal `=3D` to the recipient — the failure looks like a typo in the template and is an envelope bug.
+	if strings.Count(raw, "Content-Transfer-Encoding: quoted-printable") != 2 {
+		t.Fatal("both text parts must declare quoted-printable")
 	}
 }
 

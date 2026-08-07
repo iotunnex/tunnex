@@ -269,8 +269,8 @@ func (s *Service) Revoke(ctx context.Context, actor, orgID uuid.UUID, email stri
 // ⭐ "INVITE CREATED, DELIVERY FAILED" IS TWO FACTS AND BOTH ARE TRUE. The row is real and the link is
 // valid — it can be sent another way — so the invitation is kept and the RESPONSE stops claiming it was
 // delivered.
-// send delivers a rendered message. The logo's base URL is resolved by the mailer, not here — see
-// mail.brandedMailer for why that is not each caller's job.
+// send delivers a rendered message. There is nothing deployment-specific to stamp into it: the branded
+// template's logo rides in the message as a cid: part, so a rendered Message is complete as it stands.
 func (s *Service) send(ctx context.Context, msg mail.Message) error {
 	if err := s.mailer.Send(ctx, msg); err != nil {
 		s.logger.Error("invite_email_failed", slog.String("to", msg.To), slog.String("error", err.Error()))

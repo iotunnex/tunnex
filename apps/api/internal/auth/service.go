@@ -280,8 +280,8 @@ func (s *Service) ResetPassword(ctx context.Context, rawToken, newPassword strin
 	return nil
 }
 
-// send delivers a rendered message. The logo's base URL is resolved by the mailer — see
-// mail.brandedMailer for why that is not each caller's job.
+// send delivers a rendered message. There is nothing deployment-specific to stamp into it: the branded
+// template's logo rides in the message as a cid: part, so a rendered Message is complete as it stands.
 func (s *Service) send(ctx context.Context, msg mail.Message) {
 	if err := s.mailer.Send(ctx, msg); err != nil {
 		s.logger.Warn("email_send_failed", slog.String("to", msg.To), slog.String("error", err.Error()))

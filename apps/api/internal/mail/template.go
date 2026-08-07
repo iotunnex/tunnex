@@ -12,17 +12,16 @@ import "strings"
 // shell changes, this is the file that has to follow; that coupling is the cost of the decision and is
 // cheaper than the two drifting into different-looking mail from one brand.
 //
-// ⛔ ONE DELIBERATE DIVERGENCE: THE LOGO IS SERVED FROM THE DEPLOYMENT, NOT FROM tunnex.io.
+// ⛔ ONE DELIBERATE DIVERGENCE: THE LOGO TRAVELS WITH THE MESSAGE, IT IS NEVER FETCHED.
 //
 // The reference hard-codes `https://tunnex.io/email/tunnex-logo-2x.png`, which is right for a site we run
-// and wrong for software other people run. Every invitation a customer sends would fetch an image from us —
-// a phone-home on the most private mail the product produces, from a control plane whose entire pitch is
-// that it never contacts us, and a broken image on an air-gapped or offline deployment. So the asset ships
-// in the web bundle (`apps/web/public/email/`) and the URL is built from APP_BASE_URL. Same pixels, no
-// callback.
+// and wrong for software other people run. Pointing it at the deployment's own APP_BASE_URL fixed the
+// phone-home and left three problems standing — a default `http://localhost` that resolves to the
+// RECIPIENT's machine, an accidental open-tracking pixel in the org's own logs, and remote images blocked
+// by default in Outlook and most corporate gateways. See the embed note in mail.go.
 //
-// The logo src is left ROOT-RELATIVE by the shell and stamped by WithBaseURL at the seam that knows the
-// deployment, so these renderers stay pure — same inputs, same bytes, testable without a config.
+// So the src is `cid:tunnex-logo` and the PNG rides in a multipart/related part. No fetch: nothing to
+// resolve, nothing to log, nothing to block, and the mail renders with no network at all.
 //
 // ⚠ AND THE NONCE IS DROPPED. The reference stamps `Date.now()`/`Math.random()` into an HTML comment for
 // its own CSP reporting; a mailed document has no CSP, and it would make this renderer nondeterministic and
@@ -77,7 +76,7 @@ func renderShell(bodyHTML string, opts shellOptions) string {
 <div style="max-width:560px;margin:0 auto;padding:40px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <div style="background-color:` + emailSurface + `;border:1px solid ` + emailBorder + `;border-radius:12px;padding:32px 28px;color:` + emailText + `;font-size:15px;line-height:1.6;">
     <div style="padding-bottom:24px;margin-bottom:24px;border-bottom:1px solid ` + emailBorder + `;text-align:center;">
-      <img src="/email/tunnex-logo-2x.png" alt="Tunnex" width="176" height="22" style="display:block;border:0;margin:0 auto;outline:none;">
+      <img src="cid:tunnex-logo" alt="Tunnex" width="176" height="22" style="display:block;border:0;margin:0 auto;outline:none;">
     </div>
 ` + bodyHTML + `
   </div>

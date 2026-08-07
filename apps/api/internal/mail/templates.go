@@ -184,19 +184,3 @@ func AccountExistsMessage(to, resetURL string) Message {
 		),
 	}
 }
-
-// WithBaseURL stamps the deployment's public URL into a message's HTML, so the logo is fetched from the
-// customer's own control plane rather than from tunnex.io.
-//
-// ⛔ A SEPARATE STEP BECAUSE THE TEMPLATES DO NOT KNOW THE DEPLOYMENT. They are pure — same inputs, same
-// bytes, testable without a config — and the one deployment-specific value is applied at the seam that has
-// it. An empty base leaves a root-relative src, which renders as a broken image rather than as a request
-// to us: the failure stays local, which is the whole reason for the divergence.
-func WithBaseURL(m Message, baseURL string) Message {
-	if m.HTML == "" {
-		return m
-	}
-	m.HTML = strings.Replace(m.HTML, `src="/email/tunnex-logo-2x.png"`,
-		`src="`+escapeHTML(strings.TrimRight(baseURL, "/"))+`/email/tunnex-logo-2x.png"`, 1)
-	return m
-}
