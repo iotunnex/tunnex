@@ -1535,6 +1535,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/organizations/{orgId}/members/{userId}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Grant or change a user's role in ANY organization (deployment admin)
+         * @description Requires `users.cp_admin`. Creates the membership if the user has none. Refuses to demote the organization's last owner (409 `last_owner`). Audited into the TARGET organization's log, so the org's own owners see that someone from outside their tenant changed a role.
+         *
+         */
+        put: operations["adminSetOrgRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{userId}/cp-admin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Grant or revoke the deployment-administrator capability
+         * @description Requires `users.cp_admin`. Refuses any change that would leave the deployment with ZERO holders (409 `last_cp_admin`) — there is no public signup, so a deployment with no deployment administrator cannot be recovered without database access.
+         *
+         */
+        put: operations["adminSetCpAdmin"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/{orgId}/domains": {
         parameters: {
             query?: never;
@@ -2981,6 +3028,9 @@ export interface components {
         ChangeRoleRequest: {
             /** @enum {string} */
             role: "owner" | "admin" | "member";
+        };
+        CpAdminRequest: {
+            granted: boolean;
         };
         EmailRequest: {
             /** Format: email */
@@ -5606,6 +5656,59 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Reactivated. */
+            204: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    adminSetOrgRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description Role granted. */
+            204: {
+                headers: {
+                    "X-Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    adminSetCpAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CpAdminRequest"];
+            };
+        };
+        responses: {
+            /** @description Capability updated. */
             204: {
                 headers: {
                     "X-Request-Id": components["headers"]["RequestId"];

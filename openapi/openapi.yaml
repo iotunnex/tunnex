@@ -1997,6 +1997,70 @@ paths:
           headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
         default: { $ref: "#/components/responses/Error" }
 
+  # ── Deployment administration (users.cp_admin) ────────────────────────────
+  #
+  # ⛔ THESE ARE NOT ORG-SCOPED ROUTES WEARING AN ORG ID IN THE PATH. Every other
+  # `/organizations/{orgId}/…` operation is authorized by MEMBERSHIP in that org
+  # (authorize() → RoleIn). These are authorized by a DEPLOYMENT-LEVEL capability
+  # held by a caller who is typically a member of NONE of the orgs they act on —
+  # a different question, asked BESIDE RoleIn and never inside it, which is why
+  # they live on their own prefix rather than being a branch in the member routes.
+  /api/v1/admin/organizations/{orgId}/members/{userId}/role:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      operationId: adminSetOrgRole
+      summary: Grant or change a user's role in ANY organization (deployment admin)
+      description: >
+        Requires `users.cp_admin`. Creates the membership if the user has none.
+        Refuses to demote the organization's last owner (409 `last_owner`).
+        Audited into the TARGET organization's log, so the org's own owners see
+        that someone from outside their tenant changed a role.
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangeRoleRequest" }
+      responses:
+        "204":
+          description: Role granted.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/users/{userId}/cp-admin:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      operationId: adminSetCpAdmin
+      summary: Grant or revoke the deployment-administrator capability
+      description: >
+        Requires `users.cp_admin`. Refuses any change that would leave the
+        deployment with ZERO holders (409 `last_cp_admin`) — there is no public
+        signup, so a deployment with no deployment administrator cannot be
+        recovered without database access.
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CpAdminRequest" }
+      responses:
+        "204":
+          description: Capability updated.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/domains:
     parameters:
       - name: orgId
@@ -4022,6 +4086,13 @@ components:
       additionalProperties: false
       properties:
         role: { type: string, enum: [owner, admin, member] }
+
+    CpAdminRequest:
+      type: object
+      required: [granted]
+      additionalProperties: false
+      properties:
+        granted: { type: boolean }
 
     EmailRequest:
       type: object

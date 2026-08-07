@@ -601,6 +601,11 @@ type CliCredentialGrant struct {
 	Token string `json:"token"`
 }
 
+// CpAdminRequest defines model for CpAdminRequest.
+type CpAdminRequest struct {
+	Granted bool `json:"granted"`
+}
+
 // CreateDeviceRequest defines model for CreateDeviceRequest.
 type CreateDeviceRequest struct {
 	FullTunnel *bool `json:"full_tunnel,omitempty"`
@@ -1790,6 +1795,12 @@ type ListRoutedRangesParams struct {
 	DeviceId *openapi_types.UUID `form:"device_id,omitempty" json:"device_id,omitempty"`
 }
 
+// AdminSetOrgRoleJSONRequestBody defines body for AdminSetOrgRole for application/json ContentType.
+type AdminSetOrgRoleJSONRequestBody = ChangeRoleRequest
+
+// AdminSetCpAdminJSONRequestBody defines body for AdminSetCpAdmin for application/json ContentType.
+type AdminSetCpAdminJSONRequestBody = CpAdminRequest
+
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
 type EnrollAgentJSONRequestBody = EnrollRequest
 
@@ -2037,6 +2048,16 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 
 // The interface specification for the client above.
 type ClientInterface interface {
+	// AdminSetOrgRoleWithBody request with any body
+	AdminSetOrgRoleWithBody(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	AdminSetOrgRole(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, body AdminSetOrgRoleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AdminSetCpAdminWithBody request with any body
+	AdminSetCpAdminWithBody(ctx context.Context, userId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	AdminSetCpAdmin(ctx context.Context, userId openapi_types.UUID, body AdminSetCpAdminJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// EnrollAgentWithBody request with any body
 	EnrollAgentWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -2539,6 +2560,54 @@ type ClientInterface interface {
 
 	// GetHealth request
 	GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+func (c *Client) AdminSetOrgRoleWithBody(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAdminSetOrgRoleRequestWithBody(c.Server, orgId, userId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AdminSetOrgRole(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, body AdminSetOrgRoleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAdminSetOrgRoleRequest(c.Server, orgId, userId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AdminSetCpAdminWithBody(ctx context.Context, userId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAdminSetCpAdminRequestWithBody(c.Server, userId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AdminSetCpAdmin(ctx context.Context, userId openapi_types.UUID, body AdminSetCpAdminJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAdminSetCpAdminRequest(c.Server, userId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
 }
 
 func (c *Client) EnrollAgentWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -4783,6 +4852,107 @@ func (c *Client) GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (
 		return nil, err
 	}
 	return c.Client.Do(req)
+}
+
+// NewAdminSetOrgRoleRequest calls the generic AdminSetOrgRole builder with application/json body
+func NewAdminSetOrgRoleRequest(server string, orgId openapi_types.UUID, userId openapi_types.UUID, body AdminSetOrgRoleJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewAdminSetOrgRoleRequestWithBody(server, orgId, userId, "application/json", bodyReader)
+}
+
+// NewAdminSetOrgRoleRequestWithBody generates requests for AdminSetOrgRole with any type of body
+func NewAdminSetOrgRoleRequestWithBody(server string, orgId openapi_types.UUID, userId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "userId", runtime.ParamLocationPath, userId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/admin/organizations/%s/members/%s/role", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewAdminSetCpAdminRequest calls the generic AdminSetCpAdmin builder with application/json body
+func NewAdminSetCpAdminRequest(server string, userId openapi_types.UUID, body AdminSetCpAdminJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewAdminSetCpAdminRequestWithBody(server, userId, "application/json", bodyReader)
+}
+
+// NewAdminSetCpAdminRequestWithBody generates requests for AdminSetCpAdmin with any type of body
+func NewAdminSetCpAdminRequestWithBody(server string, userId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "userId", runtime.ParamLocationPath, userId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/admin/users/%s/cp-admin", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
 }
 
 // NewEnrollAgentRequest calls the generic EnrollAgent builder with application/json body
@@ -10394,6 +10564,16 @@ func WithBaseURL(baseURL string) ClientOption {
 
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
+	// AdminSetOrgRoleWithBodyWithResponse request with any body
+	AdminSetOrgRoleWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AdminSetOrgRoleResponse, error)
+
+	AdminSetOrgRoleWithResponse(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, body AdminSetOrgRoleJSONRequestBody, reqEditors ...RequestEditorFn) (*AdminSetOrgRoleResponse, error)
+
+	// AdminSetCpAdminWithBodyWithResponse request with any body
+	AdminSetCpAdminWithBodyWithResponse(ctx context.Context, userId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AdminSetCpAdminResponse, error)
+
+	AdminSetCpAdminWithResponse(ctx context.Context, userId openapi_types.UUID, body AdminSetCpAdminJSONRequestBody, reqEditors ...RequestEditorFn) (*AdminSetCpAdminResponse, error)
+
 	// EnrollAgentWithBodyWithResponse request with any body
 	EnrollAgentWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*EnrollAgentResponse, error)
 
@@ -10896,6 +11076,50 @@ type ClientWithResponsesInterface interface {
 
 	// GetHealthWithResponse request
 	GetHealthWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHealthResponse, error)
+}
+
+type AdminSetOrgRoleResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r AdminSetOrgRoleResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AdminSetOrgRoleResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type AdminSetCpAdminResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r AdminSetCpAdminResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AdminSetCpAdminResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
 }
 
 type EnrollAgentResponse struct {
@@ -13831,6 +14055,40 @@ func (r GetHealthResponse) StatusCode() int {
 	return 0
 }
 
+// AdminSetOrgRoleWithBodyWithResponse request with arbitrary body returning *AdminSetOrgRoleResponse
+func (c *ClientWithResponses) AdminSetOrgRoleWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AdminSetOrgRoleResponse, error) {
+	rsp, err := c.AdminSetOrgRoleWithBody(ctx, orgId, userId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAdminSetOrgRoleResponse(rsp)
+}
+
+func (c *ClientWithResponses) AdminSetOrgRoleWithResponse(ctx context.Context, orgId openapi_types.UUID, userId openapi_types.UUID, body AdminSetOrgRoleJSONRequestBody, reqEditors ...RequestEditorFn) (*AdminSetOrgRoleResponse, error) {
+	rsp, err := c.AdminSetOrgRole(ctx, orgId, userId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAdminSetOrgRoleResponse(rsp)
+}
+
+// AdminSetCpAdminWithBodyWithResponse request with arbitrary body returning *AdminSetCpAdminResponse
+func (c *ClientWithResponses) AdminSetCpAdminWithBodyWithResponse(ctx context.Context, userId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AdminSetCpAdminResponse, error) {
+	rsp, err := c.AdminSetCpAdminWithBody(ctx, userId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAdminSetCpAdminResponse(rsp)
+}
+
+func (c *ClientWithResponses) AdminSetCpAdminWithResponse(ctx context.Context, userId openapi_types.UUID, body AdminSetCpAdminJSONRequestBody, reqEditors ...RequestEditorFn) (*AdminSetCpAdminResponse, error) {
+	rsp, err := c.AdminSetCpAdmin(ctx, userId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAdminSetCpAdminResponse(rsp)
+}
+
 // EnrollAgentWithBodyWithResponse request with arbitrary body returning *EnrollAgentResponse
 func (c *ClientWithResponses) EnrollAgentWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*EnrollAgentResponse, error) {
 	rsp, err := c.EnrollAgentWithBody(ctx, contentType, body, reqEditors...)
@@ -15454,6 +15712,58 @@ func (c *ClientWithResponses) GetHealthWithResponse(ctx context.Context, reqEdit
 		return nil, err
 	}
 	return ParseGetHealthResponse(rsp)
+}
+
+// ParseAdminSetOrgRoleResponse parses an HTTP response from a AdminSetOrgRoleWithResponse call
+func ParseAdminSetOrgRoleResponse(rsp *http.Response) (*AdminSetOrgRoleResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AdminSetOrgRoleResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseAdminSetCpAdminResponse parses an HTTP response from a AdminSetCpAdminWithResponse call
+func ParseAdminSetCpAdminResponse(rsp *http.Response) (*AdminSetCpAdminResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AdminSetCpAdminResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
 }
 
 // ParseEnrollAgentResponse parses an HTTP response from a EnrollAgentWithResponse call

@@ -128,6 +128,12 @@ type Querier interface {
 	// S7.3 D4 — existing active devices stay active, not retro-pended).
 	CountActiveDevicesForOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
 	CountActiveNodesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
+	// ⛔ THE LAST-HOLDER GUARD READS THIS, so it counts only accounts that can actually SIGN IN and use the
+	// capability: soft-deleted rows are excluded (a deleted holder recovers nothing) and so are deactivated
+	// ones (SessionAuth 401s them, so they cannot exercise it either). Counting either would let the deployment
+	// reach a state where the guard says a holder exists and no human can log in — the exact unrecoverable
+	// state it exists to prevent.
+	CountCPAdmins(ctx context.Context) (int64, error)
 	// CountClusterCascade returns what a DeregisterCluster will destroy, for the audit trail (H2): the number of
 	// LIVE exposed Services in the cluster, and the number of policy grants (rules) that reference ANY Service in
 	// it. Both are FK ON DELETE CASCADE'd when the cluster row is deleted, so the audit must capture them BEFORE
@@ -1085,6 +1091,14 @@ type Querier interface {
 	// runs once per org. lint:cross-org — keyed by node_id inside the node-revoke transaction (org-authorized
 	// upstream, mirrors RevokeDevicesForNode).
 	RevokeOVPNClientCertsForNode(ctx context.Context, nodeID uuid.UUID) ([]uuid.UUID, error)
+	// The deployment-administrator capability, both directions (S12.6).
+	//
+	// ⛔ GrantCPAdmin IS NOT THIS QUERY WITH A PARAMETER. That one is the BOOTSTRAP grant: it runs inside the
+	// transaction that creates the first organization, is unconditional, and can only ever grant. This one is an
+	// operator ACT on another account, and the caller must be able to tell "no such live user" from "changed
+	// nothing" — hence :execrows, and hence a separate name rather than a shared statement whose two callers
+	// would have to agree about what zero rows means.
+	SetCPAdmin(ctx context.Context, arg SetCPAdminParams) (int64, error)
 	// lint:cross-org — keyed by device_id inside the report/sweep transaction (org
 	// already authorized). Flips the ORTHOGONAL enforcement flag (D7); returns the
 	// row so the caller sees org/node for the push.
