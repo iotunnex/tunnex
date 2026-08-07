@@ -10,11 +10,24 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/password"
 )
+
+// CredentialFile is where the one-time password is written for the operator to read.
+//
+// ⛔ A FILE, FOUNDER-RULED — reversing the earlier "never in a file". The log line worked but demanded the
+// operator already KNOW to grep for it; a path the login screen can name is something they can act on.
+//
+// ⚠ THE TRADE, STATED: a log line scrolls away, a file PERSISTS. So the file is deleted the moment the
+// password is changed (auth.ChangePassword) — it exists exactly as long as the credential is unclaimed,
+// which is the same lifetime the log line effectively had. It is written 0600 into the container's own
+// volume, never into the repo and never into .env.
+const CredentialFile = "/var/lib/tunnex/secrets/first-run-password.txt"
 
 // AdminEmail is the CP admin's address.
 //
@@ -65,6 +78,15 @@ func EnsureAdmin(ctx context.Context, q Store, logger *slog.Logger) error {
 		return err
 	}
 
+	// ⭐ WRITTEN WHERE THE LOGIN SCREEN CAN POINT AT IT. 0600, and a failure here is logged rather than
+	// fatal — the log line below is still a complete answer, so a read-only volume must not brick a boot.
+	if err := os.MkdirAll(filepath.Dir(CredentialFile), 0o700); err == nil {
+		if e := os.WriteFile(CredentialFile, []byte(pw+"\n"), 0o600); e != nil {
+			logger.Warn("bootstrap_credential_file_unwritable", slog.String("path", CredentialFile),
+				slog.String("err", e.Error()), slog.String("effect", "the password is in this log only"))
+		}
+	}
+
 	// ⭐ PRINTED WHERE THE OPERATOR IS ALREADY LOOKING. `docker compose up` streams this; there is no file
 	// to find, no env var to set, and no second place it could be. It is deliberately loud and framed,
 	// because a credential that scrolls past inside a wall of JSON is a credential that is lost.
@@ -75,6 +97,7 @@ func EnsureAdmin(ctx context.Context, q Store, logger *slog.Logger) error {
 		slog.String("banner", strings.Repeat("=", 68)),
 		slog.String("email", AdminEmail),
 		slog.String("password", pw),
+		slog.String("file", CredentialFile),
 		slog.String("action", "SIGN IN NOW AND CHANGE THIS PASSWORD — you will be forced to"),
 		slog.String("warning", "SHOWN ONCE. It is not stored in plaintext and cannot be reprinted. "+
 			"If it is lost before you sign in, the only recovery is to reset the database "+
