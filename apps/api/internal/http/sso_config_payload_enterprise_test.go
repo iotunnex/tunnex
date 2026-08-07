@@ -100,7 +100,7 @@ func TestGetSsoConfigPayloadCarriesNoSecret(t *testing.T) {
 
 	// Write through the REAL audited path (seals the secret, records a secret-free
 	// audit event), then read back through the REAL handler.
-	port := NewSSOPort(pool, sealer, nil, "", slog.Default())
+	port := NewSSOPort(pool, sealer, nil, "", nil, slog.Default())
 	if err := port.SetConfig(ctx, actor, org, "google", clientID, secret, "", true); err != nil {
 		t.Fatalf("set config: %v", err)
 	}

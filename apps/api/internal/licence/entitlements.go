@@ -78,7 +78,17 @@ var orgCeiling = map[Tier]*int{
 // a thinner Community loses to NetBird, whose self-hosted edition is free with unlimited users.
 var tierFeatures = map[Tier]map[Feature]bool{
 	TierCommunity: {},
-	TierTrial:     {FeatMultiGateway: true},
+	// ⛔ THE TRIAL CARRIES SSO AND DIRECTORY SYNC (founder-ruled). A trial exists to answer "does this
+	// work for us", and for an enterprise buyer that question IS SSO. Without it the trial could not
+	// configure Google or Entra at all, so the one capability most likely to decide the purchase was the
+	// one thing the evaluation could not test.
+	//
+	// ⚠ AND IT IS BOUNDED, BECAUSE THIS IS A CREATE-TIME GRANT. SSO LOGIN is deliberately never gated (a
+	// licence state must never lock a human out — see requireSSOAdmin), so handing the trial SSO would
+	// otherwise buy PERMANENT free SSO for anyone who takes one: the trial-band law, exactly. What stops
+	// at lapse is everything that ONBOARDS SOMEBODY NEW — JIT provisioning and domain-capture auto-join —
+	// so the free-forever surface is capped at the humans who already existed during the trial.
+	TierTrial: {FeatMultiGateway: true, FeatSSO: true, FeatIdpSync: true},
 	TierStarter:   {FeatMultiGateway: true, FeatMultiOrg: true, FeatSSO: true, FeatIdpSync: true},
 	TierGrowth:    {FeatMultiGateway: true, FeatMultiOrg: true, FeatSSO: true, FeatIdpSync: true},
 	TierScale:     {FeatMultiGateway: true, FeatMultiOrg: true, FeatSSO: true, FeatIdpSync: true},
