@@ -2557,6 +2557,8 @@ export interface components {
             tier: "community" | "trial" | "starter" | "growth" | "scale";
             /** @description Gateways this deployment may ENROL. null means unlimited. Running gateways are never stopped. */
             gateway_ceiling: number | null;
+            /** @description Live gateways ACROSS EVERY ORGANIZATION — the number the ceiling is actually checked against. A per-org count paired with this ceiling reads as spare capacity that does not exist: a fresh organization would show 0 of 5 on a deployment that is already full and refuses the enrolment. */
+            gateways_in_use?: number;
             /** @description Organizations it may CREATE. null means unlimited. */
             org_ceiling: number | null;
             /** @description The named capabilities this tier grants. */

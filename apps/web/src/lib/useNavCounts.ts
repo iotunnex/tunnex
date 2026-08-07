@@ -72,12 +72,26 @@ export function useNavCounts(): NavCounts {
       ) as Promise<Loaded<Device[]>>,
       // ⚠ DEPLOYMENT-SCOPED, so it takes no orgId — the licence belongs to the box, not the tenant.
       loadOne(() => api.GET("/api/v1/license")) as Promise<
-        Loaded<{ gateway_ceiling?: number | null }>
+        Loaded<{ gateway_ceiling?: number | null; gateways_in_use?: number }>
       >,
     ]);
 
     setCounts({
-      gatewaysTotal: countFrom(nodes, (n) => n.length),
+      // ⛔ THE NUMERATOR IS DEPLOYMENT-WIDE, LIKE THE CEILING BESIDE IT.
+      //
+      // This was `nodes.length` — the CURRENT ORG's gateways — over a ceiling that belongs to the whole
+      // box. A newly created organization therefore read "0 / 5" on a deployment that was already full,
+      // and the operator learned otherwise from a shell error on their own server minutes later.
+      //
+      // ⚠ A FRACTION WHOSE HALVES ANSWER DIFFERENT QUESTIONS IS WORSE THAN NO FRACTION: it does not fail
+      // to inform, it actively misinforms, and it does so most confidently in the newest org.
+      //
+      // The org-scoped list is still fetched — `gatewaysOnline` is a real per-org fact — so the fallback
+      // when the licence read fails is that count, which is at least a lower bound on the deployment's.
+      gatewaysTotal:
+        lic.ok && typeof lic.data.gateways_in_use === "number"
+          ? { state: "ok" as const, value: lic.data.gateways_in_use }
+          : countFrom(nodes, (n) => n.length),
       gatewaysOnline: countFrom(nodes, (n) => n.filter(isOnline).length),
       // ⚠ THE CEILING IS DEPLOYMENT-WIDE AND COMES FROM THE LICENCE, not from anything org-scoped. A null
       // ceiling is UNLIMITED — a real answer — and must not be confused with a read that failed.

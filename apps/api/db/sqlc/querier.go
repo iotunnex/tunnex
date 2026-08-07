@@ -153,7 +153,25 @@ type Querier interface {
 	CountDevicesForUserCap(ctx context.Context, arg CountDevicesForUserCapParams) (int64, error)
 	// Any origin — the refuse-unless-empty guard (D1) must see a hand-added member too.
 	CountGroupMembers(ctx context.Context, arg CountGroupMembersParams) (int64, error)
-	// The gateway count the enrolment ceiling is checked against (S12.1 slice 4).
+	// lint:cross-org — DELIBERATELY SPANS EVERY ORGANIZATION. This is the count the licence ceiling is
+	// checked against, and the licence is a property of the DEPLOYMENT, not of a tenant.
+	//
+	// ⛔ THE PER-ORG VERSION BELOW WAS A PAID CEILING THE CUSTOMER COULD LIFT BY CLICKING "+ New". Starter
+	// allows 5 gateways and UNLIMITED organizations, so counting per org made the real ceiling 5 × N — with no
+	// exploit, no API misuse, and no hacking: the button that raises it is in the product's own header. Growth
+	// was 20 × N. Community and trial were only ever safe because their org ceiling is 1, which is an accident
+	// of two numbers agreeing rather than a boundary.
+	//
+	// > ## ⛔ **ONE SIGNED KEY, ONE DEPLOYMENT, ONE COUNT.** A ceiling scoped more narrowly than the thing that
+	// > ## grants it is not a ceiling.
+	//
+	// ⛔ LIVE ONLY, same as the per-org query: a revoked gateway is not a gateway, and counting one would let a
+	// revoke permanently consume a band slot.
+	CountLiveNodes(ctx context.Context) (int64, error)
+	// The gateway count SHOWN for a single organization (S12.1 slice 4).
+	//
+	// ⚠ NOT THE CEILING CHECK ANY MORE — see CountLiveNodes above. This one answers "how many does THIS org
+	// run", which is a display question; the licence question is deployment-wide.
 	//
 	// ⛔ LIVE ONLY: a revoked gateway is not a gateway. Counting it would let a revoke permanently consume a
 	// band slot — the same defect class as the agent unique-index that a revoke bricked.

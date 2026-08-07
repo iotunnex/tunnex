@@ -1157,6 +1157,9 @@ type LicenseStatus struct {
 	// GatewayCeiling Gateways this deployment may ENROL. null means unlimited. Running gateways are never stopped.
 	GatewayCeiling *int `json:"gateway_ceiling"`
 
+	// GatewaysInUse Live gateways ACROSS EVERY ORGANIZATION — the number the ceiling is actually checked against. A per-org count paired with this ceiling reads as spare capacity that does not exist: a fresh organization would show 0 of 5 on a deployment that is already full and refuses the enrolment.
+	GatewaysInUse *int `json:"gateways_in_use,omitempty"`
+
 	// GraceEndsAt When gated capabilities stop. Absent unless expired.
 	GraceEndsAt *time.Time `json:"grace_ends_at"`
 

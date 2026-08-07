@@ -92,8 +92,22 @@ func (s apiServer) GetLicense(ctx context.Context, req api.GetLicenseRequestObje
 		return nil, err
 	}
 	st := s.licence.Evaluate(time.Now())
+	body := licenceStatusBody(st, s.licence.StoreStatus())
+	// ⛔ THE NUMERATOR MUST COME FROM THE SAME PLACE THE CEILING IS ENFORCED. The nav badge built its
+	// fraction from the CURRENT ORG's gateway list over the DEPLOYMENT's ceiling — so a newly created
+	// organization showed "0 / 5" while the deployment was full and the next enrolment was already
+	// refused. Serving the enforced count here makes the two halves the same question.
+	//
+	// ⚠ A COUNT FAILURE LEAVES IT ABSENT RATHER THAN ZERO. Zero is a claim ("there is room"); absent is
+	// the truth ("we could not count"), and the client renders the ceiling alone.
+	if s.nodes != nil {
+		if n, err := s.nodes.CountLiveGateways(ctx); err == nil {
+			used := int(n)
+			body.GatewaysInUse = &used
+		}
+	}
 	return api.GetLicense200JSONResponse{
-		Body:    licenceStatusBody(st, s.licence.StoreStatus()),
+		Body:    body,
 		Headers: api.GetLicense200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }
