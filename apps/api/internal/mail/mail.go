@@ -45,11 +45,11 @@ type Mailer interface {
 
 // Config controls mailer selection.
 type Config struct {
-	Host       string
-	Port       string
-	From       string
-	Username   string // optional; empty => no SMTP auth (e.g. Mailpit)
-	Password   string // optional
+	Host     string
+	Port     string
+	From     string
+	Username string // optional; empty => no SMTP auth (e.g. Mailpit)
+	Password string // optional
 	// DevLogging tees a copy of every message to the log. It NEVER suppresses the send. Opt-in via
 	// MAIL_DEV_LOG; see the package doc for why it is not derived from the environment name.
 	DevLogging bool
