@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useOrg } from "../lib/useOrg";
 import {
   api,
+  apiErrorMessage,
   loadOne,
   type Loaded,
   type Node,
@@ -86,6 +87,28 @@ export default function GatewaysPage() {
     tier: string;
     gateway_ceiling?: number | null;
   } | null>(null);
+
+  // ⚠ TWO-STEP, NOT window.confirm — the same shape the original control used (WF-S11-9): a confirm dialog
+  // in a table row is a modal over a list, and the row is the thing being acted on.
+  const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState(false);
+
+  /** Revoke, then reload — the row must stop looking live the moment the server says it is not. */
+  async function revokeGateway(nodeId: string) {
+    if (!org) return;
+    setRevoking(true);
+    const { error } = await api.POST(
+      "/api/v1/organizations/{orgId}/nodes/{nodeId}/revoke",
+      { params: { path: { orgId: org.id, nodeId } } },
+    );
+    setRevoking(false);
+    setConfirmRevoke(null);
+    if (error) {
+      setLoadError(apiErrorMessage(error, "Could not revoke the gateway."));
+      return;
+    }
+    await reload();
+  }
 
   const reload = useCallback(async () => {
     setLoadError(null);
@@ -203,6 +226,54 @@ export default function GatewaysPage() {
           {r.lastSeenAt ? relativeAge(r.lastSeenAt) : "never connected"}
         </span>
       ),
+    },
+    {
+      key: "actions",
+      header: "",
+      sortValue: () => "",
+      /**
+       * ⛔ REVOKE, ON EVERY TABLE — AND ITS ABSENCE IS THE DEFECT THIS COLUMN EXISTS FOR.
+       *
+       * The control has existed since S11 (`POST /nodes/{nodeId}/revoke`, two-step confirm) inside
+       * `EnrolCeremony`'s own list. This page passes `renderList={false}` because it owns the list — so the
+       * action went off with the list, and the tables that replaced it never grew one. Nothing went red:
+       * the component still exists and its own tests still pass.
+       *
+       * ⛔ AND IT IS ON THE HEALTHY TABLE TOO, WHICH IS THE CASE THAT WAS BROKEN. A healthy-but-unused
+       * gateway is exactly the one an operator retires to free a licence slot — the ceiling notice says
+       * "revoke a gateway you no longer use", and revoking genuinely frees a slot (`CountLiveNodes` counts
+       * `revoked_at IS NULL`). The remedy was true and the button was missing.
+       *
+       * ⚠ Already-revoked rows get no button: `revoked` is terminal here, and there is no un-revoke.
+       */
+      cell: (r: GatewayRow) =>
+        r.status === "revoked" ? null : confirmRevoke === r.id ? (
+          <span className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void revokeGateway(r.id)}
+              disabled={revoking}
+              className="text-micro font-medium text-danger hover:underline"
+            >
+              {revoking ? "Revoking…" : "Confirm"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmRevoke(null)}
+              className="text-micro text-ink-tertiary hover:underline"
+            >
+              Cancel
+            </button>
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirmRevoke(r.id)}
+            className="text-micro text-ink-tertiary hover:text-danger hover:underline"
+          >
+            Revoke
+          </button>
+        ),
     },
   ];
 

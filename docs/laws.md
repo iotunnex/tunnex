@@ -5453,3 +5453,28 @@ capability gives the boundary nothing to be seen against.
 ⛔ **A fixture value inherited from a migration clause is how a fixture stops representing anything**: the
 no-org onboarding account read `true` on old rigs purely because an e2e run had once given it an org and the
 backfill then caught it.
+
+
+## ⛔ A LAYOUT DECISION CAN SILENTLY DELETE A CAPABILITY (sixth instance)
+
+`POST /nodes/{nodeId}/revoke` shipped in S11 with a two-step confirm, inside `EnrolCeremony`'s own list.
+The Gateways page renders that component with **`renderList={false}`** — it owns the list itself — so the
+ACTION went off with the list, and the tables that replaced it never grew one.
+
+**Nothing went red.** The component still existed, its own tests still passed, the endpoint stayed wired,
+and the RBAC mirror still granted the permission. What broke was REACHABILITY, which no component-scoped
+test asks about.
+
+⚠ **And the cost landed at the worst moment:** the gateway-ceiling notice tells an operator to *"revoke a
+gateway you no longer use"* — a remedy that is TRUE (`CountLiveNodes` counts `revoked_at IS NULL`, so
+revoking really does free a slot) — while the button did not exist. A refusal naming a remedy the UI does
+not offer sends the operator hunting for a control that was never built, at the moment they would
+otherwise have paid.
+
+⭐ **THE GUARD MUST BE ABOUT THE ACTION BEING REACHABLE, NOT ABOUT A COMPONENT EXISTING** — the component
+existing is exactly what was true the whole time the control was gone. `gatewayrevokereach.test.ts` reads
+the PAGE for the endpoint call, so it survives whatever `renderList` does.
+
+⚠ **And that guard nearly lied too:** a census-of-censuses caught it reading source WITHOUT stripping
+comments — its own doc comment contains the endpoint path, so it would have matched its own prose and
+passed with the button deleted. Source censuses strip first, always.
