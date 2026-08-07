@@ -439,3 +439,55 @@ WHERE revoked_at IS NULL;
 -- rather than assumed from the sibling tables that do have one.
 SELECT count(*) FROM nodes
 WHERE org_id = $1 AND revoked_at IS NULL;
+
+-- name: DeleteRevokedNode :execrows
+-- ⛔ HARD DELETE, AND ONLY FOR A REVOKED NODE (S12.12 D2). The status predicate is the whole safety
+-- argument: by the time a node is revoked, the transfer step has already moved every live device off it
+-- (Revoke refuses otherwise), so the CASCADE columns have nothing left to destroy. It is the SEQUENCE that
+-- makes this delete safe, not the FK actions.
+--
+-- WHAT GOES WITH IT, read from the schema rather than assumed:
+--   · devices.node_id           ON DELETE CASCADE — empty by construction, see above.
+--   · node_peer_status          ON DELETE CASCADE — telemetry about a node that no longer exists.
+--   · ovpn_server_certs         ON DELETE CASCADE — this gateway's server credential, which nothing else can use.
+--   · node_join_tokens.consumed_node_id ON DELETE SET NULL — the enrolment token SURVIVES, unlinked.
+--
+-- ⚠ AND THE TOKEN IS THE ONE AN OPERATOR MUST BE TOLD ABOUT. It is not deleted by the FK, so the caller
+-- deletes it deliberately (D2): a token whose gateway is gone should not still enrol one. The confirm says
+-- so, because that token may be in a colleague's terminal history, about to be run.
+--
+-- Returns rows-affected so the caller can tell "no such node" from "that node is not revoked" instead of
+-- reporting a success that deleted nothing.
+DELETE FROM nodes WHERE id = $1 AND org_id = $2 AND revoked_at IS NOT NULL;
+
+-- name: DeleteJoinTokensForNode :execrows
+-- lint:cross-org — keyed by consumed_node_id, which the caller resolved from an org-scoped node row.
+-- Cleans the enrolment token that produced a gateway being deleted (S12.12 D2).
+--
+-- ⛔ IT IS A DELIBERATE CLEANUP, NOT THE REMOVAL OF AN OBSTACLE, and the distinction is recorded because
+-- the ruling was made against the opposite premise. `consumed_node_id` is ON DELETE SET NULL
+-- (0008_nodes.up.sql:46), NOT NO ACTION — it never would have blocked the delete. The ruling stands anyway:
+-- a token that enrolled a gateway an operator has just deleted should not still enrol another.
+--
+-- ⚠ Refusing the delete over a leftover token would have made the NEWEST gateways the hardest to remove,
+-- since a token is most likely to still exist on one enrolled recently. That is backwards.
+DELETE FROM node_join_tokens WHERE consumed_node_id = $1;
+
+-- name: UpdateNodeIdentity :one
+-- Edits a gateway's NAME and/or ENDPOINT (S12.12 D3) — the two things an operator can get wrong at
+-- enrolment and, until now, could never correct.
+--
+-- ⛔ THE TWO FIELDS ARE NOT SYMMETRIC AND THE CALLER MUST TREAT THEM DIFFERENTLY. The name is a LABEL:
+-- nothing consumes it structurally, so changing it costs nothing. The endpoint is HELD BY PEERS and BAKED
+-- INTO EVERY ISSUED DEVICE CONFIG, so changing it invalidates those configs — which is why the caller
+-- snapshots nothing here and instead marks the devices, and why the confirm has to say so.
+--
+-- COALESCE so a caller may send either field alone; sending neither is a no-op the caller refuses earlier.
+-- A REVOKED node is excluded: it is terminal, nothing will serve it again, and letting an operator rename
+-- one produces a tidier record of something that does not exist.
+UPDATE nodes
+SET name = COALESCE(sqlc.narg('name'), name),
+    endpoint = COALESCE(sqlc.narg('endpoint'), endpoint),
+    updated_at = now()
+WHERE id = $1 AND org_id = $2 AND revoked_at IS NULL
+RETURNING *;

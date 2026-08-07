@@ -64,3 +64,41 @@ func (s apiServer) TransferNodeDevices(ctx context.Context, req api.TransferNode
 		Headers: api.TransferNodeDevices200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }
+
+// DeleteNode DELETE /api/v1/organizations/{orgId}/nodes/{nodeId} (S12.12 D2).
+//
+// org:update, the same permission that revokes: this is the second half of retiring a gateway, and an
+// operator who can revoke can already reach the state deletion is permitted from. A separate permission
+// would let someone revoke gateways and never be able to clear the rows they made.
+func (s apiServer) DeleteNode(ctx context.Context, req api.DeleteNodeRequestObject) (api.DeleteNodeResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgUpdate); err != nil {
+		return nil, err
+	}
+	p, _ := authctx.PrincipalFrom(ctx)
+	if err := s.nodes.DeleteRevokedNode(ctx, p.UserID, req.OrgId, req.NodeId); err != nil {
+		return nil, err
+	}
+	return api.DeleteNode204Response{
+		Headers: api.DeleteNode204ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}
+
+// UpdateNode PATCH /api/v1/organizations/{orgId}/nodes/{nodeId} (S12.12 D3) — rename only, and the spec
+// carries why the endpoint is not here.
+func (s apiServer) UpdateNode(ctx context.Context, req api.UpdateNodeRequestObject) (api.UpdateNodeResponseObject, error) {
+	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgUpdate); err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, apierr.BadRequest("invalid_request", "request body is required")
+	}
+	p, _ := authctx.PrincipalFrom(ctx)
+	n, err := s.nodes.RenameNode(ctx, p.UserID, req.OrgId, req.NodeId, req.Body.Name)
+	if err != nil {
+		return nil, err
+	}
+	return api.UpdateNode200JSONResponse{
+		Body:    toAPINode(n),
+		Headers: api.UpdateNode200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
+	}, nil
+}

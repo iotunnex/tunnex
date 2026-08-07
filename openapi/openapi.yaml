@@ -745,6 +745,63 @@ paths:
               schema: { $ref: "#/components/schemas/RestoreNodeDevicesResponse" }
         default: { $ref: "#/components/responses/Error" }
 
+  /api/v1/organizations/{orgId}/nodes/{nodeId}:
+    parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: nodeId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: updateNode
+      summary: Rename a gateway
+      description: >-
+        S12.12 D3. Nothing about a gateway was editable: a typo at enrolment was permanent, because enrolment
+        is a CLI act on the operator's own server and the name it supplies is written once. The NAME is a
+        label — nothing consumes it structurally — so changing it costs nothing and is safe to expose.
+        THE ENDPOINT IS DELIBERATELY NOT EDITABLE HERE, and the asymmetry is the point: peers hold the
+        endpoint and every issued device config bakes it, so changing it invalidates those configs, and this
+        product has no snapshot of the endpoint a config was issued against — so the change would be
+        invisible to needs_reexport and every affected user would discover it by failing to connect. That is
+        the exact defect the transfer step was built to avoid one story earlier. Correcting a wrong endpoint
+        is re-enrolment until that snapshot exists.
+      tags: [nodes]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateNodeRequest" }
+      responses:
+        "200":
+          description: The updated gateway.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Node" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteNode
+      summary: Delete a REVOKED gateway permanently
+      description: >-
+        S12.12 D2. A revoked gateway is terminal and never serves anything again, but its row stayed on the
+        list forever — so a deployment accumulated dead entries an operator could not clear. Only a REVOKED
+        node can be deleted, and that predicate is the whole safety argument: the revoke itself refuses while
+        any device is homed there, so by the time a node is revoked the transfer has already moved them and
+        the cascading foreign keys have nothing left to destroy. It is the SEQUENCE that makes this safe, not
+        the FK actions. The gateway's ENROLMENT TOKEN is deleted with it: it is ON DELETE SET NULL and would
+        have survived unlinked, and a token whose gateway an operator has just deleted must not still enrol
+        another. Anyone holding that token finds it stops working, which the confirm says because it may be
+        sitting in a colleague's terminal about to be run.
+      tags: [nodes]
+      responses:
+        "204":
+          description: Deleted.
+          headers: { X-Request-Id: { $ref: "#/components/headers/RequestId" } }
+        default: { $ref: "#/components/responses/Error" }
+
   /api/v1/organizations/{orgId}/nodes/{nodeId}/transfer-devices:
     parameters:
       - name: orgId
@@ -3566,6 +3623,17 @@ components:
       additionalProperties: false
       properties:
         redirect_url: { type: string }
+
+    UpdateNodeRequest:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: "The gateway's display name. A label: nothing consumes it structurally, which is why it is the one field safe to edit."
 
     TransferNodeDevicesRequest:
       type: object

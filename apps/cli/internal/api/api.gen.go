@@ -1764,6 +1764,12 @@ type UnbindSiteNodeRequest struct {
 	NodeId *openapi_types.UUID `json:"node_id,omitempty"`
 }
 
+// UpdateNodeRequest defines model for UpdateNodeRequest.
+type UpdateNodeRequest struct {
+	// Name The gateway's display name. A label: nothing consumes it structurally, which is why it is the one field safe to edit.
+	Name string `json:"name"`
+}
+
 // UpdateOrganizationRequest Only the name is mutable; the slug is fixed at creation.
 type UpdateOrganizationRequest struct {
 	Name string `json:"name"`
@@ -1980,6 +1986,9 @@ type SetMfaEnforceJSONRequestBody = MfaEnforce
 
 // IssueJoinTokenJSONRequestBody defines body for IssueJoinToken for application/json ContentType.
 type IssueJoinTokenJSONRequestBody = JoinTokenRequest
+
+// UpdateNodeJSONRequestBody defines body for UpdateNode for application/json ContentType.
+type UpdateNodeJSONRequestBody = UpdateNodeRequest
 
 // SetHubPriorityJSONRequestBody defines body for SetHubPriority for application/json ContentType.
 type SetHubPriorityJSONRequestBody = HubPriorityRequest
@@ -2479,6 +2488,14 @@ type ClientInterface interface {
 	IssueJoinTokenWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	IssueJoinToken(ctx context.Context, orgId openapi_types.UUID, body IssueJoinTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteNode request
+	DeleteNode(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateNodeWithBody request with any body
+	UpdateNodeWithBody(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	UpdateNode(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body UpdateNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// SetHubPriorityWithBody request with any body
 	SetHubPriorityWithBody(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -4267,6 +4284,42 @@ func (c *Client) IssueJoinTokenWithBody(ctx context.Context, orgId openapi_types
 
 func (c *Client) IssueJoinToken(ctx context.Context, orgId openapi_types.UUID, body IssueJoinTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewIssueJoinTokenRequest(c.Server, orgId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteNode(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteNodeRequest(c.Server, orgId, nodeId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateNodeWithBody(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateNodeRequestWithBody(c.Server, orgId, nodeId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateNode(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body UpdateNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateNodeRequest(c.Server, orgId, nodeId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9001,6 +9054,101 @@ func NewIssueJoinTokenRequestWithBody(server string, orgId openapi_types.UUID, c
 	return req, nil
 }
 
+// NewDeleteNodeRequest generates requests for DeleteNode
+func NewDeleteNodeRequest(server string, orgId openapi_types.UUID, nodeId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "nodeId", runtime.ParamLocationPath, nodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/nodes/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUpdateNodeRequest calls the generic UpdateNode builder with application/json body
+func NewUpdateNodeRequest(server string, orgId openapi_types.UUID, nodeId openapi_types.UUID, body UpdateNodeJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateNodeRequestWithBody(server, orgId, nodeId, "application/json", bodyReader)
+}
+
+// NewUpdateNodeRequestWithBody generates requests for UpdateNode with any type of body
+func NewUpdateNodeRequestWithBody(server string, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "nodeId", runtime.ParamLocationPath, nodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/nodes/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewSetHubPriorityRequest calls the generic SetHubPriority builder with application/json body
 func NewSetHubPriorityRequest(server string, orgId openapi_types.UUID, nodeId openapi_types.UUID, body SetHubPriorityJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -11127,6 +11275,14 @@ type ClientWithResponsesInterface interface {
 	IssueJoinTokenWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*IssueJoinTokenResponse, error)
 
 	IssueJoinTokenWithResponse(ctx context.Context, orgId openapi_types.UUID, body IssueJoinTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*IssueJoinTokenResponse, error)
+
+	// DeleteNodeWithResponse request
+	DeleteNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeleteNodeResponse, error)
+
+	// UpdateNodeWithBodyWithResponse request with any body
+	UpdateNodeWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateNodeResponse, error)
+
+	UpdateNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body UpdateNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateNodeResponse, error)
 
 	// SetHubPriorityWithBodyWithResponse request with any body
 	SetHubPriorityWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetHubPriorityResponse, error)
@@ -13441,6 +13597,51 @@ func (r IssueJoinTokenResponse) StatusCode() int {
 	return 0
 }
 
+type DeleteNodeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteNodeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteNodeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type UpdateNodeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *Node
+	JSONDefault  *Error
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateNodeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateNodeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type SetHubPriorityResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -15493,6 +15694,32 @@ func (c *ClientWithResponses) IssueJoinTokenWithResponse(ctx context.Context, or
 		return nil, err
 	}
 	return ParseIssueJoinTokenResponse(rsp)
+}
+
+// DeleteNodeWithResponse request returning *DeleteNodeResponse
+func (c *ClientWithResponses) DeleteNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeleteNodeResponse, error) {
+	rsp, err := c.DeleteNode(ctx, orgId, nodeId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteNodeResponse(rsp)
+}
+
+// UpdateNodeWithBodyWithResponse request with arbitrary body returning *UpdateNodeResponse
+func (c *ClientWithResponses) UpdateNodeWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateNodeResponse, error) {
+	rsp, err := c.UpdateNodeWithBody(ctx, orgId, nodeId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateNodeResponse(rsp)
+}
+
+func (c *ClientWithResponses) UpdateNodeWithResponse(ctx context.Context, orgId openapi_types.UUID, nodeId openapi_types.UUID, body UpdateNodeJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateNodeResponse, error) {
+	rsp, err := c.UpdateNode(ctx, orgId, nodeId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateNodeResponse(rsp)
 }
 
 // SetHubPriorityWithBodyWithResponse request with arbitrary body returning *SetHubPriorityResponse
@@ -18936,6 +19163,65 @@ func ParseIssueJoinTokenResponse(rsp *http.Response) (*IssueJoinTokenResponse, e
 			return nil, err
 		}
 		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteNodeResponse parses an HTTP response from a DeleteNodeWithResponse call
+func ParseDeleteNodeResponse(rsp *http.Response) (*DeleteNodeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteNodeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateNodeResponse parses an HTTP response from a UpdateNodeWithResponse call
+func ParseUpdateNodeResponse(rsp *http.Response) (*UpdateNodeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateNodeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Node
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
