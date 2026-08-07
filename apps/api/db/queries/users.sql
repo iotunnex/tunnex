@@ -55,6 +55,26 @@ SELECT cp_admin FROM users WHERE id = $1 AND deleted_at IS NULL;
 UPDATE users SET cp_admin = true, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL;
 
+-- name: SetCPAdmin :execrows
+-- The deployment-administrator capability, both directions (S12.6).
+--
+-- ⛔ GrantCPAdmin IS NOT THIS QUERY WITH A PARAMETER. That one is the BOOTSTRAP grant: it runs inside the
+-- transaction that creates the first organization, is unconditional, and can only ever grant. This one is an
+-- operator ACT on another account, and the caller must be able to tell "no such live user" from "changed
+-- nothing" — hence :execrows, and hence a separate name rather than a shared statement whose two callers
+-- would have to agree about what zero rows means.
+UPDATE users SET cp_admin = $2, updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL;
+
+-- name: CountCPAdmins :one
+-- ⛔ THE LAST-HOLDER GUARD READS THIS, so it counts only accounts that can actually SIGN IN and use the
+-- capability: soft-deleted rows are excluded (a deleted holder recovers nothing) and so are deactivated
+-- ones (SessionAuth 401s them, so they cannot exercise it either). Counting either would let the deployment
+-- reach a state where the guard says a holder exists and no human can log in — the exact unrecoverable
+-- state it exists to prevent.
+SELECT count(*) FROM users
+WHERE cp_admin = true AND deleted_at IS NULL AND status = 'active';
+
 -- name: CountUsers :one
 -- lint:allow-deleted
 -- ⛔ INCLUDES SOFT-DELETED ROWS. The bootstrap condition is "has this deployment ever had a user", not

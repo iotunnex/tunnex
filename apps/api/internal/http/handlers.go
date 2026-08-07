@@ -114,6 +114,30 @@ func requireVerifiedUser(ctx context.Context) (*authctx.Principal, error) {
 	return p, nil
 }
 
+// requireCPAdmin is the DEPLOYMENT-level gate: the caller holds `users.cp_admin` (S12.6).
+//
+// ⛔ IT WRAPS requireVerifiedUser RATHER THAN STANDING BESIDE IT, and that is the whole reason it is one
+// function instead of four checks. The bootstrap admin holds `cp_admin` AND the one-time password that was
+// printed to `docker compose logs` — so a hand-rolled gate that asked only "is this a holder" would let the
+// public credential grant itself ownership of every organization on the deployment BEFORE the forced change.
+// That is the same route-around-the-wall that create-org already shipped once (see requireVerifiedUser).
+//
+// ⭐ AND IT IS ASKED BESIDE RoleIn, NEVER INSIDE IT. `authorize()` is deliberately untouched by this
+// feature: a `p.CPAdmin` bypass in there has exactly the blast radius of synthesising owner roles into
+// Principal.Roles — every org-scoped check in the product starts returning true for tenants the caller is
+// not in — it just looks smaller.
+func requireCPAdmin(ctx context.Context) (*authctx.Principal, error) {
+	p, err := requireVerifiedUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !p.CPAdmin {
+		return nil, apierr.New(http.StatusForbidden, "cp_admin_required",
+			"This action is reserved for deployment administrators.")
+	}
+	return p, nil
+}
+
 func requireVerifiedUserAllowingPasswordChange(ctx context.Context) (*authctx.Principal, error) {
 	p, ok := authctx.PrincipalFrom(ctx)
 	if !ok {

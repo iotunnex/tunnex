@@ -21,6 +21,23 @@ func (q *Queries) ClearMustChangePassword(ctx context.Context, id uuid.UUID) err
 	return err
 }
 
+const countCPAdmins = `-- name: CountCPAdmins :one
+SELECT count(*) FROM users
+WHERE cp_admin = true AND deleted_at IS NULL AND status = 'active'
+`
+
+// ⛔ THE LAST-HOLDER GUARD READS THIS, so it counts only accounts that can actually SIGN IN and use the
+// capability: soft-deleted rows are excluded (a deleted holder recovers nothing) and so are deactivated
+// ones (SessionAuth 401s them, so they cannot exercise it either). Counting either would let the deployment
+// reach a state where the guard says a holder exists and no human can log in — the exact unrecoverable
+// state it exists to prevent.
+func (q *Queries) CountCPAdmins(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countCPAdmins)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUsers = `-- name: CountUsers :one
 SELECT count(*) FROM users
 `
@@ -173,6 +190,31 @@ WHERE id = $1 AND deleted_at IS NULL AND email_verified_at IS NULL
 func (q *Queries) MarkEmailVerified(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, markEmailVerified, id)
 	return err
+}
+
+const setCPAdmin = `-- name: SetCPAdmin :execrows
+UPDATE users SET cp_admin = $2, updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+type SetCPAdminParams struct {
+	ID      uuid.UUID `json:"id"`
+	CpAdmin bool      `json:"cp_admin"`
+}
+
+// The deployment-administrator capability, both directions (S12.6).
+//
+// ⛔ GrantCPAdmin IS NOT THIS QUERY WITH A PARAMETER. That one is the BOOTSTRAP grant: it runs inside the
+// transaction that creates the first organization, is unconditional, and can only ever grant. This one is an
+// operator ACT on another account, and the caller must be able to tell "no such live user" from "changed
+// nothing" — hence :execrows, and hence a separate name rather than a shared statement whose two callers
+// would have to agree about what zero rows means.
+func (q *Queries) SetCPAdmin(ctx context.Context, arg SetCPAdminParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setCPAdmin, arg.ID, arg.CpAdmin)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setUserPassword = `-- name: SetUserPassword :exec
