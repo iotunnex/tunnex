@@ -905,6 +905,17 @@ type Querier interface {
 	MarkCertDelivered(ctx context.Context, id uuid.UUID) error
 	MarkDomainVerified(ctx context.Context, arg MarkDomainVerifiedParams) (DomainClaim, error)
 	MarkEmailVerified(ctx context.Context, id uuid.UUID) error
+	// lint:cross-org — the token itself is the credential; the org comes from the returned row.
+	//
+	// ⛔ READ WITHOUT CONSUMING, so a refusal that the operator can FIX does not destroy their token.
+	// `node_name_mismatch` burned it twice in one session: the operator names a gateway in the UI, the agent
+	// registers under its container hostname, and the two disagree — a mistake fixed in five seconds, except
+	// the token is gone and the next attempt fails with `invalid_join_token`, which describes a completely
+	// different problem and sends them looking in the wrong place.
+	//
+	// ⚠ THIS DOES NOT WEAKEN SINGLE-USE. ConsumeJoinToken still performs the atomic claim; this only lets the
+	// pre-flight checks run first, and both happen inside one transaction.
+	PeekJoinToken(ctx context.Context, tokenHash []byte) (NodeJoinToken, error)
 	// One stamp for all three poll outcomes (the two-tier health, D2):
 	//   success  → ok=true,  advance_clock=true  (last_sync_at = now; error cleared)
 	//   transient→ ok=false, advance_clock=false (last_sync_at FROZEN at the last good sync — the

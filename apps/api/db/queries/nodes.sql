@@ -21,6 +21,20 @@ INSERT INTO node_join_tokens (org_id, node_name, token_hash, expires_at, issued_
 VALUES ($1, $2, $3, $4, $5, COALESCE(NULLIF(sqlc.arg(enrols_kind)::text, ''), 'gateway'))
 RETURNING *;
 
+-- name: PeekJoinToken :one
+-- lint:cross-org — the token itself is the credential; the org comes from the returned row.
+--
+-- ⛔ READ WITHOUT CONSUMING, so a refusal that the operator can FIX does not destroy their token.
+-- `node_name_mismatch` burned it twice in one session: the operator names a gateway in the UI, the agent
+-- registers under its container hostname, and the two disagree — a mistake fixed in five seconds, except
+-- the token is gone and the next attempt fails with `invalid_join_token`, which describes a completely
+-- different problem and sends them looking in the wrong place.
+--
+-- ⚠ THIS DOES NOT WEAKEN SINGLE-USE. ConsumeJoinToken still performs the atomic claim; this only lets the
+-- pre-flight checks run first, and both happen inside one transaction.
+SELECT * FROM node_join_tokens
+WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now();
+
 -- name: ConsumeJoinToken :one
 -- lint:cross-org — the token itself is the credential; the org comes from the
 -- returned row. Single-use + expiring.
