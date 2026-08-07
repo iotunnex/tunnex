@@ -5478,3 +5478,29 @@ the PAGE for the endpoint call, so it survives whatever `renderList` does.
 ⚠ **And that guard nearly lied too:** a census-of-censuses caught it reading source WITHOUT stripping
 comments — its own doc comment contains the endpoint path, so it would have matched its own prose and
 passed with the button deleted. Source censuses strip first, always.
+
+
+## ⛔ A GUARD READ IN ISOLATION CANNOT SHOW WHAT TWO GUARDS DO TO EACH OTHER
+
+Both of the day's defects were COMPOSITIONAL: the 400-before-401 sat in front of a correct handler, and the
+invitation defect sits between correct redirects. Each guard is right alone; a loop exists only in their
+composition — and the spec that DRIVES the flow finds what reading the guards does not.
+
+⚠ **AND THE COROLLARY, WHICH THIS STORY IS THE EVIDENCE FOR: READING CANNOT EXONERATE EITHER.** A handoff
+named `RequireSetupIncomplete` as the guard that bounced a membershipless user to `/login`. That guard does
+not exist in this codebase. The two real guards were then measured end to end:
+
+- `RequireOrg` (App.tsx) sends 0-membership to `/create-org`, or `/verify-pending` when unverified.
+- `RequireNoOrg` bounces to `/dashboard` — never `/login` — and only when `status === "has"`.
+- `CreateOrg` renders the **Invitation required** card for any authed non-`cp_admin`, so the funnel TERMINATES.
+- Server side: create returns 202 with the raw token (`delivered:false` when SMTP is unset), accept does
+  `CreateUser` + `MarkEmailVerified` + `UpsertMembership`, and `ListOrganizations` is membership-scoped.
+
+**Five legs, five passes, no loop found by reading — which is exactly the result a reading pass is entitled
+to produce and NOT entitled to conclude from.** The only instrument that can settle it is one that drives a
+REAL invitation: create it, take the token from the RESPONSE (never from mail), accept, sign in, and assert
+the org renders.
+
+⛔ **AND A SPEC THAT ASSERTS ONLY THE FIRST DESTINATION PASSES ON A PRODUCT WHERE INVITATIONS NEVER WORK.**
+`onboarding.spec.ts` already pinned membershipless → the invitation card against a real backend, and it was
+green throughout. Two states, two destinations, BOTH asserted, or the green half hides the broken half.
