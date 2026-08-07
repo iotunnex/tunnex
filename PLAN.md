@@ -64,8 +64,56 @@ expected to be rewritten before merge.
 **Update this on every merge (one line) — a stale pointer re-enters a fresh session in the wrong epic.**
 
 **CURRENT (2026-07-31): EPIC 13 = GATEWAY RECOVERY — BUILD COMPLETE INCLUDING SLICE 7 on `story/S13.1-gateway-recovery` (tip `7c1a127`; Slice 7 = `120ff0c`, since then docs-only), NOT MERGED. Slice 7 (operator-initiated restore, `POST /nodes/{nodeId}/restore-devices`, new perm `device:restore`, re-homes onto a named LIVE gateway because a revoked node never returns) closed the reachability defect and is RED-PROVEN REACHABLE + UI-exposed. **REVIEW STATE POINTER = `docs/S13.1-review-state.md`** (pass 1 COMPLETE — 20 findings + F3, HELD, nothing folded, `docs/S13.1-review-pass1-findings.md`; pass 3 launched before pass 2 by ruling; pass 2 not started and must cover Slice 7). Earlier note: pass 1 was once interrupted — (run `wf_642e5fe8-1ed`: 8/8 finders done, 127/144 verifiers returned, Critic and Synthesize never ran — resumable from cache). The review remains a merge precondition. Next session = REVIEW → WALK → merge word, nothing in between.** The epic exists for one observed event: an AWS gateway went offline past its 48h cert lifetime and could not come back — `/agent/renew` lives behind the mTLS channel its expired cert can no longer authenticate to. Commit-one `docs/S13.1-decisions.md` (six walls, D1–D10 ruled). **SHIPPED:** agent precedence (`identity.Decide`, no network argument — a failed handshake structurally cannot trigger re-key; `Recover` ranked above `UseToken`) · **PoP re-key** on the public listener (RSA over `nonce ‖ CSR DER`; gate BEFORE crypto so timing is not a liveness oracle; **D3 amended: expiry authorizes, revocation REFUSES** — expiry is an absence of action, revocation is the presence of a decision) · its own path-scoped throttle + body cap (registered before `middleware.RealIP` — review #1 was exactly that) · **cascade restore** (`revoked_cause`, reclaim-first via the canonical oracle) · **Slice 6 `provisioned_ip`** (`needs_reexport` gains the ADDRESS cause for EVERY mode; ranges stay static-only; both contract rewrites + the label the census under-scoped) · **D10 second identifier** (key fingerprint: a LOST RESPONSE no longer bricks a gateway; ambiguity refuses; three implementations of one digest pinned to a golden vector; agent persists its pending key before submitting and reuses it so retries CONVERGE; migration guard forced expand/contract with both shim halves). Retroactive review pass 1 (leader election) folded — *leadership was a boolean that lies*; `ConfirmLeader` now matches `pg_locks`. **OWED BEFORE MERGE, IN ORDER: (1) the epic-end review pass — three passes by surface family (unauthenticated re-key surface · identity/cascade data path + migrations 0054–0061 · agent recovery loop), ~4.5–6M tokens, a merge precondition alongside CI and the walk, and a truncated pass is worse than none; (2) the walk per `docs/S13-boxwalk.md` — seven legs, TWO GATEWAYS MUST BE OFFLINE 48h+ BEFORE the session (`agentca.CertTTL` is a constant; the clock is the only way to make a cert expire); (3) the merge word.** **RULED — cascade-restore reachability: SLICE 7 (operator-initiated restore), built AFTER the review pass and BEFORE the walk; two conditions — authorized as a deliberate operator act (same class as minting a join token) and RED-PROVEN REACHABLE, not merely correct. Un-revoke PERMANENTLY REFUSED (it is the attack chain D3 exists to prevent); removing the mechanism refused (re-opens Wall 6). Walk Leg 4 stays a falsification attempt. The defect:** `RestoreCascadeRevokedDevices` has one caller (`Rekey`), devices are cascade-revoked in one place (`Revoke`), and `Rekey` refuses a revoked node — so the trigger may put the node into the one state that can never reach the restorer (dormant-machinery law). Four faces in the paper; walk Leg 4 is written as a falsification attempt. Retroactive **pass 2 (backup/restore)** still attaches to the next natural merge boundary. Registered: the 0061 contract migration (trigger = the release after this one) · no general rate limiting · body caps only on the two re-key routes · failover hysteresis persistence (beta-blocking, owned by the failover story).
-**CURRENT (2026-08-07): S12.6–S12.11 + D23 + THE MAIL FIX — THE FOUNDER-FOUND DEFECT RUN — PR #96,
-content tip `46c8c527` (`c997d7fd` pre-merge).**
+**CURRENT (2026-08-07): S12.12 GATEWAY LIFECYCLE — transfer, delete, rename — PR #97,
+content tip `<post-merge sha>` (`c061b265` pre-merge).**
+
+⛔ **THE FOUNDER REVOKED A GATEWAY AND HIS DEVICE READ `revoked`, WHICH HE HAD NOT DONE.** `nodes.Revoke`
+ran `RevokeDevicesForNode` inside its own transaction, sweeping every active and pending device homed there,
+and a revoked gateway is never active again. Retiring a gateway meant disconnecting everyone on it with the
+only remedy behind an endpoint the operator did not know existed.
+
+**Commit-one is `docs/S12.12-gateway-lifecycle-decisions.md`** (D1–D7 ruled). **SHIPPED:**
+
+- **D1 TRANSFER BEFORE REVOKE, as its own step.** `POST /nodes/{nodeId}/transfer-devices`, new perm
+  `device:transfer`. Revoke now REFUSES with `devices_still_homed` (409, naming the count) while any device
+  is homed there. Both halves ship together: the refusal alone is a dead end, the endpoint alone is an
+  optional step nobody takes before the destructive one. **The order was ruled from the ABANDONED state, not
+  the end state** — transfer-first leaves "devices moved, old gateway still running"; revoke-then-restore
+  leaves a disconnected fleet and no un-revoke.
+- **D4** pending devices move and STAY pending · **D6** one audit event naming the count and both gateways.
+- **Addresses are NOT reallocated** — the pool is org-scoped (`organizations.pool_cidr`, uniqueness on
+  `(org_id, ip)`), so a same-org move cannot collide. Measured, not assumed.
+- **D7 — THE RESIDUAL THAT POINT 6 WOULD HAVE HIDDEN.** "Managed devices re-home themselves" is true ONLY
+  for hub-set members: `activeHubDialFrom` returns `derived=false` otherwise and the client keeps its baked
+  endpoint. `ProfileStale`'s gateway cause was static-only, so a managed device moved onto an ordinary
+  gateway was moved in the database, broken on the wire, and reported `needs_reexport: false` everywhere.
+  Acceptable while the only path was the rare operator restore; transfer makes re-homing routine. Now
+  covered, gated on `nodes.SelfHomingNodes` so a device that genuinely heals is not flagged forever.
+  ⚠ Unknown resolves in OPPOSITE directions on the two surfaces, deliberately — the transfer's one-shot
+  report assumes a re-issue is needed; the standing Devices list does not.
+- **D2 DELETE a revoked gateway** (`DELETE /nodes/{nodeId}`), and the enrolment token goes with it —
+  `consumed_node_id` is `ON DELETE SET NULL`, so it would have survived UNLINKED and still enrolled one.
+  The ruling was right; the premise it was ruled against (that the FK would block) was inverted.
+- **D3 RENAME** ships. **THE ENDPOINT EDIT DOES NOT → S12.12b**: there is no snapshot of the endpoint a
+  config was issued against, so the edit would be invisible to `needs_reexport` — point 6's defect with no
+  row moving at all. Needs `devices.provisioned_endpoint` + a fourth `ProfileStale` cause. ⚠ Drags D3's
+  ceiling clause: re-enrolment is the only correction and `CountLiveNodes` charges a slot for it.
+- Earlier in the same PR: the invitation second-destination e2e spec (`e2e/tests/invitation.spec.ts` —
+  a real invitation, no mocks, asserting the invitee lands INSIDE the org and NOT on `/create-org`), and two
+  laws (guards-in-composition · one count, two sources).
+
+**HELD FOR DISPOSITION, unbuilt:**
+- ⛔ **THE CEILING NOTICE'S NUMERATOR IS STILL ORG-SCOPED against a deployment ceiling** (`Gateways.tsx:614`
+  feeds `nodes.length` to `ceilingSentence`). On a box with 127 live gateways and a ceiling of 2 it renders
+  the AT-ceiling sentence — so the over-ceiling branch, which exists to say "revoking one will not free a
+  slot", can never fire. **Third instance of the one-count-two-sources law**, ten lines from the badge that
+  was fixed for it.
+- `delivered` (the invite 202's honest delivery flag) has NO web consumer — `Users.tsx:922` reads
+  `invite_token` and ignores it, so the screen cannot tell a sent invitation from a failed one.
+- `ResendInvitation` returns no token · `revoked_cause` not surfaced on the Devices list.
+- **The §7 full-surface walk has never run.** Rotation before launch.
+
+
 
 ⚠ **RE-POINTED, NOT RE-DATED.** The checkpoint was written at `42a9c609` and the mail work landed after it
 — which is the exact sequencing failure this rule was written for, twice. Re-pointed in the same breath
