@@ -14,6 +14,28 @@ up: ## Start the full stack (postgres, redis, api, web, nginx, node-agent, mailp
 	@test -f .env || cp .env.example .env
 	$(COMPOSE) up -d --build
 	@echo "Tunnex is starting → http://localhost   (Mailpit → http://localhost:8025)"
+	@# ⛔ SURFACE THE FIRST-RUN CREDENTIAL ON THE OPERATOR'S TERMINAL.
+	@#
+	@# The API prints a framed banner to ITS stdout — which `up -d` sends to the container log and NOT to
+	@# the terminal the operator is sitting at. Three attempts failed on that same blind spot: a JSON log
+	@# line (invisible in a wall of JSON), a file (path is inside the container, so `cat` on the host finds
+	@# nothing), and the banner itself (correct, and detached mode hides it).
+	@#
+	@# ⭐ THE QUESTION WAS NEVER "WHERE DOES THE CREDENTIAL GO" — IT WAS "WHERE ARE THE OPERATOR'S EYES".
+	@# They are here, on the output of the command they just ran.
+	@#
+	@# ⚠ Prints NOTHING on a deployment that already has an admin, because the banner is only emitted on a
+	@# genuinely first run — so this cannot republish a live credential on every `make up`.
+	@# ⛔ GATED ON THE CREDENTIAL STILL BEING UNCLAIMED, and that gate is not optional. The container LOG
+	@# keeps the banner forever, so an ungated grep reprints it on every `make up` — republishing a
+	@# password that may already have been changed, to a terminal, indefinitely. Asked of the database
+	@# instead: `must_change_password` is true only until the operator sets their own, so this stops the
+	@# moment the credential stops working.
+	@if [ "$$($(COMPOSE) exec -T postgres psql -U $(PG_USER) -d $(PG_DB) -tAc \
+	    "select count(*) from users where must_change_password" 2>/dev/null | tr -d ' ')" != "0" ]; then \
+	  $(COMPOSE) logs api 2>/dev/null | grep -B1 -A14 "TUNNEX - FIRST RUN" \
+	    | sed 's/^[a-z-]*-1  *| \{0,1\}//'; \
+	fi
 
 .PHONY: up-enterprise
 up-enterprise: ## ⛔ THERE IS NO ENTERPRISE BUILD ANY MORE — edition comes from a LICENCE KEY (S12.1)
