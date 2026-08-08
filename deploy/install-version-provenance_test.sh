@@ -82,6 +82,18 @@ for installer in "$ROOT/deploy/install.sh" "$ROOT/deploy/get.sh"; do
 		fail "$(basename "$installer") does not extract the first-run banner"
 	grep -Fq "grep -q 'password'" "$installer" ||
 		fail "$(basename "$installer") does not detect the detached credential banner"
+	grep -Fq 'BEGIN MASKED SECRET READER' "$installer" || fail "$(basename "$installer") lacks the masked secret reader"
+	grep -Fq 'stty raw -echo' "$installer" || fail "$(basename "$installer") does not disable terminal echo safely"
+	grep -Fq 'printf '\''*'\''' "$installer" || fail "$(basename "$installer") does not mask typed secret bytes"
+	grep -Fq "printf '\\b \\b'" "$installer" || fail "$(basename "$installer") does not erase a mask on backspace"
+	grep -Fq "printf '\\003'" "$installer" || fail "$(basename "$installer") does not handle Ctrl-C"
+	grep -Fq "printf '\\177'" "$installer" || fail "$(basename "$installer") does not handle Delete"
+	if ! grep -Fq 'secret input ended before Enter' "$installer" && ! grep -Fq 'no_tty_help' "$installer"; then
+		fail "$(basename "$installer") lacks EOF handling"
+	fi
+	if grep -Fq 'SMTP_PASSWORD="$(ask ' "$installer"; then
+		fail "$(basename "$installer") still reads SMTP passwords with visible line input"
+	fi
 done
 
 grep -Fq 'DOCKER_METADATA_SHORT_SHA_LENGTH: "7"' "$ROOT/.github/workflows/ci.yml" ||
