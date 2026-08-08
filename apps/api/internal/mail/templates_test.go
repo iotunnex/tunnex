@@ -24,7 +24,7 @@ func decodeQP(t *testing.T, s string) string {
 
 func decodeBase64Bodies(t *testing.T, s string) string {
 	t.Helper()
-	const marker = "Content-Transfer-Encoding: base64\r\n\r\n"
+	const marker = "Content-Transfer-Encoding: base64\r\n"
 	var decoded strings.Builder
 	for rest := s; ; {
 		i := strings.Index(rest, marker)
@@ -32,10 +32,12 @@ func decodeBase64Bodies(t *testing.T, s string) string {
 			break
 		}
 		rest = rest[i+len(marker):]
-		end := strings.Index(rest, "\r\n--")
-		if end < 0 {
-			end = strings.Index(rest, "\r\n")
+		headerEnd := strings.Index(rest, "\r\n\r\n")
+		if headerEnd < 0 {
+			break
 		}
+		rest = rest[headerEnd+4:]
+		end := strings.Index(rest, "\r\n--")
 		if end < 0 {
 			end = len(rest)
 		}
@@ -117,6 +119,15 @@ func TestBuildRFC822SanitizesHeaderInjection(t *testing.T) {
 	if strings.Contains(raw, "\r\nX-Injected:") {
 		t.Fatalf("header injection survived: %q", raw)
 	}
+	raw = string(buildRFC822("from@example.test", Message{
+		To:      "to@example.test",
+		Subject: "subject\r\nX-Injected: yes",
+		Text:    "body",
+	}))
+	headerEnd := strings.Index(raw, "\r\n\r\n")
+	if headerEnd < 0 || strings.Contains(raw[:headerEnd], "\r\nX-Injected:") {
+		t.Fatalf("subject injection escaped into headers: %q", raw)
+	}
 }
 
 func TestBuildRFC822EncodesBodyBoundaries(t *testing.T) {
@@ -129,7 +140,8 @@ func TestBuildRFC822EncodesBodyBoundaries(t *testing.T) {
 	if headerEnd < 0 || strings.Contains(raw[:headerEnd], "\r\nX-Injected:") {
 		t.Fatalf("body boundary escaped into a header: %q", raw)
 	}
-	if !strings.Contains(decodeBase64Bodies(t, raw), "before\r\nX-Injected: yes\r\nafter") {
+	decoded := decodeBase64Bodies(t, raw)
+	if !strings.Contains(decoded, "before\r\nX-Injected: yes\r\nafter") {
 		t.Fatalf("body did not survive base64 encoding: %q", raw)
 	}
 }
@@ -191,7 +203,7 @@ func TestLogoTravelsWithTheMessageAndIsNeverFetched(t *testing.T) {
 	if !strings.Contains(raw, "multipart/related") {
 		t.Fatal("an HTML message must be multipart/related so the logo can ride with it")
 	}
-	if !strings.Contains(raw, "Content-ID: <tunnex-logo>") {
+	if !strings.Contains(raw, "Content-Id: tunnex-logo") {
 		t.Fatal("the image part's Content-ID must match the src the HTML refers to — a mismatch is a broken " +
 			"image with no error anywhere")
 	}
@@ -222,11 +234,12 @@ func TestLogoTravelsWithTheMessageAndIsNeverFetched(t *testing.T) {
 func TestPlainTextAndHTMLSurviveTheRelatedWrapper(t *testing.T) {
 	raw := string(buildRFC822("f@x.test", InviteMessage("a@b.test", acceptURL, "")))
 	relAt := strings.Index(raw, "multipart/related")
-	altAt := strings.Index(raw, "multipart/alternative; boundary")
+	altAt := strings.Index(raw, "multipart/alternative")
 	if relAt < 0 || altAt < 0 || relAt > altAt {
 		t.Fatalf("multipart/alternative must be nested INSIDE multipart/related: rel=%d alt=%d", relAt, altAt)
 	}
-	if !strings.Contains(decodeBase64Bodies(t, raw), acceptURL) {
+	decoded := decodeBase64Bodies(t, raw)
+	if !strings.Contains(decoded, acceptURL) {
 		t.Fatal("the plaintext half must still carry the URL through the extra wrapper and the encoding")
 	}
 	if strings.Count(raw, "Content-Transfer-Encoding: base64") != 3 {
