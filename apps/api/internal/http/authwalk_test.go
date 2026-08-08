@@ -35,8 +35,6 @@ var walkBodies = map[string]string{
 	"createorganization": `{"name":"Walk","slug":"walk-test"}`,
 	"updateorganization": `{"name":"Walk"}`,
 	"setssoconfig":       `{"client_id":"x","client_secret":"y","enabled":true}`,
-	"createdomainclaim":  `{"domain":"walk.example.com"}`,
-	"verifydomainclaim":  `{"domain":"walk.example.com"}`,
 	"createinvitation":   `{"email":"walk@example.com","role":"member"}`,
 	"changememberrole":   `{"role":"member"}`,
 	"resizepool":         `{"cidr":"10.0.0.0/24"}`,
