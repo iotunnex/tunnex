@@ -69,6 +69,20 @@ func TestEveryTemplateCarriesAWorkingPlaintextBody(t *testing.T) {
 	}
 }
 
+func TestBuildRFC822SanitizesHeaderInjection(t *testing.T) {
+	raw := string(buildRFC822("from@example.test\r\nX-Injected: yes", Message{
+		To:      "to@example.test\nBcc: attacker@example.test",
+		Subject: "subject\r\nX-Injected: yes",
+		Text:    "body",
+	}))
+	if strings.Contains(raw, "\r\nX-Injected:") {
+		t.Fatalf("header injection survived: %q", raw)
+	}
+	if strings.Count(raw, "\r\n\r\n") != 1 {
+		t.Fatalf("unexpected header/body boundary count: %d", strings.Count(raw, "\r\n\r\n"))
+	}
+}
+
 // TestUserInputIsEscapedInHTMLAndRawInText — ⛔ THE INVARIANT A PORT LOSES FIRST.
 //
 // The reference's own comment says "never user input without escaping there". renderShell cannot tell an

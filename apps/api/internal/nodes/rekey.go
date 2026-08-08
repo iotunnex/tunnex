@@ -151,7 +151,7 @@ func (s *Service) resolveRekeyIdentity(ctx context.Context, ident RekeyIdentifie
 // fleet has not been told. The recovering gateway's own next reconcile closes it for itself; other gateways converge
 // on the push, or on their next poll if the push is lost. A lost push is a DELAYED convergence, never a lost one.
 func (s *Service) Rekey(ctx context.Context, ident RekeyIdentifier, nonce, csrPEM, signature []byte, agentVersion string) (certPEM, caPEM string, err error) {
-	log := slog.With("op", "rekey", "identifier_kind", ident.Kind, "identifier", ident.Value)
+	log := slog.With("op", "rekey", "identifier_kind", ident.Kind)
 
 	// (1) Single-use nonce, bound to this identifier AND kind. The UPDATE's own WHERE enforces it, so two concurrent
 	//     submits cannot both win.
