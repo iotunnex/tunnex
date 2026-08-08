@@ -379,7 +379,7 @@ visual: ## Run the viewport leg (visual regression). BASELINES ARE GENERATED IN 
 	# UPDATE a baseline with:  make visual-update
 	VITE_VISUAL_GALLERY=1 $(COMPOSE) up -d --build --wait
 	docker run --rm --network $(NET) -v "$(PWD)/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
-	  $(PW_IMAGE) sh -c "npm install --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts"
+	  $(PW_IMAGE) sh -c "npm ci --no-audit --no-fund && npx playwright test -c playwright.visual.config.ts"
 
 .PHONY: visual-update
 visual-update: ## Re-render the visual baselines. THE RESULT MUST BE ITS OWN COMMIT, .png FILES ONLY.
@@ -387,7 +387,18 @@ visual-update: ## Re-render the visual baselines. THE RESULT MUST BE ITS OWN COM
 	# someone can see, not something buried in a 40-file diff.
 	VITE_VISUAL_GALLERY=1 $(COMPOSE) up -d --build --wait
 	docker run --rm --network $(NET) -v "$(PWD)/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
-	  $(PW_IMAGE) sh -c "npm install --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts --update-snapshots"
+	  $(PW_IMAGE) sh -c "npm ci --no-audit --no-fund && npx playwright test -c playwright.visual.config.ts --update-snapshots"
+
+.PHONY: e2e-preflight
+e2e-preflight: ## Clean CI-equivalent E2E dependency + source preflight (no stack required)
+	@git ls-files --error-unmatch e2e/package-lock.json >/dev/null 2>&1 || \
+	  { echo "ERROR: e2e/package-lock.json must be tracked for npm ci"; exit 1; }
+	node e2e/check-heading-locators.mjs
+	docker run --rm \
+	  -v "$(PWD)/e2e":/e2e:ro \
+	  --mount type=volume,target=/e2e/node_modules \
+	  -w /e2e $(PW_IMAGE) \
+	  sh -c "npm ci --no-audit --no-fund && npm run typecheck && npx playwright test --list >/dev/null"
 
 .PHONY: e2e
 e2e: ## One command: bring the stack up healthy, run API integration + Playwright e2e
@@ -404,7 +415,7 @@ e2e: ## One command: bring the stack up healthy, run API integration + Playwrigh
 	  $(GO_IMAGE) go test -p 1 ./...
 	@echo ">> Playwright browser e2e (SPA -> API correlation chain)"
 	docker run --rm --network $(NET) -v "$(PWD)/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
-	  $(PW_IMAGE) sh -c "npm install --no-audit --no-fund --silent && npx playwright test"
+	  $(PW_IMAGE) sh -c "npm ci --no-audit --no-fund && npx playwright test"
 	@echo ">> e2e passed."
 
 .PHONY: api
