@@ -217,7 +217,9 @@ test("A4: enroll empty state → ceremony (no route back); audit row is raw-toke
   // Fresh-org empty state offers the affordance.
   await expect(page.getByText("No gateway enrolled yet.")).toBeVisible();
   await page.getByRole("link", { name: /Enroll a gateway/ }).click();
-  await expect(page.getByRole("heading", { name: "Gateways" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Gateways", level: 1 }),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Enroll gateway" }).click();
   await page.getByLabel(/Gateway name/).fill("walk-gw");
@@ -243,7 +245,9 @@ test("A4: enroll empty state → ceremony (no route back); audit row is raw-toke
   ).toHaveCount(0);
   // No route back: a reload must not resurrect the token.
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Gateways" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Gateways", level: 1 }),
+  ).toBeVisible();
   await expect(page.getByText(token)).toHaveCount(0);
 
   // Audit: the issuance row exists and is secret-free (raw token nowhere on page).

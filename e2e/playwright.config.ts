@@ -10,7 +10,10 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost",
-    trace: "off",
+    // Retained only when a test fails, then uploaded by CI with the stack logs. Successful runs pay no
+    // artifact-storage cost; a timing failure has the browser timeline needed to diagnose it in one run.
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });

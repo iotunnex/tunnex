@@ -40,8 +40,10 @@ jobs:
   # nothing else would notice.
   scope:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       go: ${{ steps.c.outputs.go }}
+      javascript: ${{ steps.c.outputs.javascript }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,6 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           RUN_GO=true
+          RUN_JAVASCRIPT=true
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE="${{ github.event.pull_request.base.sha }}"
             if git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
@@ -58,11 +61,15 @@ jobs:
                 if ! printf '%s\n' "$CHANGED" | grep -qE '(\.go$|go\.(mod|sum)$|\.sql$|Dockerfile|Makefile|\.github/|openapi/|apps/api/db/|apps/api/internal/mail/)'; then
                   RUN_GO=false
                 fi
+                if ! printf '%s\n' "$CHANGED" | grep -qE '(\.(js|jsx|mjs|cjs|ts|tsx)$|(^|/)(package|pnpm-lock|package-lock)\.json$|(^|/)pnpm-lock\.yaml$|(^|/)(tsconfig|vite\.config|playwright\.config|playwright\.visual\.config)\.|Dockerfile|Makefile|\.github/|openapi/|apps/(web|client)/|packages/shared/|e2e/)'; then
+                  RUN_JAVASCRIPT=false
+                fi
               fi
             fi
           fi
           echo "go=$RUN_GO" >> "$GITHUB_OUTPUT"
-          echo "::notice title=security scope::go=$RUN_GO"
+          echo "javascript=$RUN_JAVASCRIPT" >> "$GITHUB_OUTPUT"
+          echo "::notice title=security scope::go=$RUN_GO javascript=$RUN_JAVASCRIPT"
 
   # ── BLOCKING: our dependency choices ────────────────────────────────────────────────────────────────
   govulncheck:
@@ -70,6 +77,7 @@ jobs:
     if: needs.scope.outputs.go == 'true'
     name: govulncheck (blocking)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -94,6 +102,7 @@ jobs:
     needs: scope
     name: CodeQL (blocking on high/critical)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       security-events: write
       contents: read
@@ -104,20 +113,28 @@ jobs:
         language: [go, javascript-typescript]
     steps:
       - uses: actions/checkout@v4
-      # ⛔ THE GO LEG ONLY. `javascript-typescript` stays UNFILTERED — it is genuinely relevant to a UI
-      # section, which is the whole reason this is a per-leg condition and not a job-level filter.
-      - name: Skip note (go leg, non-Go diff)
-        if: matrix.language == 'go' && needs.scope.outputs.go != 'true'
-        run: echo "::notice::CodeQL(go) SKIPPED — the diff touches no Go. javascript-typescript still ran."
+      # Each leg is skipped only when the shared classifier positively proves that its language is absent.
+      # Non-PR events, missing bases and empty diffs default to running both legs (fail closed).
+      - name: Skip note (language absent from diff)
+        if: >-
+          (matrix.language == 'go' && needs.scope.outputs.go != 'true') ||
+          (matrix.language == 'javascript-typescript' && needs.scope.outputs.javascript != 'true')
+        run: echo "::notice::CodeQL(${{ matrix.language }}) SKIPPED — the PR diff cannot affect this language."
       - uses: github/codeql-action/init@v3
-        if: matrix.language != 'go' || needs.scope.outputs.go == 'true'
+        if: >-
+          (matrix.language == 'go' && needs.scope.outputs.go == 'true') ||
+          (matrix.language == 'javascript-typescript' && needs.scope.outputs.javascript == 'true')
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
       - uses: github/codeql-action/autobuild@v3
-        if: matrix.language != 'go' || needs.scope.outputs.go == 'true'
+        if: >-
+          (matrix.language == 'go' && needs.scope.outputs.go == 'true') ||
+          (matrix.language == 'javascript-typescript' && needs.scope.outputs.javascript == 'true')
       - uses: github/codeql-action/analyze@v3
-        if: matrix.language != 'go' || needs.scope.outputs.go == 'true'
+        if: >-
+          (matrix.language == 'go' && needs.scope.outputs.go == 'true') ||
+          (matrix.language == 'javascript-typescript' && needs.scope.outputs.javascript == 'true')
         with:
           category: /language:${{ matrix.language }}
           output: codeql-results
@@ -134,7 +151,9 @@ jobs:
       # It stayed invisible because every PR between the split and #59 touched Go. The filter was never
       # exercised on the branch it now takes.
       - name: Fail on high/critical findings (blocking threshold)
-        if: matrix.language != 'go' || needs.scope.outputs.go == 'true'
+        if: >-
+          (matrix.language == 'go' && needs.scope.outputs.go == 'true') ||
+          (matrix.language == 'javascript-typescript' && needs.scope.outputs.javascript == 'true')
         run: |
           set -euo pipefail
           # ⛔ AND A GUARD ON THE INPUT ITSELF: if the analysis DID run, a missing SARIF is a real failure
@@ -168,12 +187,20 @@ jobs:
     if: needs.scope.outputs.go == 'true'
     name: gofmt + vet parity (blocking)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: apps/api/go.mod
-          cache: false
+          # The five modules share one toolchain but have independent dependency graphs. Hashing every sum
+          # lets setup-go restore the same module/build cache that the sequential vet commands consume.
+          cache-dependency-path: |
+            apps/api/go.sum
+            apps/node/go.sum
+            apps/helper/go.sum
+            apps/cli/go.sum
+            apps/operator/go.sum
       - name: gofmt (all Go modules)
         run: |
           set -euo pipefail
@@ -211,13 +238,24 @@ jobs:
     if: needs.scope.outputs.go == 'true'
     name: Trivy image scan (advisory findings, blocking setup)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       security-events: write
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
       - name: Build the API image (the customer-facing artifact)
-        run: docker build -f deploy/docker/api.Dockerfile -t tunnex-api:scan .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/api.Dockerfile
+          load: true
+          tags: tunnex-api:scan
+          # Read the publisher's API cache, but export to a separate scope: Security and CI run concurrently
+          # on main, so sharing the writer scope would let two BuildKit exporters overwrite one another.
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=security-api
       - uses: aquasecurity/trivy-action@v0.36.0
         continue-on-error: true # ADVISORY: inherited base-image CVEs are not ours to fix
         with:
@@ -236,6 +274,7 @@ jobs:
     name: OpenSSF Scorecard (advisory findings, blocking setup)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       security-events: write
       id-token: write
@@ -258,6 +297,7 @@ jobs:
     name: SBOM + cosign (blocking on release)
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
       packages: write
