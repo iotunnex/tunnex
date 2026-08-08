@@ -79,6 +79,40 @@ func (s *Service) SetupComplete(ctx context.Context) (bool, error) {
 	return ever > 0, err
 }
 
+// PublicSignupOpen answers whether `/auth/signup` may still admit a stranger.
+//
+// ⛔ IT IS KEYED ON USERS, NOT ORGANIZATIONS, AND THAT CLOSES A RACE THAT WAS REAL.
+//
+// SetupComplete asks "has this deployment ever had an ORGANIZATION", which is zero on a fresh install —
+// so signup stayed open from `docker compose up` until the operator got round to creating the first org.
+// On a public address that window belongs to whoever finds it first: sign up, create the first
+// organization, own the deployment. `bootstrap.EnsureAdmin` exists precisely to make the first
+// administrator a deliberate act, and an open form running beside it gave the same power away for free.
+//
+// ⚠ A ONE-CLICK INSTALLER TURNS THAT WINDOW INTO A PRODUCT FEATURE. `curl … | sh` ends with a running,
+// publicly-reachable, unclaimed control plane — and the time between "up" and "the operator reads the
+// credential" is exactly the time an attacker has. Measured in minutes on a good day.
+//
+// ⭐ THE SIGNAL IS THE SAME ONE EnsureAdmin USES, so the two can never disagree: `CountUsers` counts
+// SOFT-DELETED rows, meaning "has this deployment ever had a user". EnsureAdmin runs at every boot and
+// mints the administrator when that count is zero — so from the first successful start there is always at
+// least one user, and this returns false forever after. No flag, no setting, nothing to configure wrong.
+//
+// ⛔ AND THAT MAKES PUBLIC SIGNUP UNREACHABLE IN PRACTICE, WHICH IS THE INTENT AND NOT A SIDE EFFECT. The
+// bootstrap administrator REPLACED signup as the first-run path; leaving both alive was the defect. Every
+// remaining way in is an act by someone already inside — invitation, or SSO domain capture — and both are
+// proven independent of this endpoint by TestAdmissionPathsDoNotDependOnSignup.
+func (s *Service) PublicSignupOpen(ctx context.Context) (bool, error) {
+	ever, err := s.q.CountUsers(ctx)
+	if err != nil {
+		// ⚠ FAIL CLOSED. A read error must not be read as "nobody is here yet" — that is the one answer
+		// that opens the door. Everywhere else in this product an unknown fails toward showing more; here
+		// an unknown hands the deployment away.
+		return false, err
+	}
+	return ever == 0, nil
+}
+
 // checkMayCreateOrg answers WHO may bring an organization into existence, which is a different question
 // from HOW MANY may exist (that is checkOrgCeiling, and it is commercial).
 //

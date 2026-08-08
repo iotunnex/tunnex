@@ -42,17 +42,30 @@ func (s apiServer) Signup(ctx context.Context, req api.SignupRequestObject) (api
 	// calls CreateUser itself (invites.go:158); SSO domain capture mints on the callback. Both are proven
 	// independent by TestAdmissionPathsDoNotDependOnSignup.
 	//
-	// ⚠ FIRST RUN STAYS OPEN — same self-closing signal the org boundary uses, and it counts soft-deleted
-	// rows so deleting every organization cannot reopen it.
+	// ⛔ KEYED ON USERS, NOT ORGANIZATIONS — AND THAT CLOSES A RACE THAT WAS REAL.
+	//
+	// This used to ask SetupComplete ("has this deployment ever had an ORGANIZATION"), which is zero on a
+	// fresh install — so signup stayed open from `docker compose up` until the operator created the first
+	// org. On a public address that window belongs to whoever finds it first: sign up, create the first
+	// organization, own the deployment. bootstrap.EnsureAdmin exists to make the first administrator a
+	// DELIBERATE act, and an open form running beside it gave the same power away for free.
+	//
+	// ⚠ THE ONE-CLICK INSTALLER IS WHY THIS HAD TO CHANGE BEFORE IT SHIPPED. `curl … | sh` ends with a
+	// running, publicly-reachable, unclaimed control plane, and the gap between "up" and "the operator
+	// reads the credential" is exactly the attacker's window.
+	//
+	// ⚠ AND IT FAILS CLOSED. PublicSignupOpen returns false on a read error: an unknown must not be read as
+	// "nobody is here yet", which is the one answer that opens the door.
 	if s.orgs != nil {
-		done, e := s.orgs.SetupComplete(ctx)
+		open, e := s.orgs.PublicSignupOpen(ctx)
 		if e != nil {
 			return nil, e
 		}
-		if done {
+		if !open {
 			return nil, apierr.Forbidden("signup_closed",
-				"This deployment is already set up. Accounts are created by invitation — ask an "+
-					"administrator to invite you, and the invitation link will set up your account.")
+				"This deployment is already set up. Sign in as the administrator with the credential "+
+					"printed at first run, or ask an administrator to invite you — the invitation link "+
+					"will set up your account.")
 		}
 	}
 	if err := s.auth.Signup(ctx, string(req.Body.Email), name, req.Body.Password); err != nil {
