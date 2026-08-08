@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -45,6 +46,16 @@ func (nopDeprov) DeactivateForSync(context.Context, uuid.UUID, uuid.UUID, string
 	return true, nil
 }
 func (nopDeprov) RevokeOrgAccess(context.Context, uuid.UUID, uuid.UUID, string) (bool, error) {
+	return true, nil
+}
+
+type recordingDeprov struct{ calls int }
+
+func (d *recordingDeprov) DeactivateForSync(context.Context, uuid.UUID, uuid.UUID, string) (bool, error) {
+	return false, nil
+}
+func (d *recordingDeprov) RevokeOrgAccess(context.Context, uuid.UUID, uuid.UUID, string) (bool, error) {
+	d.calls++
 	return true, nil
 }
 
@@ -196,6 +207,63 @@ func TestFirstSaveMapAndTrigger(t *testing.T) {
 	}
 	if _, err := svc.Trigger(ctx, org, "microsoft"); err != nil {
 		t.Fatalf("immediate Sync now after first save: %v", err)
+	}
+}
+
+func TestIdpAccessProvenanceOnlySourceAndPreservation(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	org, otherOrg, user, groupA, groupB := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	for _, pair := range []struct {
+		id   uuid.UUID
+		slug string
+	}{{org, "a"}, {otherOrg, "b"}} {
+		exec(t, pool, `INSERT INTO organizations (id,name,slug) VALUES ($1,'o',$2)`, pair.id, pair.slug+"-"+pair.id.String()[:8])
+	}
+	exec(t, pool, `INSERT INTO users (id,email,name) VALUES ($1,$2,'u')`, user, user.String()[:8]+"@t.io")
+	for _, oid := range []uuid.UUID{org, otherOrg} {
+		exec(t, pool, `INSERT INTO memberships (org_id,user_id,role) VALUES ($1,$2,'member')`, oid, user)
+	}
+	for _, gid := range []uuid.UUID{groupA, groupB} {
+		exec(t, pool, `INSERT INTO user_groups (id,org_id,name,origin,idp_provider,idp_group_id) VALUES ($1,$2,$3,'idp_sync','microsoft',$4)`, gid, org, "g-"+gid.String()[:8], gid.String())
+	}
+	deprov := &recordingDeprov{}
+	svc := idpsync.NewService(pool, testSealer(t), &nopPusher{}, deprov, testLogger())
+	// Only-source removal revokes this org, while the other org remains untouched.
+	exec(t, pool, `DELETE FROM membership_access_sources WHERE org_id=$1 AND user_id=$2`, org, user)
+	exec(t, pool, `INSERT INTO group_members (org_id,group_id,user_id,origin) VALUES ($1,$2,$3,'idp_sync')`, org, groupA, user)
+	if _, err := svc.AddIdpGroupMember(ctx, org, groupA, user, "ext"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RemoveIdpGroupMember(ctx, org, groupA, user); err != nil {
+		t.Fatal(err)
+	}
+	if deprov.calls != 1 {
+		t.Fatalf("only-source removal must revoke once, got %d", deprov.calls)
+	}
+	// A second mapped group preserves access and is idempotent on repeated removal.
+	exec(t, pool, `UPDATE memberships SET access_revoked_at=NULL WHERE org_id=$1 AND user_id=$2`, org, user)
+	exec(t, pool, `INSERT INTO membership_access_sources (org_id,user_id,source_type,source_key) VALUES ($1,$2,'idp_sync',$3)`, org, user, groupA.String())
+	exec(t, pool, `INSERT INTO membership_access_sources (org_id,user_id,source_type,source_key) VALUES ($1,$2,'idp_sync',$3)`, org, user, groupB.String())
+	exec(t, pool, `INSERT INTO group_members (org_id,group_id,user_id,origin) VALUES ($1,$2,$3,'idp_sync')`, org, groupB, user)
+	if _, err := svc.RemoveIdpGroupMember(ctx, org, groupB, user); err != nil {
+		t.Fatal(err)
+	}
+	if deprov.calls != 1 {
+		t.Fatalf("multiple-source removal must preserve access, got %d revocations", deprov.calls)
+	}
+	if _, err := svc.RemoveIdpGroupMember(ctx, org, groupB, user); err != nil {
+		t.Fatal(err)
+	}
+	if deprov.calls != 1 {
+		t.Fatalf("repeated removal must be idempotent, got %d revocations", deprov.calls)
+	}
+	var revoked *time.Time
+	if err := pool.QueryRow(ctx, `SELECT access_revoked_at FROM memberships WHERE org_id=$1 AND user_id=$2`, otherOrg, user).Scan(&revoked); err != nil {
+		t.Fatal(err)
+	}
+	if revoked != nil {
+		t.Fatal("other organization membership must remain active")
 	}
 }
 
