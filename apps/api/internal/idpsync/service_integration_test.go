@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/crypto"
 	"github.com/tunnexio/tunnex/apps/api/internal/idpsync"
@@ -163,6 +164,39 @@ func hasCode(err error, status int, code string) bool {
 		return false
 	}
 	return ae.Status == status && ae.Code == code
+}
+
+type firstSaveProvider struct{ members []idpsync.DirectoryMember }
+
+func (p firstSaveProvider) ListGroupMembers(context.Context, string) ([]idpsync.DirectoryMember, error) {
+	return p.members, nil
+}
+func (p firstSaveProvider) ResolveUserStatus(context.Context, string) (idpsync.UserStatus, error) {
+	return idpsync.StatusActive, nil
+}
+
+// TestFirstSaveMapAndTrigger exercises the exact operator sequence that differs
+// from credential replacement: initial PUT, map, then immediate Sync now.
+func TestFirstSaveMapAndTrigger(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	org, user := uuid.New(), uuid.New()
+	exec(t, pool, `INSERT INTO organizations (id,name,slug) VALUES ($1,'o',$2)`, org, "o-"+org.String()[:8])
+	exec(t, pool, `INSERT INTO users (id,email,name) VALUES ($1,$2,'u')`, user, user.String()[:8]+"@t.io")
+	exec(t, pool, `INSERT INTO memberships (org_id,user_id,role) VALUES ($1,$2,'member')`, org, user)
+	svc := newService(t, pool)
+	svc.SetProviderFactory(func(sqlc.IdpSyncConfig, string) (idpsync.DirectoryProvider, error) {
+		return firstSaveProvider{members: []idpsync.DirectoryMember{{ExternalID: "ext", Email: user.String()[:8] + "@t.io", Status: idpsync.StatusActive}}}, nil
+	})
+	if _, err := svc.UpsertConfig(ctx, org, "microsoft", idpsyncspec.ConfigInput{ClientID: "cid", ClientSecret: "secret", TenantID: "tenant", Enabled: true}); err != nil {
+		t.Fatalf("initial credential save: %v", err)
+	}
+	if _, err := svc.MapGroup(ctx, org, "microsoft", idpsyncspec.MapInput{IdpGroupID: "ext-group", Name: "Engineering"}); err != nil {
+		t.Fatalf("map after first save: %v", err)
+	}
+	if _, err := svc.Trigger(ctx, org, "microsoft"); err != nil {
+		t.Fatalf("immediate Sync now after first save: %v", err)
+	}
 }
 
 // TestUnmapWritesAnAuditRow pins the first of the two destructive-and-silent verbs (S14.15).
