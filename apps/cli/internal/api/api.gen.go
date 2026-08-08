@@ -788,22 +788,6 @@ type DeviceHealthResultFailedChecksMode string
 // DeviceHealthResultState defines model for DeviceHealthResult.State.
 type DeviceHealthResultState string
 
-// DomainClaimRequest defines model for DomainClaimRequest.
-type DomainClaimRequest struct {
-	Domain string `json:"domain"`
-}
-
-// DomainClaimResponse defines model for DomainClaimResponse.
-type DomainClaimResponse struct {
-	// TxtRecord Publish this exact value as a TXT record on the domain, then verify.
-	TxtRecord string `json:"txt_record"`
-}
-
-// DomainVerifyRequest defines model for DomainVerifyRequest.
-type DomainVerifyRequest struct {
-	Domain string `json:"domain"`
-}
-
 // EmailRequest defines model for EmailRequest.
 type EmailRequest struct {
 	Email openapi_types.Email `json:"email"`
@@ -1933,12 +1917,6 @@ type CreateDeviceJSONRequestBody = CreateDeviceRequest
 // ReportDeviceHealthJSONRequestBody defines body for ReportDeviceHealth for application/json ContentType.
 type ReportDeviceHealthJSONRequestBody = DeviceHealthReport
 
-// CreateDomainClaimJSONRequestBody defines body for CreateDomainClaim for application/json ContentType.
-type CreateDomainClaimJSONRequestBody = DomainClaimRequest
-
-// VerifyDomainClaimJSONRequestBody defines body for VerifyDomainClaim for application/json ContentType.
-type VerifyDomainClaimJSONRequestBody = DomainVerifyRequest
-
 // CreateGroupJSONRequestBody defines body for CreateGroup for application/json ContentType.
 type CreateGroupJSONRequestBody = GroupRequest
 
@@ -2320,16 +2298,6 @@ type ClientInterface interface {
 
 	// RevokeDevice request
 	RevokeDevice(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// CreateDomainClaimWithBody request with any body
-	CreateDomainClaimWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	CreateDomainClaim(ctx context.Context, orgId openapi_types.UUID, body CreateDomainClaimJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// VerifyDomainClaimWithBody request with any body
-	VerifyDomainClaimWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	VerifyDomainClaim(ctx context.Context, orgId openapi_types.UUID, body VerifyDomainClaimJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListGroups request
 	ListGroups(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3540,54 +3508,6 @@ func (c *Client) RejectDevice(ctx context.Context, orgId openapi_types.UUID, dev
 
 func (c *Client) RevokeDevice(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRevokeDeviceRequest(c.Server, orgId, deviceId)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) CreateDomainClaimWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateDomainClaimRequestWithBody(c.Server, orgId, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) CreateDomainClaim(ctx context.Context, orgId openapi_types.UUID, body CreateDomainClaimJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateDomainClaimRequest(c.Server, orgId, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) VerifyDomainClaimWithBody(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewVerifyDomainClaimRequestWithBody(c.Server, orgId, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) VerifyDomainClaim(ctx context.Context, orgId openapi_types.UUID, body VerifyDomainClaimJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewVerifyDomainClaimRequest(c.Server, orgId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -7138,100 +7058,6 @@ func NewRevokeDeviceRequest(server string, orgId openapi_types.UUID, deviceId op
 	if err != nil {
 		return nil, err
 	}
-
-	return req, nil
-}
-
-// NewCreateDomainClaimRequest calls the generic CreateDomainClaim builder with application/json body
-func NewCreateDomainClaimRequest(server string, orgId openapi_types.UUID, body CreateDomainClaimJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewCreateDomainClaimRequestWithBody(server, orgId, "application/json", bodyReader)
-}
-
-// NewCreateDomainClaimRequestWithBody generates requests for CreateDomainClaim with any type of body
-func NewCreateDomainClaimRequestWithBody(server string, orgId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	var pathParam0 string
-
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
-	if err != nil {
-		return nil, err
-	}
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/api/v1/organizations/%s/domains", pathParam0)
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("POST", queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
-
-	return req, nil
-}
-
-// NewVerifyDomainClaimRequest calls the generic VerifyDomainClaim builder with application/json body
-func NewVerifyDomainClaimRequest(server string, orgId openapi_types.UUID, body VerifyDomainClaimJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewVerifyDomainClaimRequestWithBody(server, orgId, "application/json", bodyReader)
-}
-
-// NewVerifyDomainClaimRequestWithBody generates requests for VerifyDomainClaim with any type of body
-func NewVerifyDomainClaimRequestWithBody(server string, orgId openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	var pathParam0 string
-
-	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "orgId", runtime.ParamLocationPath, orgId)
-	if err != nil {
-		return nil, err
-	}
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/api/v1/organizations/%s/domains/verify", pathParam0)
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("POST", queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -11108,16 +10934,6 @@ type ClientWithResponsesInterface interface {
 	// RevokeDeviceWithResponse request
 	RevokeDeviceWithResponse(ctx context.Context, orgId openapi_types.UUID, deviceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*RevokeDeviceResponse, error)
 
-	// CreateDomainClaimWithBodyWithResponse request with any body
-	CreateDomainClaimWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateDomainClaimResponse, error)
-
-	CreateDomainClaimWithResponse(ctx context.Context, orgId openapi_types.UUID, body CreateDomainClaimJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateDomainClaimResponse, error)
-
-	// VerifyDomainClaimWithBodyWithResponse request with any body
-	VerifyDomainClaimWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*VerifyDomainClaimResponse, error)
-
-	VerifyDomainClaimWithResponse(ctx context.Context, orgId openapi_types.UUID, body VerifyDomainClaimJSONRequestBody, reqEditors ...RequestEditorFn) (*VerifyDomainClaimResponse, error)
-
 	// ListGroupsWithResponse request
 	ListGroupsWithResponse(ctx context.Context, orgId openapi_types.UUID, reqEditors ...RequestEditorFn) (*ListGroupsResponse, error)
 
@@ -12593,52 +12409,6 @@ func (r RevokeDeviceResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r RevokeDeviceResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type CreateDomainClaimResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON201      *DomainClaimResponse
-	JSONDefault  *Error
-}
-
-// Status returns HTTPResponse.Status
-func (r CreateDomainClaimResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r CreateDomainClaimResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type VerifyDomainClaimResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *GenericMessage
-	JSONDefault  *Error
-}
-
-// Status returns HTTPResponse.Status
-func (r VerifyDomainClaimResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r VerifyDomainClaimResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -15154,40 +14924,6 @@ func (c *ClientWithResponses) RevokeDeviceWithResponse(ctx context.Context, orgI
 		return nil, err
 	}
 	return ParseRevokeDeviceResponse(rsp)
-}
-
-// CreateDomainClaimWithBodyWithResponse request with arbitrary body returning *CreateDomainClaimResponse
-func (c *ClientWithResponses) CreateDomainClaimWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateDomainClaimResponse, error) {
-	rsp, err := c.CreateDomainClaimWithBody(ctx, orgId, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateDomainClaimResponse(rsp)
-}
-
-func (c *ClientWithResponses) CreateDomainClaimWithResponse(ctx context.Context, orgId openapi_types.UUID, body CreateDomainClaimJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateDomainClaimResponse, error) {
-	rsp, err := c.CreateDomainClaim(ctx, orgId, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateDomainClaimResponse(rsp)
-}
-
-// VerifyDomainClaimWithBodyWithResponse request with arbitrary body returning *VerifyDomainClaimResponse
-func (c *ClientWithResponses) VerifyDomainClaimWithBodyWithResponse(ctx context.Context, orgId openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*VerifyDomainClaimResponse, error) {
-	rsp, err := c.VerifyDomainClaimWithBody(ctx, orgId, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseVerifyDomainClaimResponse(rsp)
-}
-
-func (c *ClientWithResponses) VerifyDomainClaimWithResponse(ctx context.Context, orgId openapi_types.UUID, body VerifyDomainClaimJSONRequestBody, reqEditors ...RequestEditorFn) (*VerifyDomainClaimResponse, error) {
-	rsp, err := c.VerifyDomainClaim(ctx, orgId, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseVerifyDomainClaimResponse(rsp)
 }
 
 // ListGroupsWithResponse request returning *ListGroupsResponse
@@ -17810,72 +17546,6 @@ func ParseRevokeDeviceResponse(rsp *http.Response) (*RevokeDeviceResponse, error
 	}
 
 	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSONDefault = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseCreateDomainClaimResponse parses an HTTP response from a CreateDomainClaimWithResponse call
-func ParseCreateDomainClaimResponse(rsp *http.Response) (*CreateDomainClaimResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &CreateDomainClaimResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
-		var dest DomainClaimResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON201 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSONDefault = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseVerifyDomainClaimResponse parses an HTTP response from a VerifyDomainClaimWithResponse call
-func ParseVerifyDomainClaimResponse(rsp *http.Response) (*VerifyDomainClaimResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &VerifyDomainClaimResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest GenericMessage
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

@@ -34,8 +34,6 @@ export const ENTERPRISE_PATHS: readonly string[] = [
   "/api/v1/organizations/{orgId}/devices/{deviceId}/approve",
   "/api/v1/organizations/{orgId}/devices/{deviceId}/health",
   "/api/v1/organizations/{orgId}/devices/{deviceId}/reject",
-  "/api/v1/organizations/{orgId}/domains",
-  "/api/v1/organizations/{orgId}/domains/verify",
   "/api/v1/organizations/{orgId}/groups",
   "/api/v1/organizations/{orgId}/groups/{groupId}",
   "/api/v1/organizations/{orgId}/groups/{groupId}/members",

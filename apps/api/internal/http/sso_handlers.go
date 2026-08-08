@@ -24,8 +24,6 @@ type ssoPort interface {
 	HandleCallback(ctx context.Context, provider, code, state string) (userID uuid.UUID, err error)
 	SetConfig(ctx context.Context, actor, orgID uuid.UUID, provider, clientID, clientSecret, tenantID string, enabled bool) error
 	ViewConfig(ctx context.Context, orgID uuid.UUID, provider string) (SSOConfigView, error)
-	CreateDomainClaim(ctx context.Context, actor uuid.UUID, actorEmail string, actorVerified bool, orgID uuid.UUID, domain string) (txtRecord string, err error)
-	VerifyDomain(ctx context.Context, actor, orgID uuid.UUID, domain string) error
 }
 
 // SSOConfigView is the non-secret projection returned by the read endpoint. It
@@ -205,54 +203,5 @@ func (s apiServer) GetSsoConfig(ctx context.Context, req api.GetSsoConfigRequest
 	return api.GetSsoConfig200JSONResponse{
 		Body:    body,
 		Headers: api.GetSsoConfig200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
-	}, nil
-}
-
-// CreateDomainClaim implements POST /api/v1/organizations/{orgId}/domains.
-func (s apiServer) CreateDomainClaim(ctx context.Context, req api.CreateDomainClaimRequestObject) (api.CreateDomainClaimResponseObject, error) {
-	if req.Body == nil {
-		return nil, apierr.BadRequest("invalid_request", "request body is required")
-	}
-	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgUpdate); err != nil {
-		return nil, err
-	}
-	if err := s.requireSSOAdmin(); err != nil {
-		return nil, err
-	}
-	if s.sso == nil {
-		return nil, editionRequired()
-	}
-	p, _ := authctx.PrincipalFrom(ctx) // non-nil after authorize
-	txt, err := s.sso.CreateDomainClaim(ctx, p.UserID, p.Email, p.EmailVerified, req.OrgId, req.Body.Domain)
-	if err != nil {
-		return nil, err
-	}
-	return api.CreateDomainClaim201JSONResponse{
-		Body:    api.DomainClaimResponse{TxtRecord: txt},
-		Headers: api.CreateDomainClaim201ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
-	}, nil
-}
-
-// VerifyDomainClaim implements POST /api/v1/organizations/{orgId}/domains/verify.
-func (s apiServer) VerifyDomainClaim(ctx context.Context, req api.VerifyDomainClaimRequestObject) (api.VerifyDomainClaimResponseObject, error) {
-	if req.Body == nil {
-		return nil, apierr.BadRequest("invalid_request", "request body is required")
-	}
-	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgUpdate); err != nil {
-		return nil, err
-	}
-	if err := s.requireSSOAdmin(); err != nil {
-		return nil, err
-	}
-	if s.sso == nil {
-		return nil, editionRequired()
-	}
-	p, _ := authctx.PrincipalFrom(ctx)
-	if err := s.sso.VerifyDomain(ctx, p.UserID, req.OrgId, req.Body.Domain); err != nil {
-		return nil, err
-	}
-	return api.VerifyDomainClaim200JSONResponse{
-		Body:    api.GenericMessage{Message: "Domain verified."},
-		Headers: api.VerifyDomainClaim200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
 }
