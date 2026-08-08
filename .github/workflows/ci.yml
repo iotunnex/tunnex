@@ -33,6 +33,7 @@ jobs:
       go: ${{ steps.scope.outputs.go }}
       web: ${{ steps.scope.outputs.web }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30 # observed 9–11m; a hung tool fails red instead of looking alive for hours
     steps:
       # fetch-depth: 0 so the classifier below can diff against the PR base. A shallow clone would make the
       # base unreachable — which the classifier treats as UNKNOWN and therefore runs everything, so a
@@ -43,6 +44,9 @@ jobs:
 
       - name: Installer version provenance contract
         run: sh deploy/install-version-provenance_test.sh
+
+      - name: E2E heading locator contract
+        run: node e2e/check-heading-locators.mjs
 
       # ⛔ THE DIFF CLASSIFIER. MEASURED FINDING (S14.10): `gates` is 8.1 min and is the ENTIRE critical path
       # of a PR run, and 78% of that is Go steps a web-only diff cannot affect. A UI section pushes 3-6 times,
@@ -226,6 +230,7 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20 # observed max ~4m on Windows packaging
     steps:
       - uses: actions/checkout@v4
       # Native Windows build+vet+test of the privilege helper — the WFP backend pulls
@@ -304,6 +309,7 @@ jobs:
     # not touch branch protection.
     if: always() && needs.gates.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # observed ~3m; timeout is fail-closed, never a skip
     steps:
       - uses: actions/checkout@v4
       - name: Bring up the stack + seed
@@ -311,12 +317,25 @@ jobs:
           cp .env.example .env
           docker compose up -d --build --wait
           make seed
-      - name: Playwright e2e (SPA → API)
+      - name: Playwright E2E (SPA → API; normally under 1m after stack startup)
         run: |
           docker run --rm --network tunnex_default \
             -v "$PWD/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
             mcr.microsoft.com/playwright:v1.48.2-jammy \
-            sh -c "npm install --no-audit --no-fund --silent && npx playwright test"
+            sh -c "npm ci --no-audit --no-fund --silent && npx playwright test"
+      - name: Capture E2E stack logs on failure
+        if: failure()
+        run: |
+          mkdir -p e2e/test-results
+          docker compose logs --no-color > e2e/test-results/compose.log 2>&1 || true
+      - name: Upload E2E failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-${{ github.run_attempt }}
+          path: e2e/test-results/
+          if-no-files-found: warn
+          retention-days: 7
 
   # ── THE VIEWPORT LEG ────────────────────────────────────────────────────────────────────────────────────
   # Answers ONE question: did anything move that nobody asked to move? It cannot answer "is this right" —
@@ -345,6 +364,7 @@ jobs:
     needs: gates
     if: always() && needs.gates.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # observed ~3m; advisory findings remain advisory, broken setup still fails
     steps:
       - uses: actions/checkout@v4
       - name: Bring up the stack + seed, with the gallery route COMPILED IN
@@ -368,7 +388,7 @@ jobs:
           docker run --rm --network tunnex_default \
             -v "$PWD/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
             mcr.microsoft.com/playwright:v1.48.2-jammy \
-            sh -c "npm install --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts --grep-invert @pixel"
+            sh -c "npm ci --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts --grep-invert @pixel"
 
       # ⛔ STEP 2 — ADVISORY during EPIC 14. The committed-image comparison, which is red BY DESIGN while the
       # epic deliberately changes the shared surface every slice. The artifact and diff still upload below.
@@ -379,7 +399,7 @@ jobs:
           docker run --rm --network tunnex_default \
             -v "$PWD/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
             mcr.microsoft.com/playwright:v1.48.2-jammy \
-            sh -c "npm install --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts --grep @pixel"
+            sh -c "npm ci --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts --grep @pixel"
       - name: Upload the diff images for adjudication
         if: always()
         uses: actions/upload-artifact@v4
@@ -404,6 +424,7 @@ jobs:
     # not touch branch protection.
     if: always() && needs.gates.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # observed ~3m; timeout is fail-closed, never a skip
     steps:
       - uses: actions/checkout@v4
       - name: Bring up the ENTERPRISE stack + seed (base + enterprise fixtures)
@@ -412,21 +433,43 @@ jobs:
           TUNNEX_BUILD_TAGS=enterprise docker compose up -d --build --wait
           make seed
           make seed-enterprise
-      - name: Playwright enterprise e2e (real S4.5 / S4.5b)
+      - name: Playwright enterprise E2E (real S4.5 / S4.5b)
         run: |
           docker run --rm --network tunnex_default \
             -v "$PWD/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 -e E2E_EDITION=enterprise \
             mcr.microsoft.com/playwright:v1.48.2-jammy \
-            sh -c "npm install --no-audit --no-fund --silent && npx playwright test settings.enterprise.spec.ts"
+            sh -c "npm ci --no-audit --no-fund --silent && npx playwright test settings.enterprise.spec.ts"
+      - name: Capture enterprise E2E stack logs on failure
+        if: failure()
+        run: |
+          mkdir -p e2e/test-results
+          docker compose logs --no-color > e2e/test-results/compose-enterprise.log 2>&1 || true
+      - name: Upload enterprise E2E failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-enterprise-failure-${{ github.run_attempt }}
+          path: e2e/test-results/
+          if-no-files-found: warn
+          retention-days: 7
 
   # S6.6 zero-build deploy: publish the prebuilt, MULTI-ARCH (amd64+arm64) service images to ghcr
-  # so a customer never builds from source. Runs ONLY on a push (never PRs) and ONLY after the
-  # gates pass. main pushes publish :latest + :sha (opt-in / main-tracking); a v* release tag
+  # so a customer never builds from source. Runs ONLY on a push (never PRs) and ONLY after gates,
+  # both clients, and both behavioural E2E jobs pass. A failed build must not keep publishing for minutes
+  # after its failure or move mutable tags to code the product tests rejected. main pushes publish
+  # :latest + :sha (opt-in / main-tracking); a v* release tag
   # publishes the reproducible :vX.Y.Z that deploy/tunnex.yml pins via ${TUNNEX_VERSION}.
   publish:
-    if: github.event_name == 'push'
-    needs: [gates]
+    name: publish ${{ matrix.image.name }} — amd64 + arm64 (timeout 20m)
+    if: >-
+      github.event_name == 'push' &&
+      needs.gates.result == 'success' &&
+      needs.client.result == 'success' &&
+      needs.e2e.result == 'success' &&
+      needs.e2e-enterprise.result == 'success'
+    needs: [gates, client, e2e, e2e-enterprise]
     runs-on: ubuntu-latest
+    timeout-minutes: 20 # observed max ~10m (API/QEMU); cache makes the common case shorter
     permissions:
       contents: read
       packages: write
@@ -455,7 +498,8 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=short,prefix=sha-,enable={{is_default_branch}}
             type=ref,event=tag
-      - uses: docker/build-push-action@v6
+      - name: Build + push ${{ matrix.image.name }} for both architectures
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.image.dockerfile }}
@@ -463,16 +507,20 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Per-image scopes prevent five concurrent exporters overwriting one shared `buildkit` cache.
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
 
   # S6.6 pipe-safe install: on a v* release tag, attach install.sh + its SHA256 as release assets so
   # the docs can offer a download-verify-inspect-run path (the security-conscious default) and the
   # marketing site can serve the SAME single script — it must never fork or hand-maintain a copy.
   release-assets:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [gates]
+    # A release asset that appears before its five image tags finish is a broken release. The matrix result
+    # becomes success only after every architecture of every service has been pushed.
+    needs: [publish]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

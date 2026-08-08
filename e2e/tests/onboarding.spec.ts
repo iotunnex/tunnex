@@ -316,7 +316,11 @@ test("enrolling a gateway shows the join token exactly once (one-time-secret cer
   await signIn(page, OWNER);
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
   await page.getByRole("link", { name: "Gateways" }).click();
-  await expect(page.getByRole("heading", { name: "Gateways" })).toBeVisible();
+  // The page also contains an enrolment-card h2 named "Gateways" after data loads. Target the page-title
+  // h1 semantically; the broad locator raced that async render and failed strict mode on 3 main runs.
+  await expect(
+    page.getByRole("heading", { name: "Gateways", level: 1 }),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Enroll gateway" }).click();
   // Name the gateway: the token is PINNED to this name server-side, so the
