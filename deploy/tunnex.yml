@@ -2,9 +2,10 @@
 #
 # Customers do NOT clone the repo or build from source. `install.sh` fetches THIS file next to a
 # generated `.env`, then: `docker compose -f tunnex.yml pull && docker compose -f tunnex.yml up -d`.
-# Every Tunnex service is a PREBUILT image pinned to a release version via ${TUNNEX_VERSION} (set in
-# .env by install.sh — a real vX.Y.Z tag, so the deployment is reproducible + revertible; set it to
-# `latest` only to deliberately track main). NEVER edit this file — all config is in `.env`.
+# Every Tunnex service is a PREBUILT image pinned via ${TUNNEX_VERSION}. A normal install uses the
+# immutable sha-* tag of the newest fully-published green main workflow and records the exact manifest
+# commit as TUNNEX_SOURCE_REF. An operator may explicitly supply a release tag instead. NEVER edit this
+# file — all config is in `.env`.
 
 name: tunnex
 

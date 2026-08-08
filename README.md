@@ -5,7 +5,7 @@ Self-hosted, multi-tenant VPN & Zero Trust access platform — a modern, open al
 - **WireGuard** management (OpenVPN later), with a control-plane / data-plane split.
 - **Auth**: local users, Google & Microsoft SSO.
 - **Clients**: CLI first, then Electron for Windows & macOS.
-- **One-command install**: a single `install.sh` brings up the whole stack from **prebuilt images** — no source build, no file edits — and auto-generates every secret/key on first boot.
+- **One-command install**: a single guided installer brings up the whole stack from **prebuilt images** — no source build, no file edits — and auto-generates every secret/key on first boot.
 
 > The full product roadmap — every epic and story — lives in [`PLAN.md`](./PLAN.md). Point any session at it and name the current story (e.g. "we're on S1.3").
 
@@ -16,45 +16,45 @@ Self-hosted, multi-tenant VPN & Zero Trust access platform — a modern, open al
 > stories. Every procedure in it is marked with whether we have actually run it.
 
 **Prerequisite: any VPS with Docker Engine + the Compose v2 plugin and a public address** (a DNS name
-or public IP that users and gateways can reach). `install.sh` installs the *software* — it does not
+or public IP that users and gateways can reach). The installer installs the *software* — it does not
 provision the server; a laptop with no public IP is not a deploy target.
 
 **Recommended — download, verify, inspect, then run** (our audience is sovereignty/security-conscious;
 never pipe a script you haven't read into a root shell):
 
 ```bash
-url=https://raw.githubusercontent.com/iotunnex/tunnex/main/deploy
-curl -fsSL "$url/install.sh" -o install.sh
-curl -fsSL "$url/install.sh.sha256" -o install.sh.sha256 && sha256sum -c install.sh.sha256
-less install.sh
-sudo sh install.sh
+curl -fsSL https://get.tunnex.io -o get.sh
+curl -fsSL https://get.tunnex.io/SHA256SUMS -o SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+less get.sh
+sudo sh get.sh
 ```
 
 **Convenience — one-liner:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iotunnex/tunnex/main/deploy/install.sh | sh
+curl -fsSL https://get.tunnex.io | sh
 ```
 
-Either way it asks exactly two things — your **public address** and **SMTP** (or skip) — generates
-the DB secret, writes a clean `./tunnex/.env`, pins a released version, and starts the stack from
-`ghcr.io/iotunnex/tunnex-*` images. No `git clone`, no `--build`, no editing compose. It is
-idempotent (re-running reuses the DB password) and prints your dashboard URL + how to enroll a
-gateway when done.
+Either way it collects the deployment address, administrator, address pool, and SMTP choice before
+changing the machine. It generates the DB secret, writes a clean `./tunnex/.env`, and pins the newest
+fully-published green `main` build: the compose manifest and every `ghcr.io/iotunnex/tunnex-*` image
+come from the same CI commit, recorded as `TUNNEX_SOURCE_REF`. No `git clone`, no `--build`, no editing
+compose. Re-running reuses the DB password.
 
 Non-interactive (CI / no terminal) — pass the two inputs as env vars:
 
 ```bash
-curl -fsSL <url>/install.sh | TUNNEX_PUBLIC_ADDR=vpn.acme.com TUNNEX_SMTP=skip sh
+curl -fsSL https://get.tunnex.io | TUNNEX_PUBLIC_ADDR=vpn.acme.com sh -s -- --yes
 ```
 
 - Dashboard → `http://<your-address>/`
 - Config lives in `./tunnex/.env` (edit values there; never hand-edit `tunnex.yml`).
-- Upgrade: bump `TUNNEX_VERSION` to a newer tag, then `docker compose -f tunnex.yml pull && up -d`.
+- Provenance: `.env` records both the immutable `sha-*` image tag and exact manifest commit.
 
-> The `install.sh` in this repo is the **single source of truth** — the marketing site (and any
-> `get.tunnex.io` shortcut) only *serves* this exact file as a release asset; it must never fork or
-> hand-maintain its own copy.
+> `get.tunnex.io` serves [`deploy/get.sh`](deploy/get.sh) directly with a five-minute revalidation
+> window. The legacy raw/release path, [`deploy/install.sh`](deploy/install.sh), uses the identical
+> version resolver; CI rejects any drift between them.
 
 ## Develop locally
 

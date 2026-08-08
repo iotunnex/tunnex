@@ -1,0 +1,86 @@
+#!/bin/sh
+# Behavioural contract for the two public installer paths. No network, Docker, or root required.
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT HUP INT TERM
+
+fail() {
+	printf 'installer provenance test: %s\n' "$*" >&2
+	exit 1
+}
+
+extract_resolver() {
+	sed -n '/^# BEGIN INSTALL VERSION RESOLVER/,/^# END INSTALL VERSION RESOLVER/p' "$1"
+}
+
+extract_resolver "$ROOT/deploy/install.sh" >"$TMP/install.resolver"
+extract_resolver "$ROOT/deploy/get.sh" >"$TMP/get.resolver"
+[ -s "$TMP/install.resolver" ] || fail "install.sh resolver block is missing"
+cmp -s "$TMP/install.resolver" "$TMP/get.resolver" ||
+	fail "install.sh and get.sh version resolvers drifted"
+
+die() {
+	printf '%s\n' "$*" >&2
+	exit 1
+}
+
+curl() {
+	[ "${MOCK_CURL_MUST_NOT_RUN:-0}" = "0" ] || fail "resolver called the API for an explicit override"
+	printf '%s' "${MOCK_RESPONSE:-}"
+}
+
+API="https://api.example.invalid/repos/iotunnex/tunnex"
+# shellcheck disable=SC1090
+. "$TMP/install.resolver"
+
+resolve_result() {
+	resolve_install_version
+	printf '%s|%s|%s' "$VERSION" "$SOURCE_REF" "$VERSION_PROVENANCE"
+}
+
+SHA="b3c7bcd4895f31c63fe4b882a8cd622415b80ae4"
+MOCK_RESPONSE="{\"workflow_runs\":[{\"head_sha\":\"${SHA}\",\"conclusion\":\"success\"}]}"
+export MOCK_RESPONSE
+
+actual="$(unset TUNNEX_VERSION TUNNEX_SOURCE_REF; resolve_result)"
+expected="sha-b3c7bcd|${SHA}|successful main CI commit ${SHA}"
+[ "$actual" = "$expected" ] || fail "green-main resolution mismatch: got '$actual'"
+
+actual="$(TUNNEX_VERSION=v1.2.3 MOCK_CURL_MUST_NOT_RUN=1 resolve_result)"
+[ "$actual" = "v1.2.3|v1.2.3|operator override v1.2.3 (manifest ref v1.2.3)" ] ||
+	fail "release override mismatch: got '$actual'"
+
+actual="$(TUNNEX_VERSION=latest MOCK_CURL_MUST_NOT_RUN=1 resolve_result)"
+[ "$actual" = "latest|main|operator override latest (manifest ref main)" ] ||
+	fail "latest override must fetch its manifest from main: got '$actual'"
+
+actual="$(TUNNEX_VERSION=sha-b3c7bcd MOCK_CURL_MUST_NOT_RUN=1 resolve_result)"
+[ "$actual" = "sha-b3c7bcd|b3c7bcd|operator override sha-b3c7bcd (manifest ref b3c7bcd)" ] ||
+	fail "SHA override must remove the image-tag prefix for the Git ref: got '$actual'"
+
+if output="$(MOCK_RESPONSE='{"workflow_runs":[]}' resolve_result 2>&1)"; then
+	fail "an absent successful workflow silently selected a version"
+fi
+printf '%s' "$output" | grep -q 'Refusing to fall back to an older release' ||
+	fail "missing-workflow refusal did not name the forbidden stale fallback"
+
+for installer in "$ROOT/deploy/install.sh" "$ROOT/deploy/get.sh"; do
+	if grep -q '/releases/latest' "$installer"; then
+		fail "$(basename "$installer") still selects GitHub's stale release pointer"
+	fi
+	grep -Fq '/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=1' "$installer" ||
+		fail "$(basename "$installer") is not selecting a completed successful main workflow"
+	grep -Fq '${RAW}/${SOURCE_REF}/deploy/tunnex.yml' "$installer" ||
+		fail "$(basename "$installer") does not bind the compose manifest to SOURCE_REF"
+	grep -q '^TUNNEX_SOURCE_REF=${SOURCE_REF}$' "$installer" ||
+		fail "$(basename "$installer") does not persist manifest provenance"
+done
+
+grep -Fq 'DOCKER_METADATA_SHORT_SHA_LENGTH: "7"' "$ROOT/.github/workflows/ci.yml" ||
+	fail "CI no longer pins the SHA abbreviation length consumed by installers"
+grep -Fq 'type=sha,format=short,prefix=sha-,enable={{is_default_branch}}' "$ROOT/.github/workflows/ci.yml" ||
+	fail "CI image tag naming drifted from installer resolution"
+
+printf 'installer provenance contract: PASS\n'
