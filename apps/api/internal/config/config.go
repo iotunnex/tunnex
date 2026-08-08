@@ -83,16 +83,16 @@ type SMTP struct {
 	From     string
 	Username string
 	Password string
-	// DevLog tees every outgoing message to the log IN ADDITION TO SENDING IT (MAIL_DEV_LOG, default off).
+	// DevLog tees safe metadata for every outgoing message to the log IN ADDITION TO SENDING IT
+	// (MAIL_DEV_LOG, default off); message bodies are never logged.
 	//
 	// ⛔ IT IS ITS OWN VARIABLE, AND THAT IS THE RULING (S12.13 D1). This used to be `!IsProduction()` — so
 	// TUNNEX_ENV, a variable about what kind of deployment this is, silently governed mail behaviour. The
 	// founder set five SMTP variables, got a `smtp+log` mailer and a log line reading "email_not_sent", and
 	// spent a session concluding mail was disabled. ONE FLAG MUST NOT GOVERN TWO UNRELATED THINGS.
 	//
-	// ⚠ IT NEVER SUPPRESSES DELIVERY, and never did — the tee sends and also logs. But it must not be
-	// reachable by accident, because the log line it produces carries the message BODY, and invitation,
-	// verification and password-reset bodies are links that work.
+	// ⚠ IT NEVER SUPPRESSES DELIVERY, and never did — the tee sends and also logs. It remains opt-in so
+	// operators do not mistake metadata diagnostics for delivery confirmation.
 	DevLog bool
 }
 
