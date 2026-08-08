@@ -14,6 +14,7 @@ import (
 	"log/slog"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
+	"github.com/tunnexio/tunnex/apps/api/internal/mail"
 	"github.com/tunnexio/tunnex/apps/api/internal/password"
 )
 
@@ -30,8 +31,8 @@ type Store interface {
 	CreateBootstrapAdmin(ctx context.Context, arg sqlc.CreateBootstrapAdminParams) (sqlc.User, error)
 }
 
-// EnsureAdmin creates the CP admin on a deployment that has never had a user, and prints its one-time
-// credential. On every other start it does nothing at all.
+// EnsureAdmin creates the CP admin on a deployment that has never had a user, prints its one-time
+// credential, and emails it when SMTP is configured. On every other start it does nothing at all.
 //
 // ⛔ IDEMPOTENT, AND THE NO-OP BRANCH IS THE SECURITY-CRITICAL ONE. A container restarts constantly —
 // crashes, deploys, host reboots. Minting a second admin on any of those would be a privilege escalation
@@ -45,7 +46,7 @@ type Store interface {
 // admin minting to whoever restarts the container next.
 // ⚠ `out` IS INJECTABLE so the reds can assert what an OPERATOR SEES. The credential is no longer in any
 // log line, so a test that read the logger would be testing the wrong surface.
-func EnsureAdmin(ctx context.Context, q Store, logger *slog.Logger, out io.Writer) error {
+func EnsureAdmin(ctx context.Context, q Store, logger *slog.Logger, out io.Writer, configuredEmail string, mailer mail.Mailer) error {
 	n, err := q.CountUsers(ctx)
 	if err != nil {
 		return err
@@ -62,8 +63,12 @@ func EnsureAdmin(ctx context.Context, q Store, logger *slog.Logger, out io.Write
 	if err != nil {
 		return err
 	}
+	email := configuredEmail
+	if email == "" {
+		email = AdminEmail
+	}
 	if _, err := q.CreateBootstrapAdmin(ctx, sqlc.CreateBootstrapAdminParams{
-		Email: AdminEmail, Name: "Control Plane Admin", PasswordHash: &hash,
+		Email: email, Name: "Control Plane Admin", PasswordHash: &hash,
 	}); err != nil {
 		return err
 	}
@@ -79,7 +84,7 @@ func EnsureAdmin(ctx context.Context, q Store, logger *slog.Logger, out io.Write
 	// an argon2id hash and nowhere else, and there is no command that reprints it.
 	// ⚠ THE STRUCTURED LINE RECORDS THE EVENT AND NOT THE CREDENTIAL. Logging it too would double the
 	// exposure — a banner scrolls off a terminal, but log aggregation keeps a searchable copy forever.
-	logger.Warn("bootstrap_admin_created", slog.String("email", AdminEmail),
+	logger.Warn("bootstrap_admin_created", slog.String("email", email),
 		slog.String("credential", "printed to stdout once; not stored in plaintext"))
 
 	fmt.Fprint(out, "\n"+
@@ -87,7 +92,7 @@ func EnsureAdmin(ctx context.Context, q Store, logger *slog.Logger, out io.Write
 		"  TUNNEX - FIRST RUN: ADMINISTRATOR ACCOUNT\n"+
 		"==========================================================================\n"+
 		"\n"+
-		"  email     "+AdminEmail+"\n"+
+		"  email     "+email+"\n"+
 		"  password  "+pw+"\n"+
 		"\n"+
 		"  SHOWN ONCE. Stored only as a hash; it cannot be reprinted. Copy it now.\n"+
@@ -99,6 +104,17 @@ func EnsureAdmin(ctx context.Context, q Store, logger *slog.Logger, out io.Write
 		"  reset the deployment with:  docker compose down -v\n"+
 		"\n"+
 		"==========================================================================\n\n")
+
+	if mailer != nil {
+		if err := mailer.Send(ctx, mail.BootstrapAdminMessage(email, pw)); err != nil {
+			// Keep the terminal banner as the safe recovery path. Never include the password or message body
+			// in this log line: SMTP failures are routinely shipped to centralized logging.
+			logger.Warn("bootstrap_admin_email_failed", slog.String("email", email), slog.String("error", err.Error()))
+			fmt.Fprint(out, "  ⚠ The administrator email could not be sent. Use the one-time credential shown above.\n\n")
+		} else {
+			fmt.Fprint(out, "  administrator credential emailed to "+email+"\n\n")
+		}
+	}
 	return nil
 }
 

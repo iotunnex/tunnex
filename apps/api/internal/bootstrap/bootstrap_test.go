@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
+	"github.com/tunnexio/tunnex/apps/api/internal/mail"
 )
 
 type fakeStore struct {
@@ -23,6 +24,18 @@ func (f *fakeStore) CreateBootstrapAdmin(_ context.Context, p sqlc.CreateBootstr
 	return sqlc.User{Email: p.Email}, nil
 }
 
+type fakeMailer struct {
+	messages []mail.Message
+	err      error
+}
+
+func (f *fakeMailer) Send(_ context.Context, msg mail.Message) error {
+	f.messages = append(f.messages, msg)
+	return f.err
+}
+
+func (f *fakeMailer) Kind() string { return "fake" }
+
 // ⚠ TWO SINKS, AND THE TEST WATCHES THE ONE THE OPERATOR WATCHES. The credential goes to `out` (stdout in
 // production); the logger records only that the event happened. A test reading the logger would pass while
 // the banner was empty.
@@ -35,7 +48,7 @@ func capture() (*slog.Logger, *bytes.Buffer, *bytes.Buffer) {
 func TestFreshDeploymentMintsOneAdminAndPrintsIt(t *testing.T) {
 	f := &fakeStore{users: 0}
 	log, logBuf, out := capture()
-	if err := EnsureAdmin(context.Background(), f, log, out); err != nil {
+	if err := EnsureAdmin(context.Background(), f, log, out, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.created) != 1 {
@@ -97,7 +110,7 @@ func TestFreshDeploymentMintsOneAdminAndPrintsIt(t *testing.T) {
 func TestDeploymentWithUsersMintsNothingAndPrintsNothing(t *testing.T) {
 	f := &fakeStore{users: 1}
 	log, _, out := capture()
-	if err := EnsureAdmin(context.Background(), f, log, out); err != nil {
+	if err := EnsureAdmin(context.Background(), f, log, out, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.created) != 0 {
@@ -116,11 +129,54 @@ func TestDeploymentWithUsersMintsNothingAndPrintsNothing(t *testing.T) {
 func TestCountFailureMintsNothing(t *testing.T) {
 	f := &fakeStore{users: 0, err: errors.New("connection refused")}
 	log, _, out := capture()
-	if err := EnsureAdmin(context.Background(), f, log, out); err == nil {
+	if err := EnsureAdmin(context.Background(), f, log, out, "", nil); err == nil {
 		t.Error("a store failure was swallowed — the caller cannot tell bootstrap did not run")
 	}
 	if len(f.created) != 0 || out.Len() != 0 {
 		t.Fatal("⛔ an admin was minted despite not knowing whether users exist")
+	}
+}
+
+func TestFreshDeploymentUsesConfiguredEmailAndSendsCredential(t *testing.T) {
+	f := &fakeStore{users: 0}
+	m := &fakeMailer{}
+	log, logBuf, out := capture()
+	if err := EnsureAdmin(context.Background(), f, log, out, "owner@example.com", m); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.created[0].Email; got != "owner@example.com" {
+		t.Fatalf("stored email = %q, want owner@example.com", got)
+	}
+	if len(m.messages) != 1 || m.messages[0].To != "owner@example.com" {
+		t.Fatalf("sent messages = %#v, want one message to configured admin", m.messages)
+	}
+	if !strings.Contains(m.messages[0].Text, "Password: ") {
+		t.Fatal("bootstrap email did not contain the one-time password")
+	}
+	if strings.Contains(logBuf.String(), "Password: ") {
+		t.Fatal("bootstrap password appeared in structured logs")
+	}
+}
+
+func TestFreshDeploymentWithoutSMTPKeepsTerminalFallback(t *testing.T) {
+	f := &fakeStore{users: 0}
+	log, logBuf, out := capture()
+	mailer := mail.New(mail.Config{}, log)
+	if err := EnsureAdmin(context.Background(), f, log, out, "owner@example.com", mailer); err != nil {
+		t.Fatal(err)
+	}
+	banner := out.String()
+	if !strings.Contains(banner, "password ") || !strings.Contains(banner, "could not be sent") {
+		t.Fatalf("SMTP-absent bootstrap did not preserve an explicit terminal fallback: %s", banner)
+	}
+	pw := ""
+	for _, line := range strings.Split(banner, "\n") {
+		if strings.Contains(line, "password ") {
+			pw = strings.TrimSpace(strings.SplitN(line, "password ", 2)[1])
+		}
+	}
+	if pw == "" || strings.Contains(logBuf.String(), pw) {
+		t.Fatal("SMTP-absent bootstrap password was missing from the terminal or leaked into structured logs")
 	}
 }
 

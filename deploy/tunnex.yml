@@ -58,6 +58,8 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # The installer collects this address so first-boot can deliver the one-time admin credential.
+      TUNNEX_ADMIN_EMAIL: ${TUNNEX_ADMIN_EMAIL:-}
     volumes:
       - tunnex_secrets:/var/lib/tunnex/secrets # master key / JWT / session — auto-generated on first boot (S0.3)
     ports:

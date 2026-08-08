@@ -14,8 +14,8 @@
 # Prerequisite: any host with Docker Engine + the Compose v2 plugin AND a public address (a DNS name
 # or public IP users + gateways can reach). It installs the SOFTWARE; it does not conjure the server.
 #
-# Non-interactive / piped-with-no-terminal: set the two inputs as env vars so the pipe still works:
-#     curl -fsSL <url> | TUNNEX_PUBLIC_ADDR=vpn.acme.com TUNNEX_SMTP=skip sh
+# Non-interactive / piped-with-no-terminal: set the inputs as env vars so the pipe still works:
+#     curl -fsSL <url> | TUNNEX_PUBLIC_ADDR=vpn.acme.com TUNNEX_ADMIN_EMAIL=owner@example.com TUNNEX_SMTP=skip sh
 # For SMTP=configure non-interactively, also export SMTP_HOST/SMTP_PORT/SMTP_USERNAME/SMTP_PASSWORD/SMTP_FROM.
 #
 # Idempotent: re-running against an existing ./tunnex REUSES the generated DB password (a fresh one
@@ -122,6 +122,17 @@ else
     curl -fsSL ${RAW}/main/deploy/install.sh | TUNNEX_PUBLIC_ADDR=vpn.acme.com TUNNEX_SMTP=skip sh"
 fi
 
+ADMIN_EMAIL="${TUNNEX_ADMIN_EMAIL:-admin@${ADDR}}"
+if have_tty && [ -z "${TUNNEX_ADMIN_EMAIL:-}" ]; then
+	ADMIN_EMAIL="$(ask "Administrator email [${ADMIN_EMAIL}]: ")"
+	[ -n "$ADMIN_EMAIL" ] || ADMIN_EMAIL="admin@${ADDR}"
+fi
+case "$ADMIN_EMAIL" in
+	'' | *[!A-Za-z0-9@._%+-]* | *@*@*) die "TUNNEX_ADMIN_EMAIL must be a valid single email address (got '${ADMIN_EMAIL}')" ;;
+	*@*) : ;;
+	*) die "TUNNEX_ADMIN_EMAIL must be an email address (got '${ADMIN_EMAIL}')" ;;
+esac
+
 # ── 3. SMTP — env override (skip|configure) OR prompt; default when non-interactive = skip ───────
 SMTP_HOST="${SMTP_HOST:-}"
 SMTP_PORT="${SMTP_PORT:-}"
@@ -205,6 +216,7 @@ SMTP_PORT=${SMTP_PORT}
 SMTP_FROM=${SMTP_FROM}
 SMTP_USERNAME=${SMTP_USERNAME}
 SMTP_PASSWORD=${SMTP_PASSWORD}
+TUNNEX_ADMIN_EMAIL=${ADMIN_EMAIL}
 EOF
 mv .env.new .env # atomic swap — the .env is never observed half-written
 
@@ -213,14 +225,24 @@ say ">> Pulling images and starting the stack…"
 docker compose -f tunnex.yml pull
 docker compose -f tunnex.yml up -d --wait
 
+# The API prints the one-time credential to stdout. Surface that banner here because `up -d` is detached;
+# operators should not need to search container logs, and the API will also email it when SMTP is configured.
+CREDS="$(docker compose -f tunnex.yml logs api 2>/dev/null | sed -n '/TUNNEX - FIRST RUN/,/^.*=\{20,\}$/p' | tail -n +2 || true)"
+if printf '%s' "$CREDS" | grep -q 'password'; then
+	say ''
+	say 'Your administrator credential (shown once):'
+	say "$CREDS"
+fi
+
 # ── 8. NEXT STEPS (the customer's first experience — a real hand-off, not an echo) ───────────────
 say ''
 say '════════════════════════════════════════════════════════════════════════════'
 say " Tunnex ${VERSION} is running."
 say ''
 say "   1. Open the dashboard:   http://${ADDR}/"
-say '   2. Sign up — you will be guided to create your first organization.'
-say '   3. Enroll a gateway:     Dashboard → Gateways → “Generate join token”.'
+say "   2. Sign in as ${ADMIN_EMAIL}; set the one-time password to your own password."
+say '   3. Create your first organization.'
+say '   4. Enroll a gateway:     Dashboard → Gateways → “Generate join token”.'
 say '      Copy the ONE command it shows and run it in this folder to bring the'
 say '      gateway online (it re-creates the node-agent with your join token).'
 say ''

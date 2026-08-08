@@ -255,7 +255,7 @@ func main() {
 	// ⛔ THE ONLY WAY INTO A FRESH DEPLOYMENT. There is no public signup, so without this a new install has
 	// no account and no way to make one. Idempotent: on any deployment that has ever had a user it does
 	// nothing and prints nothing — a restart must not be a security event.
-	if e := bootstrap.EnsureAdmin(context.Background(), sqlc.New(pool), logger, os.Stdout); e != nil {
+	if e := bootstrap.EnsureAdmin(context.Background(), sqlc.New(pool), logger, os.Stdout, cfg.AdminEmail, mailer); e != nil {
 		logger.Error("bootstrap_admin_failed", slog.String("err", e.Error()))
 	}
 	licenceMgr := (&licence.Manager{}).WithStore(

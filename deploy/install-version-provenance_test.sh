@@ -76,11 +76,26 @@ for installer in "$ROOT/deploy/install.sh" "$ROOT/deploy/get.sh"; do
 		fail "$(basename "$installer") does not bind the compose manifest to SOURCE_REF"
 	grep -q '^TUNNEX_SOURCE_REF=${SOURCE_REF}$' "$installer" ||
 		fail "$(basename "$installer") does not persist manifest provenance"
+	grep -Fq 'compose -f tunnex.yml logs api' "$installer" ||
+		fail "$(basename "$installer") does not surface the detached first-run API banner"
+	grep -Fq 'TUNNEX - FIRST RUN' "$installer" ||
+		fail "$(basename "$installer") does not extract the first-run banner"
+	grep -Fq "grep -q 'password'" "$installer" ||
+		fail "$(basename "$installer") does not detect the detached credential banner"
 done
 
 grep -Fq 'DOCKER_METADATA_SHORT_SHA_LENGTH: "7"' "$ROOT/.github/workflows/ci.yml" ||
 	fail "CI no longer pins the SHA abbreviation length consumed by installers"
 grep -Fq 'type=sha,format=short,prefix=sha-,enable={{is_default_branch}}' "$ROOT/.github/workflows/ci.yml" ||
 	fail "CI image tag naming drifted from installer resolution"
+
+# Bootstrap inputs are written by both installers and must reach the API container. Keep this as a
+# contract test at the distribution boundary: a value present in .env but absent from compose silently
+# reverts first boot to admin@tunnex.local or disables SMTP, which is only discovered after the container
+# has already created its one-time credential.
+for variable in TUNNEX_ADMIN_EMAIL SMTP_HOST SMTP_PORT SMTP_FROM SMTP_USERNAME SMTP_PASSWORD; do
+	grep -Fq "      ${variable}: \${${variable}:-}" "$ROOT/deploy/tunnex.yml" ||
+		fail "deploy/tunnex.yml does not forward ${variable} to the API container"
+done
 
 printf 'installer provenance contract: PASS\n'
