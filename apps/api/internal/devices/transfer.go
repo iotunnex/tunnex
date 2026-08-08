@@ -159,8 +159,6 @@ func (s *Service) TransferDevicesToNode(ctx context.Context, actor, orgID, sourc
 			}
 		}
 		s.logger.Info("devices_transferred_between_gateways",
-			slog.String("source_node_id", sourceNodeID.String()),
-			slog.String("target_node_id", targetNodeID.String()),
 			slog.Int("moved", len(out)),
 			slog.Int("needing_reissue", reissue))
 		// BOTH GATEWAYS RECONCILE, not just the destination. The source must DROP these peers — a device that

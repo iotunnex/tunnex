@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime"
 	"mime/quotedprintable"
 	"net/smtp"
 	"strings"
@@ -264,9 +265,12 @@ func (m *teeMailer) Send(ctx context.Context, msg Message) error {
 // to clients that could have rendered the branded version.
 func buildRFC822(from string, msg Message) []byte {
 	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\n", from)
-	fmt.Fprintf(&b, "To: %s\r\n", msg.To)
-	fmt.Fprintf(&b, "Subject: %s\r\n", msg.Subject)
+	// Header values are untrusted at the mail boundary. Strip line breaks before
+	// writing them, and use MIME Q-encoding for subjects; otherwise a caller could
+	// inject a new header (or alter the body) through a crafted address/subject.
+	fmt.Fprintf(&b, "From: %s\r\n", safeHeader(from))
+	fmt.Fprintf(&b, "To: %s\r\n", safeHeader(msg.To))
+	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("UTF-8", safeHeader(msg.Subject)))
 	b.WriteString("MIME-Version: 1.0\r\n")
 	if msg.HTML == "" {
 		b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
@@ -308,6 +312,12 @@ func buildRFC822(from string, msg Message) []byte {
 	b.WriteString(base64Lines(logoPNG))
 	b.WriteString("\r\n--" + relBoundary + "--\r\n")
 	return []byte(b.String())
+}
+
+func safeHeader(value string) string {
+	value = strings.ReplaceAll(value, "\r", " ")
+	value = strings.ReplaceAll(value, "\n", " ")
+	return strings.TrimSpace(value)
 }
 
 // quotedPrintable encodes a text body for the wire.

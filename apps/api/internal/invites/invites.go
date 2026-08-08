@@ -273,7 +273,7 @@ func (s *Service) Revoke(ctx context.Context, actor, orgID uuid.UUID, email stri
 // template's logo rides in the message as a cid: part, so a rendered Message is complete as it stands.
 func (s *Service) send(ctx context.Context, msg mail.Message) error {
 	if err := s.mailer.Send(ctx, msg); err != nil {
-		s.logger.Error("invite_email_failed", slog.String("to", msg.To), slog.String("error", err.Error()))
+		s.logger.Error("invite_email_failed", slog.String("error", err.Error()))
 		return err
 	}
 	return nil

@@ -245,8 +245,6 @@ func (s *Service) RestoreCascadeRevokedDevices(ctx context.Context, orgID, sourc
 			}
 		}
 		s.logger.Info("devices_restored_after_gateway_recovery",
-			slog.String("source_node_id", sourceNodeID.String()),
-			slog.String("target_node_id", targetNodeID.String()),
 			slog.Int("restored", len(out)),
 			slog.Int("kept_original_address", len(out)-readdressed),
 			slog.Int("readdressed_needing_reimport", readdressed))
