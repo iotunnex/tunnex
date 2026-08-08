@@ -21,18 +21,17 @@
 package mail
 
 import (
+	"bytes"
 	"context"
-	"crypto/tls"
 	_ "embed"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
-	"mime"
-	"mime/quotedprintable"
 	stdmail "net/mail"
-	"net/smtp"
+	"strconv"
 	"strings"
+
+	gomail "github.com/wneessen/go-mail"
 )
 
 // ⛔ THE LOGO TRAVELS WITH THE MESSAGE. IT IS NEVER FETCHED.
@@ -208,10 +207,6 @@ func (m *SMTPMailer) Kind() string { return "smtp" }
 
 func (m *SMTPMailer) Send(_ context.Context, msg Message) error {
 	addr := m.cfg.Host + ":" + m.cfg.Port
-	var auth smtp.Auth
-	if m.cfg.Username != "" {
-		auth = smtp.PlainAuth("", m.cfg.Username, m.cfg.Password, m.cfg.Host)
-	}
 	from, err := canonicalAddress(m.cfg.From)
 	if err != nil {
 		return fmt.Errorf("invalid SMTP_FROM: %w", err)
@@ -220,11 +215,30 @@ func (m *SMTPMailer) Send(_ context.Context, msg Message) error {
 	if err != nil {
 		return fmt.Errorf("invalid recipient: %w", err)
 	}
-	body, err := buildRFC822Checked(from, to, msg)
+	message, err := composeMessage(from, to, msg)
 	if err != nil {
 		return err
 	}
-	if err := sendSMTPMessage(addr, m.cfg.Host, auth, from, to, body); err != nil {
+	port, err := strconv.Atoi(m.cfg.Port)
+	if err != nil {
+		return fmt.Errorf("invalid SMTP_PORT: %w", err)
+	}
+	options := []gomail.Option{
+		gomail.WithPort(port),
+		gomail.WithTLSPolicy(gomail.TLSMandatory),
+	}
+	if m.cfg.Username != "" {
+		options = append(options,
+			gomail.WithSMTPAuth(gomail.SMTPAuthPlain),
+			gomail.WithUsername(m.cfg.Username),
+			gomail.WithPassword(m.cfg.Password),
+		)
+	}
+	client, err := gomail.NewClient(m.cfg.Host, options...)
+	if err != nil {
+		return fmt.Errorf("smtp client: %w", err)
+	}
+	if err := client.DialAndSend(message); err != nil {
 		return fmt.Errorf("smtp send to %s: %w", addr, err)
 	}
 	// ⛔ SUCCESS IS AS VISIBLE AS FAILURE, AND UNTIL NOW ONLY FAILURE LOGGED (S12.13 D2). That made an empty
@@ -247,57 +261,6 @@ func (m *SMTPMailer) Send(_ context.Context, msg Message) error {
 				"inbox is the provider's outbound log to answer, not this one"))
 	}
 	return nil
-}
-
-// sendSMTPMessage deliberately uses the typed smtp.Client envelope methods and
-// its textproto DATA writer instead of net/smtp.SendMail. CodeQL models the
-// latter's byte-slice argument as an email-content sink regardless of encoding;
-// this flow keeps headers in validated envelope methods and writes a complete,
-// already-encoded RFC822 document only after DATA is accepted.
-func sendSMTPMessage(addr, host string, auth smtp.Auth, from, to string, body []byte) error {
-	c, err := smtp.Dial(addr)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	if ok, _ := c.Extension("STARTTLS"); ok {
-		if err := c.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}); err != nil {
-			return err
-		}
-	}
-	if auth != nil {
-		if err := c.Auth(auth); err != nil {
-			return err
-		}
-	}
-	if err := c.Mail(from); err != nil {
-		return err
-	}
-	if err := c.Rcpt(to); err != nil {
-		return err
-	}
-	id, err := c.Text.Cmd("DATA")
-	if err != nil {
-		return err
-	}
-	c.Text.StartResponse(id)
-	_, _, err = c.Text.ReadResponse(354)
-	c.Text.EndResponse(id)
-	if err != nil {
-		return err
-	}
-	dot := c.Text.DotWriter()
-	if _, err := dot.Write(body); err != nil {
-		_ = dot.Close()
-		return err
-	}
-	if err := dot.Close(); err != nil {
-		return err
-	}
-	if _, _, err := c.Text.ReadResponse(250); err != nil {
-		return err
-	}
-	return c.Quit()
 }
 
 // teeMailer sends via the primary mailer and also logs safe message metadata.
@@ -328,11 +291,20 @@ func (m *teeMailer) Send(ctx context.Context, msg Message) error {
 // least-to-most preferred, so a client picks the LAST part it understands. Reversing them serves plaintext
 // to clients that could have rendered the branded version.
 func buildRFC822(from string, msg Message) []byte {
-	body, _ := buildRFC822Checked(from, msg.To, msg)
-	return body
+	message, err := composeMessage(from, msg.To, msg)
+	if err != nil {
+		return nil
+	}
+	var body bytes.Buffer
+	if _, err := message.WriteTo(&body); err != nil {
+		return nil
+	}
+	return body.Bytes()
 }
 
-func buildRFC822Checked(from, to string, msg Message) ([]byte, error) {
+// composeMessage uses go-mail's typed message builder. Production transport sends
+// this object directly; buildRFC822 above exists only for wire-format tests.
+func composeMessage(from, to string, msg Message) (*gomail.Msg, error) {
 	canonicalFrom, err := canonicalAddress(from)
 	if err != nil {
 		return nil, fmt.Errorf("invalid sender: %w", err)
@@ -341,55 +313,24 @@ func buildRFC822Checked(from, to string, msg Message) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid recipient: %w", err)
 	}
-	var b strings.Builder
-	// Addresses are parsed and canonicalized before they reach either the SMTP
-	// envelope or the RFC822 headers. Subjects are MIME encoded, so no untrusted
-	// value can create a header or alter the message structure.
-	fmt.Fprintf(&b, "From: %s\r\n", canonicalFrom)
-	fmt.Fprintf(&b, "To: %s\r\n", canonicalTo)
-	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("UTF-8", safeHeader(msg.Subject)))
-	b.WriteString("MIME-Version: 1.0\r\n")
-	if msg.HTML == "" {
-		b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
-		b.WriteString("Content-Transfer-Encoding: base64\r\n")
-		b.WriteString("\r\n")
-		b.WriteString(base64Lines([]byte(msg.Text)))
-		return []byte(b.String()), nil
+	message := gomail.NewMsg(gomail.WithCharset(gomail.CharsetUTF8), gomail.WithEncoding(gomail.EncodingB64))
+	if err := message.From(canonicalFrom); err != nil {
+		return nil, fmt.Errorf("invalid sender: %w", err)
 	}
-	// FIXED BOUNDARIES, and they are safe because both bodies are generated by this repo: the templates
-	// escape user input into HTML entities, so no interpolated value can reproduce either string. Random
-	// boundaries would make every rendered message differ from the last and the renderer untestable — the
-	// same trade the dropped CSP nonce lost.
-	const (
-		relBoundary = "tunnex-rel-boundary-4a7e93"
-		altBoundary = "tunnex-alt-boundary-8f2c1d"
-	)
-	b.WriteString("Content-Type: multipart/related; type=\"multipart/alternative\"; boundary=\"" + relBoundary + "\"\r\n")
-	b.WriteString("\r\n")
-
-	b.WriteString("--" + relBoundary + "\r\n")
-	b.WriteString("Content-Type: multipart/alternative; boundary=\"" + altBoundary + "\"\r\n\r\n")
-	b.WriteString("--" + altBoundary + "\r\n")
-	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
-	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
-	b.WriteString(base64Lines([]byte(msg.Text)))
-	b.WriteString("\r\n--" + altBoundary + "\r\n")
-	b.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
-	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
-	b.WriteString(base64Lines([]byte(msg.HTML)))
-	b.WriteString("\r\n--" + altBoundary + "--\r\n")
-
-	// THE LOGO, INLINE. Content-Disposition: inline asks the client to render it in place rather than list
-	// it as an attachment. Some clients (Outlook, historically) show a paperclip anyway — a cosmetic cost
-	// accepted deliberately, because the alternative it replaces is an image that does not appear at all.
-	b.WriteString("\r\n--" + relBoundary + "\r\n")
-	b.WriteString("Content-Type: image/png\r\n")
-	b.WriteString("Content-ID: <" + logoCID + ">\r\n")
-	b.WriteString("Content-Disposition: inline; filename=\"tunnex-logo.png\"\r\n")
-	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
-	b.WriteString(base64Lines(logoPNG))
-	b.WriteString("\r\n--" + relBoundary + "--\r\n")
-	return []byte(b.String()), nil
+	if err := message.To(canonicalTo); err != nil {
+		return nil, fmt.Errorf("invalid recipient: %w", err)
+	}
+	message.Subject(msg.Subject)
+	if msg.HTML == "" {
+		message.SetBodyString(gomail.TypeTextPlain, msg.Text)
+		return message, nil
+	}
+	message.SetBodyString(gomail.TypeTextPlain, msg.Text)
+	message.AddAlternativeString(gomail.TypeTextHTML, msg.HTML)
+	if err := message.EmbedReader("tunnex-logo.png", bytes.NewReader(logoPNG), gomail.WithFileContentID(logoCID), gomail.WithFileName("tunnex-logo.png")); err != nil {
+		return nil, fmt.Errorf("embed logo: %w", err)
+	}
+	return message, nil
 }
 
 func canonicalAddress(raw string) (string, error) {
@@ -401,47 +342,4 @@ func canonicalAddress(raw string) (string, error) {
 		return "", errors.New("address is not valid")
 	}
 	return parsed.Address, nil
-}
-
-func safeHeader(value string) string {
-	value = strings.ReplaceAll(value, "\r", " ")
-	value = strings.ReplaceAll(value, "\n", " ")
-	return strings.TrimSpace(value)
-}
-
-// quotedPrintable encodes a text body for the wire.
-//
-// ⛔ TWO REASONS, AND BOTH WERE LATENT BUGS BEFORE A TEST ASKED.
-//
-//  1. LINE LENGTH. RFC 5321 caps an SMTP line at 998 octets and the branded HTML has 2,000-character lines
-//     (one long inline-styled <div> is a single line). A server that enforces the cap either rejects the
-//     message or inserts its own break — mid-attribute, corrupting the markup — and the symptom is "the
-//     email looks broken" with nothing in any log. quoted-printable inserts SOFT breaks (`=` + CRLF) that
-//     the recipient's client removes, so the rendered body is unchanged.
-//  2. 8-BIT CONTENT OVER A 7-BIT CHANNEL. These bodies contain em-dashes and `·`, which are multi-byte
-//     UTF-8. A part with no Content-Transfer-Encoding is 7bit by default, so declaring nothing was a claim
-//     that happened to be false on every message this product sends.
-func quotedPrintable(s string) string {
-	var b strings.Builder
-	w := quotedprintable.NewWriter(&b)
-	_, _ = w.Write([]byte(s))
-	_ = w.Close()
-	return b.String()
-}
-
-// base64Lines encodes to base64 wrapped at 76 characters.
-//
-// ⚠ THE WRAP IS REQUIRED, NOT TIDINESS. RFC 2045 caps an encoded line at 76 characters, and SMTP itself
-// caps a line at 998; a 7KB single-line attachment violates both, and the servers that enforce it reject
-// or silently mangle the message rather than explaining why.
-func base64Lines(data []byte) string {
-	enc := base64.StdEncoding.EncodeToString(data)
-	var b strings.Builder
-	for len(enc) > 76 {
-		b.WriteString(enc[:76])
-		b.WriteString("\r\n")
-		enc = enc[76:]
-	}
-	b.WriteString(enc)
-	return b.String()
 }
