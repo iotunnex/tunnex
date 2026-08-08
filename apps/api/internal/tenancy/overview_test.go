@@ -102,7 +102,7 @@ func TestOverviewPopulated(t *testing.T) {
 	}
 
 	svc := &Service{q: sqlc.New(tx)}
-	ov, err := svc.Overview(ctx, orgA)
+	ov, err := svc.Overview(ctx, orgA, nil)
 	if err != nil {
 		t.Fatalf("Overview: %v", err)
 	}

@@ -316,6 +316,11 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, current,
 	if !ok {
 		return apierr.BadRequest("invalid_credentials", "the current password is incorrect")
 	}
+	// A bootstrap/invitation password is a one-time credential. Reusing it as the permanent
+	// password defeats the forced-change boundary and leaves the emailed secret valid forever.
+	if err := rejectPasswordReuse(*user.PasswordHash, next); err != nil {
+		return err
+	}
 	hash, err := password.Hash(next)
 	if err != nil {
 		return err
@@ -327,6 +332,13 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, current,
 		return q.ClearMustChangePassword(ctx, userID)
 	}); e != nil {
 		return e
+	}
+	return nil
+}
+
+func rejectPasswordReuse(currentHash, next string) error {
+	if _, err := password.Verify(next, currentHash); err == nil {
+		return apierr.BadRequest("password_reuse", "the new password must be different from the current password")
 	}
 	return nil
 }

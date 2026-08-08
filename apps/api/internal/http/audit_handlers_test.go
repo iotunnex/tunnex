@@ -11,6 +11,7 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
+	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
@@ -36,6 +37,20 @@ func TestListAuditLogsHalfCursorRejected(t *testing.T) {
 	})
 	if !hasCode(err, 400, "invalid_cursor") {
 		t.Fatalf("half-cursor (id only): want 400 invalid_cursor, got %v", err)
+	}
+}
+
+func TestAuditActorScopeMembersAreSelfOnly(t *testing.T) {
+	org := uuid.New()
+	member := uuid.New()
+	p := &authctx.Principal{UserID: member, Roles: map[uuid.UUID]string{org: rbac.RoleMember}}
+	got := auditActorScope(p, org)
+	if got == nil || *got != member {
+		t.Fatalf("member scope = %v, want own actor %s", got, member)
+	}
+	admin := &authctx.Principal{UserID: uuid.New(), Roles: map[uuid.UUID]string{org: rbac.RoleAdmin}}
+	if got := auditActorScope(admin, org); got != nil {
+		t.Fatalf("admin scope = %v, want organization-wide nil actor filter", got)
 	}
 }
 

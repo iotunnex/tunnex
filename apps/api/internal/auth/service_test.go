@@ -15,6 +15,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
 	"github.com/tunnexio/tunnex/apps/api/internal/mail"
+	"github.com/tunnexio/tunnex/apps/api/internal/password"
 )
 
 type captureMailer struct{ msgs []mail.Message }
@@ -74,6 +75,19 @@ func codeOf(err error) string {
 		return a.Code
 	}
 	return ""
+}
+
+func TestRejectPasswordReuse(t *testing.T) {
+	hash, err := password.Hash("emailed-one-time-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := codeOf(rejectPasswordReuse(hash, "emailed-one-time-password")); got != "password_reuse" {
+		t.Fatalf("reusing the one-time password: code = %q, want password_reuse", got)
+	}
+	if err := rejectPasswordReuse(hash, "different permanent password"); err != nil {
+		t.Fatalf("different password rejected: %v", err)
+	}
 }
 
 func TestSignupVerifyLoginResetFlow(t *testing.T) {
