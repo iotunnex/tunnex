@@ -15,20 +15,6 @@ import { useOrg } from "../lib/useOrg";
 import { relativeAge } from "../lib/format";
 import { can } from "../lib/rbac";
 import {
-  CAPTURE_EFFECT,
-  DOMAIN_STEPS,
-  KEEP_RECORD_NOTE,
-  NO_CLAIM_CHIP,
-  WRITE_ONLY_NOTE,
-  chipTone,
-  domainErrorCopy,
-  domainGate,
-  domainStepIndex,
-  normalizeDomain,
-  txtInstruction,
-  type DomainClaimState,
-} from "../lib/domainview";
-import {
   FAIL_STATIC_NOTE,
   UNMAP_CONSEQUENCES,
   UNSUPPORTED_NOTE,
@@ -70,10 +56,6 @@ export default function Settings() {
   const { state } = useAuth();
   const myId = state.status === "authed" ? state.user.id : "";
   const emailVerified = state.status === "authed" && state.user.email_verified;
-  // The claim guard is an OWNERSHIP guard, not just a verified-email one: CreateClaim
-  // refuses unless the actor's own address is AT the domain (domain.go:100). The panel
-  // needs the address to predict that refusal instead of round-tripping into a 403.
-  const myEmail = state.status === "authed" ? state.user.email : "";
   const [meta, setMeta] = useState<Meta | null>(null);
   const [org, setOrg] = useState<Org | null>(null);
   const [myRole, setMyRole] = useState<Role | undefined>(undefined);
@@ -252,17 +234,6 @@ export default function Settings() {
                 </Card>
               </div>
             )}
-            {/* Domain capture. The gate is PERMISSION-then-EDITION (domainGate), matching
-              CreateDomainClaim's own ordering — authorize at sso_handlers.go:180, edition at :183. */}
-            <div className="mb-3.5 break-inside-avoid">
-              <DomainSection
-                orgId={org.id}
-                role={myRole}
-                isEnterprise={meta?.edition === "enterprise"}
-                canEdit={emailVerified}
-                myEmail={myEmail}
-              />
-            </div>
             {meta?.edition === "enterprise" ? (
               <div className="mb-3.5 break-inside-avoid">
                 <OrgMfaEnforce orgId={org.id} canEdit={emailVerified} />
@@ -1194,7 +1165,10 @@ function providerLabel(p: string): string {
   return p === "microsoft" ? "Microsoft Entra" : "Google Workspace";
 }
 
-// DomainSection — claim an email domain and verify it by DNS TXT.
+/* Domain Capture was removed from the product. The old implementation is retained only in this
+   comment temporarily so the surrounding Settings layout remains easy to review; it is not compiled,
+   rendered, or reachable. */
+/*
 //
 // ⛔ THE PANEL RENDERS A STATE THE SERVER WILL NOT SERVE BACK. There is no GET for domain
 // claims (openapi.yaml:1793/:1817), so everything below `unknown` is knowledge this session
@@ -1277,7 +1251,7 @@ function DomainSection({
             subject — which is what shipped, because `i <= step` gave only two tiers and at
             `unknown` (step -1) every chip fell into the same one. `unknown` is the DEFAULT
             state here (there is no GET), so that was the common render, not an edge case.
-            It now has its own leading chip and anchors the chain. */}
+            It now has its own leading chip and anchors the chain. * /}
         <div className="flex items-center gap-1.5">
           {[...(step < 0 ? [NO_CLAIM_CHIP] : []), ...DOMAIN_STEPS].map(
             (label, idx) => {
@@ -1301,7 +1275,7 @@ function DomainSection({
                     }
                   >
                     {/* Non-colour cue: the design encodes the whole distinction in tone, which
-                        a colour-blind operator cannot read. */}
+                        a colour-blind operator cannot read. * /}
                     {tone === "done" ? "✓ " : ""}
                     {label}
                   </span>
@@ -1334,7 +1308,7 @@ function DomainSection({
         </Button>
       </form>
 
-      {/* The ownership inversion guard, stated BEFORE the attempt (domain.go:100). */}
+      {/* The ownership inversion guard, stated BEFORE the attempt (domain.go:100). * /}
       {ownershipBlocked && (
         <p className="mt-2 text-xs text-amber-400">
           You can only claim the domain of your own verified address (
@@ -1387,7 +1361,7 @@ function DomainSection({
       <ErrorText>{err}</ErrorText>
 
       {/* The two facts the wireframe's pill chain cannot carry: the state is not readable
-          back, and VERIFIED is not terminal. */}
+          back, and VERIFIED is not terminal. * /}
       <p className="mt-3 text-xs text-slate-600">{WRITE_ONLY_NOTE}</p>
       {claim.kind !== "unknown" && (
         <p className="mt-1 text-xs text-slate-600">{KEEP_RECORD_NOTE}</p>
@@ -1396,6 +1370,7 @@ function DomainSection({
   );
 }
 
+*/
 function OrgSection({
   org,
   canEdit,

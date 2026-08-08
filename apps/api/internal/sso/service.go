@@ -38,7 +38,6 @@ type Service struct {
 	q       *sqlc.Queries
 	configs *ConfigService
 	flows   *FlowStore
-	domains *DomainService // nil disables domain-capture auto-join
 	factory ProviderFactory
 	baseURL string
 	logger  *slog.Logger
@@ -65,15 +64,12 @@ func (s *Service) mayOnboard() bool {
 }
 
 // NewService builds the SSO service.
-func NewService(pool *pgxpool.Pool, configs *ConfigService, flows *FlowStore, domains *DomainService, factory ProviderFactory, baseURL string, logger *slog.Logger) *Service {
-	return &Service{pool: pool, q: sqlc.New(pool), configs: configs, flows: flows, domains: domains, factory: factory, baseURL: baseURL, logger: logger}
+func NewService(pool *pgxpool.Pool, configs *ConfigService, flows *FlowStore, factory ProviderFactory, baseURL string, logger *slog.Logger) *Service {
+	return &Service{pool: pool, q: sqlc.New(pool), configs: configs, flows: flows, factory: factory, baseURL: baseURL, logger: logger}
 }
 
 // Configs exposes the config service (for the admin set-config endpoint).
 func (s *Service) Configs() *ConfigService { return s.configs }
-
-// Domains exposes the domain-capture service (for the admin domain endpoints).
-func (s *Service) Domains() *DomainService { return s.domains }
 
 func (s *Service) redirectURL(provider string) string {
 	return s.baseURL + "/api/v1/auth/sso/" + provider + "/callback"
@@ -178,20 +174,6 @@ func (s *Service) resolveUser(ctx context.Context, id Identity, orgID uuid.UUID)
 			return e
 		}
 
-		// Domain capture: also auto-join any org that has verified-captured the
-		// email's domain. This runs AFTER the linking decision above (a rejected
-		// identity never reaches here), so capture never bypasses DecideLink.
-		// ⛔ AND CAPTURE STOPS AT LAPSE TOO, for the same reason: auto-join CREATES a membership. ⚠ It is
-		// checked separately from LinkCreate rather than sharing its branch — an EXISTING user logging in
-		// through a captured domain would otherwise be silently joined to an org the licence no longer
-		// covers, which is the same admission wearing a different path.
-		if s.domains != nil && s.mayOnboard() {
-			if capOrg, ok := s.domains.capturingOrgTx(ctx, q, id.Email); ok && capOrg != orgID {
-				if e := s.ensureMembership(ctx, q, capOrg, userID, "domain_capture", id); e != nil {
-					return e
-				}
-			}
-		}
 		return nil
 	})
 	if err != nil {
