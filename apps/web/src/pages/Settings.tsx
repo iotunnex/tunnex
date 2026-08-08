@@ -1007,7 +1007,7 @@ function IdpSyncSection({
             for the directory-sync credential, so the fields below always start
             empty even when a credential is stored.
           </p>
-          <Field label={`${providerLabel(provider)} directory client ID`}>
+          {provider === "microsoft" && <Field label={`${providerLabel(provider)} directory client ID`}>
             <Input
               name={`${provider}-idp-client-id`}
               autoComplete="off"
@@ -1016,8 +1016,8 @@ function IdpSyncSection({
               required
               disabled={!canEdit}
             />
-          </Field>
-          <Field label={`${providerLabel(provider)} directory client secret`}>
+          </Field>}
+          {provider === "microsoft" && <Field label={`${providerLabel(provider)} directory client secret`}>
             <Input
               type="password"
               name={`${provider}-idp-client-secret`}
@@ -1028,7 +1028,7 @@ function IdpSyncSection({
               disabled={!canEdit}
               placeholder="••••••••"
             />
-          </Field>
+          </Field>}
           {provider === "microsoft" && (
             <Field label="Tenant ID (Entra)">
               <Input
