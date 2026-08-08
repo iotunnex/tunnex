@@ -59,14 +59,14 @@ func TestDestinationNamesWhereMailGoes(t *testing.T) {
 		t.Fatalf("with no host it must say mail is disabled AND name the variable that fixes it: %q", off)
 	}
 
-	// ⚠ THE TEE IS NAMED, because its log copies carry working links and an operator must learn that from
-	// the boot line rather than from a security review.
+	// ⚠ THE TEE IS NAMED, and its log is metadata-only so an operator can diagnose delivery without logging
+	// working links or credentials.
 	teed := Destination(Config{Host: "mail.spacemail.com", Port: "587", DevLogging: true})
 	if !strings.Contains(teed, "mail.spacemail.com:587") {
 		t.Fatalf("the tee still SENDS, so the destination must still name the server: %q", teed)
 	}
-	if !strings.Contains(teed, "MAIL_DEV_LOG") || !strings.Contains(teed, "BODY") {
-		t.Fatalf("the tee must name itself and say that bodies are logged: %q", teed)
+	if !strings.Contains(teed, "MAIL_DEV_LOG") || !strings.Contains(teed, "metadata") {
+		t.Fatalf("the tee must name itself and describe safe metadata logging: %q", teed)
 	}
 }
 
@@ -79,7 +79,7 @@ func TestTeeLogLineIsTrueInBothContexts(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 	lm := &LogMailer{logger: logger, reason: "MAIL_DEV_LOG"}
-	if err := lm.Send(context.Background(), Message{To: "a@b.c", Subject: "S", Text: "link"}); err != nil {
+	if err := lm.Send(context.Background(), Message{To: "a@b.c", Subject: "S", Text: "SECRET-BOOTSTRAP-KEY"}); err != nil {
 		t.Fatal(err)
 	}
 	var rec map[string]any
@@ -91,6 +91,9 @@ func TestTeeLogLineIsTrueInBothContexts(t *testing.T) {
 	}
 	if rec["msg"] != "email_copied_to_log" {
 		t.Fatalf("the name must describe what THIS mailer did and nothing about what happens next: %v", rec["msg"])
+	}
+	if rec["body"] != "omitted" || rec["subject"] != "S" || strings.Contains(buf.String(), "SECRET-BOOTSTRAP-KEY") {
+		t.Fatalf("LogMailer must retain safe metadata but never log the message body: %v", rec)
 	}
 }
 

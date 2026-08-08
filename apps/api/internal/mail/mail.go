@@ -6,8 +6,8 @@
 //     and subject (never the body — it carries links). ⛔ It used to log the whole message and return nil,
 //     so a deployment with no mail reported success on every invitation it silently dropped.
 //   - SMTP host configured      -> SMTPMailer.
-//   - SMTP host + MAIL_DEV_LOG  -> the SMTP mailer wrapped to ALSO log. It still sends. The tee has never
-//     suppressed delivery and must never be readable as if it did.
+//   - SMTP host + MAIL_DEV_LOG  -> the SMTP mailer wrapped to ALSO log safe metadata. It still sends. The
+//     tee never logs message bodies, which may contain links, tokens, or bootstrap credentials.
 //
 // ⛔ DevLogging IS ITS OWN VARIABLE (MAIL_DEV_LOG), NOT A CONSEQUENCE OF TUNNEX_ENV. It used to be
 // `!IsProduction()`, which meant a variable about the KIND of deployment silently governed mail behaviour —
@@ -89,8 +89,9 @@ type Config struct {
 	From     string
 	Username string // optional; empty => no SMTP auth (e.g. Mailpit)
 	Password string // optional
-	// DevLogging tees a copy of every message to the log. It NEVER suppresses the send. Opt-in via
-	// MAIL_DEV_LOG; see the package doc for why it is not derived from the environment name.
+	// DevLogging tees safe metadata for every message to the log; the body is always omitted. It NEVER
+	// suppresses the send. Opt-in via MAIL_DEV_LOG; see the package doc for why it is not derived from the
+	// environment name.
 	DevLogging bool
 }
 
@@ -134,8 +135,8 @@ func Destination(cfg Config) string {
 	}
 	dest := cfg.Host + ":" + cfg.Port
 	if cfg.DevLogging {
-		return dest + " — and MAIL_DEV_LOG is on, so a copy of every message INCLUDING ITS BODY " +
-			"(invitation, verification and reset links work) is written to this log"
+		return dest + " — and MAIL_DEV_LOG is on, so safe message metadata is copied to this log; " +
+			"message bodies are omitted"
 	}
 	return dest
 }
@@ -159,7 +160,9 @@ func (m *disabledMailer) Send(_ context.Context, msg Message) error {
 	return ErrNotConfigured
 }
 
-// LogMailer writes messages to the logger instead of sending them.
+// LogMailer writes safe message metadata to the logger instead of sending messages. Bodies are deliberately
+// omitted: development logging must not turn invitation links, reset tokens, or bootstrap passwords into
+// searchable structured-log secrets.
 type LogMailer struct {
 	logger *slog.Logger
 	reason string
@@ -177,17 +180,13 @@ func (m *LogMailer) Kind() string { return "log" }
 //
 // > **A LOG LINE THAT NAMES AN OUTCOME MUST BE TRUE IN EVERY CONTEXT THE LINE CAN BE REACHED FROM.**
 // > "Copied to log" is true in both. "Not sent" was true in one and diagnostic poison in the other.
-//
-// ⚠ IT LOGS THE BODY, WHICH IS THE POINT AND ALSO THE RISK. Invitation, verification and reset bodies are
-// working links, so this is a credential in a shipped, searchable log — the class already ruled on for the
-// bootstrap password. That is why MAIL_DEV_LOG is opt-in, defaults off, and is named at boot.
 func (m *LogMailer) Send(_ context.Context, msg Message) error {
 	m.logger.Info("email_copied_to_log",
 		slog.String("reason", m.reason),
 		slog.String("to", msg.To),
 		slog.String("subject", msg.Subject),
-		slog.String("body", msg.Text),
-		slog.String("warning", "this body contains a working link; MAIL_DEV_LOG must not be set on a deployment"),
+		slog.String("body", "omitted"),
+		slog.String("warning", "message body omitted to prevent credential and link leakage"),
 	)
 	return nil
 }
@@ -236,7 +235,7 @@ func (m *SMTPMailer) Send(_ context.Context, msg Message) error {
 	return nil
 }
 
-// teeMailer sends via the primary mailer and also logs the message.
+// teeMailer sends via the primary mailer and also logs safe message metadata.
 type teeMailer struct {
 	primary Mailer
 	log     *LogMailer
