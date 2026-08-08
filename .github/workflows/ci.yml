@@ -322,7 +322,7 @@ jobs:
           docker run --rm --network tunnex_default \
             -v "$PWD/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
             mcr.microsoft.com/playwright:v1.48.2-jammy \
-            sh -c "npm ci --no-audit --no-fund --silent && npx playwright test"
+            sh -c "npm ci --no-audit --no-fund && npx playwright test"
       - name: Capture E2E stack logs on failure
         if: failure()
         run: |
@@ -388,7 +388,7 @@ jobs:
           docker run --rm --network tunnex_default \
             -v "$PWD/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
             mcr.microsoft.com/playwright:v1.48.2-jammy \
-            sh -c "npm ci --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts --grep-invert @pixel"
+            sh -c "npm ci --no-audit --no-fund && npx playwright test -c playwright.visual.config.ts --grep-invert @pixel"
 
       # ⛔ STEP 2 — ADVISORY during EPIC 14. The committed-image comparison, which is red BY DESIGN while the
       # epic deliberately changes the shared surface every slice. The artifact and diff still upload below.
@@ -399,7 +399,7 @@ jobs:
           docker run --rm --network tunnex_default \
             -v "$PWD/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 \
             mcr.microsoft.com/playwright:v1.48.2-jammy \
-            sh -c "npm ci --no-audit --no-fund --silent && npx playwright test -c playwright.visual.config.ts --grep @pixel"
+            sh -c "npm ci --no-audit --no-fund && npx playwright test -c playwright.visual.config.ts --grep @pixel"
       - name: Upload the diff images for adjudication
         if: always()
         uses: actions/upload-artifact@v4
@@ -438,7 +438,7 @@ jobs:
           docker run --rm --network tunnex_default \
             -v "$PWD/e2e":/e2e -w /e2e -e E2E_BASE_URL=http://nginx:8080 -e E2E_EDITION=enterprise \
             mcr.microsoft.com/playwright:v1.48.2-jammy \
-            sh -c "npm ci --no-audit --no-fund --silent && npx playwright test settings.enterprise.spec.ts"
+            sh -c "npm ci --no-audit --no-fund && npx playwright test settings.enterprise.spec.ts"
       - name: Capture enterprise E2E stack logs on failure
         if: failure()
         run: |
