@@ -2,6 +2,32 @@ package mail
 
 import "strings"
 
+// BootstrapAdminMessage delivers the one-time first-run credential. The password is intentionally present
+// only in this SMTP message and the operator-facing stdout banner; callers must never log the Message body.
+func BootstrapAdminMessage(to, password string) Message {
+	return Message{
+		To:      to,
+		Subject: "Your Tunnex administrator credential",
+		Text: strings.Join([]string{
+			"Your Tunnex deployment has created its first administrator account.",
+			"",
+			"Sign in with:",
+			"Email: " + to,
+			"Password: " + password,
+			"",
+			"This password is one-time. Tunnex will require you to choose a new password immediately after sign-in.",
+			"If you did not just install Tunnex, contact the person who manages this server.",
+		}, "\n"),
+		HTML: renderShell(
+			paragraph("Your Tunnex deployment has created its first administrator account.")+
+				paragraph("<strong>Email:</strong> "+escapeHTML(to)+"<br><strong>Password:</strong> "+escapeHTML(password))+
+				paragraph("This password is one-time. Tunnex will require you to choose a new password immediately after sign-in.")+
+				muted("If you did not just install Tunnex, contact the person who manages this server."),
+			shellOptions{Title: "Your Tunnex administrator credential", Preheader: "Your one-time first-run password."},
+		),
+	}
+}
+
 // Every product email, in one file, each returning a Message with BOTH bodies.
 //
 // ⛔ THE PLAINTEXT IS WRITTEN FIRST AND IT CARRIES THE LINK IN FULL. The HTML half is the one a recipient

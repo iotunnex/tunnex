@@ -43,6 +43,9 @@ type Config struct {
 	AutoMigrate bool
 	// AppBaseURL is the public base URL used to build email links (S2.1).
 	AppBaseURL string
+	// AdminEmail receives the one-time first-run administrator credential when SMTP is configured.
+	// Empty falls back to bootstrap's local address for non-installer deployments.
+	AdminEmail string
 	// NodeAgentImage is the gateway agent image the dashboard bakes into the emitted enroll command
 	// (S8.2c WF-2). One-truth applied to the artifact version: pin it to a DIGEST
 	// (ghcr.io/…/tunnex-node-agent@sha256:…) and the stale-`:latest` drift that mis-convicted D2 becomes
@@ -131,6 +134,7 @@ func Load() Config {
 		ExternalRedis:      getenv("TUNNEX_REDIS_URL", "") != "",
 		AutoMigrate:        getbool("TUNNEX_AUTO_MIGRATE", true),
 		AppBaseURL:         getenv("APP_BASE_URL", "http://localhost"),
+		AdminEmail:         getenv("TUNNEX_ADMIN_EMAIL", ""),
 		NodeAgentImage:     getenv("TUNNEX_NODE_AGENT_IMAGE", "ghcr.io/iotunnex/tunnex-node-agent:latest"),
 		RedisURL:           firstNonEmpty(getenv("TUNNEX_REDIS_URL", ""), getenv("REDIS_URL", "redis://redis:6379/0")),
 		CookieSecure:       getbool("TUNNEX_COOKIE_SECURE", false),
