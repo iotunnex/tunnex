@@ -2173,11 +2173,19 @@ export interface components {
             idp_group_id?: string;
         };
         IdpSyncConfigRequest: {
+            /** @description Entra application client id; required for microsoft. */
             client_id: string;
-            /** @description Sealed at rest (AES-GCM); never returned. */
+            /** @description Entra client secret; sealed at rest and never returned. */
             client_secret: string;
-            /** @description Entra tenant id; omit for google. */
+            /** @description Entra tenant id; required for microsoft. */
             tenant_id?: string;
+            /** @description Google service-account JSON with DWD; sealed at rest and never returned. */
+            service_account_json?: string;
+            /**
+             * Format: email
+             * @description Google Workspace admin subject for DWD impersonation.
+             */
+            delegated_admin_email?: string;
             /** @default true */
             enabled: boolean;
         };
@@ -2187,6 +2195,8 @@ export interface components {
             client_id: string;
             secret_fingerprint?: string;
             tenant_id?: string;
+            /** Format: email */
+            delegated_admin_email?: string;
             enabled: boolean;
             /** Format: date-time */
             last_sync_at?: string;

@@ -115,6 +115,10 @@ func (d *fakeDeprov) DeactivateForSync(ctx context.Context, orgID, userID uuid.U
 	return true, nil
 }
 
+func (d *fakeDeprov) RevokeOrgAccess(context.Context, uuid.UUID, uuid.UUID, string) (bool, error) {
+	return true, nil
+}
+
 // --- helpers ---
 
 var (
@@ -427,13 +431,15 @@ func TestReconcile_NoopAddDoesNotPush(t *testing.T) {
 	}
 }
 
-// #6: directory sync supports microsoft only in v1 — an unsupported provider is rejected at config
-// time (provider_not_supported), not accepted and surfaced as perpetual-degraded health.
-func TestSupportedProvider_MicrosoftOnly(t *testing.T) {
+// Directory sync supports the two managed providers; unknown providers are rejected.
+func TestSupportedProvider(t *testing.T) {
 	if err := supportedProvider("microsoft"); err != nil {
 		t.Fatalf("microsoft must be supported, got %v", err)
 	}
-	for _, p := range []string{"google", "okta", ""} {
+	if err := supportedProvider("google"); err != nil {
+		t.Fatalf("google must be supported, got %v", err)
+	}
+	for _, p := range []string{"okta", ""} {
 		if err := supportedProvider(p); err == nil {
 			t.Errorf("#6: provider %q must be rejected at config time", p)
 		}

@@ -12,6 +12,23 @@ import (
 	"github.com/google/uuid"
 )
 
+const addIdpAccessSource = `-- name: AddIdpAccessSource :exec
+INSERT INTO membership_access_sources (org_id, user_id, source_type, source_key)
+VALUES ($1, $2, 'idp_sync', $3)
+ON CONFLICT DO NOTHING
+`
+
+type AddIdpAccessSourceParams struct {
+	OrgID     uuid.UUID `json:"org_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	SourceKey string    `json:"source_key"`
+}
+
+func (q *Queries) AddIdpAccessSource(ctx context.Context, arg AddIdpAccessSourceParams) error {
+	_, err := q.db.Exec(ctx, addIdpAccessSource, arg.OrgID, arg.UserID, arg.SourceKey)
+	return err
+}
+
 const addIdpGroupMember = `-- name: AddIdpGroupMember :execrows
 INSERT INTO group_members (org_id, group_id, user_id, origin, idp_external_id)
 VALUES ($1, $2, $3, 'idp_sync', $4)
@@ -78,6 +95,22 @@ func (q *Queries) BindGroupToIdp(ctx context.Context, arg BindGroupToIdpParams) 
 		&i.IdpGroupID,
 	)
 	return i, err
+}
+
+const countAccessSources = `-- name: CountAccessSources :one
+SELECT count(*) FROM membership_access_sources WHERE org_id = $1 AND user_id = $2
+`
+
+type CountAccessSourcesParams struct {
+	OrgID  uuid.UUID `json:"org_id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) CountAccessSources(ctx context.Context, arg CountAccessSourcesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAccessSources, arg.OrgID, arg.UserID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countGroupMembers = `-- name: CountGroupMembers :one
@@ -154,7 +187,7 @@ func (q *Queries) DeleteGroupMembersByGroup(ctx context.Context, arg DeleteGroup
 
 const getIdpSyncConfig = `-- name: GetIdpSyncConfig :one
 
-SELECT id, org_id, provider, client_id, secret_sealed, tenant_id, enabled, last_sync_at, last_sync_ok, last_sync_error, created_at, updated_at FROM idp_sync_configs
+SELECT id, org_id, provider, client_id, secret_sealed, tenant_id, enabled, last_sync_at, last_sync_ok, last_sync_error, created_at, updated_at, delegated_admin_email FROM idp_sync_configs
 WHERE org_id = $1 AND provider = $2
 `
 
@@ -183,6 +216,7 @@ func (q *Queries) GetIdpSyncConfig(ctx context.Context, arg GetIdpSyncConfigPara
 		&i.LastSyncError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DelegatedAdminEmail,
 	)
 	return i, err
 }
@@ -217,7 +251,7 @@ func (q *Queries) GetOrgUserByEmail(ctx context.Context, arg GetOrgUserByEmailPa
 }
 
 const listEnabledIdpSyncConfigs = `-- name: ListEnabledIdpSyncConfigs :many
-SELECT id, org_id, provider, client_id, secret_sealed, tenant_id, enabled, last_sync_at, last_sync_ok, last_sync_error, created_at, updated_at FROM idp_sync_configs
+SELECT id, org_id, provider, client_id, secret_sealed, tenant_id, enabled, last_sync_at, last_sync_ok, last_sync_error, created_at, updated_at, delegated_admin_email FROM idp_sync_configs
 WHERE enabled = true
 ORDER BY org_id, provider
 `
@@ -247,6 +281,7 @@ func (q *Queries) ListEnabledIdpSyncConfigs(ctx context.Context) ([]IdpSyncConfi
 			&i.LastSyncError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DelegatedAdminEmail,
 		); err != nil {
 			return nil, err
 		}
@@ -378,6 +413,22 @@ func (q *Queries) RecordIdpSyncResult(ctx context.Context, arg RecordIdpSyncResu
 	return err
 }
 
+const removeIdpAccessSource = `-- name: RemoveIdpAccessSource :exec
+DELETE FROM membership_access_sources
+WHERE org_id = $1 AND user_id = $2 AND source_type = 'idp_sync' AND source_key = $3
+`
+
+type RemoveIdpAccessSourceParams struct {
+	OrgID     uuid.UUID `json:"org_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	SourceKey string    `json:"source_key"`
+}
+
+func (q *Queries) RemoveIdpAccessSource(ctx context.Context, arg RemoveIdpAccessSourceParams) error {
+	_, err := q.db.Exec(ctx, removeIdpAccessSource, arg.OrgID, arg.UserID, arg.SourceKey)
+	return err
+}
+
 const removeIdpGroupMember = `-- name: RemoveIdpGroupMember :execrows
 DELETE FROM group_members
 WHERE org_id = $1 AND group_id = $2 AND user_id = $3 AND origin = 'idp_sync'
@@ -397,6 +448,20 @@ func (q *Queries) RemoveIdpGroupMember(ctx context.Context, arg RemoveIdpGroupMe
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const restoreMembershipAfterIdpGrant = `-- name: RestoreMembershipAfterIdpGrant :exec
+UPDATE memberships SET access_revoked_at = NULL WHERE org_id = $1 AND user_id = $2
+`
+
+type RestoreMembershipAfterIdpGrantParams struct {
+	OrgID  uuid.UUID `json:"org_id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) RestoreMembershipAfterIdpGrant(ctx context.Context, arg RestoreMembershipAfterIdpGrantParams) error {
+	_, err := q.db.Exec(ctx, restoreMembershipAfterIdpGrant, arg.OrgID, arg.UserID)
+	return err
 }
 
 const unbindIdpGroup = `-- name: UnbindIdpGroup :one
@@ -430,24 +495,26 @@ func (q *Queries) UnbindIdpGroup(ctx context.Context, arg UnbindIdpGroupParams) 
 }
 
 const upsertIdpSyncConfig = `-- name: UpsertIdpSyncConfig :one
-INSERT INTO idp_sync_configs (org_id, provider, client_id, secret_sealed, tenant_id, enabled)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO idp_sync_configs (org_id, provider, client_id, secret_sealed, tenant_id, delegated_admin_email, enabled)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (org_id, provider) DO UPDATE
     SET client_id = EXCLUDED.client_id,
         secret_sealed = EXCLUDED.secret_sealed,
         tenant_id = EXCLUDED.tenant_id,
+        delegated_admin_email = EXCLUDED.delegated_admin_email,
         enabled = EXCLUDED.enabled,
         updated_at = now()
-RETURNING id, org_id, provider, client_id, secret_sealed, tenant_id, enabled, last_sync_at, last_sync_ok, last_sync_error, created_at, updated_at
+RETURNING id, org_id, provider, client_id, secret_sealed, tenant_id, enabled, last_sync_at, last_sync_ok, last_sync_error, created_at, updated_at, delegated_admin_email
 `
 
 type UpsertIdpSyncConfigParams struct {
-	OrgID        uuid.UUID `json:"org_id"`
-	Provider     string    `json:"provider"`
-	ClientID     string    `json:"client_id"`
-	SecretSealed []byte    `json:"secret_sealed"`
-	TenantID     *string   `json:"tenant_id"`
-	Enabled      bool      `json:"enabled"`
+	OrgID               uuid.UUID `json:"org_id"`
+	Provider            string    `json:"provider"`
+	ClientID            string    `json:"client_id"`
+	SecretSealed        []byte    `json:"secret_sealed"`
+	TenantID            *string   `json:"tenant_id"`
+	DelegatedAdminEmail *string   `json:"delegated_admin_email"`
+	Enabled             bool      `json:"enabled"`
 }
 
 // Connect / update a provider credential. The secret is pre-sealed (AES-GCM) by the caller;
@@ -460,6 +527,7 @@ func (q *Queries) UpsertIdpSyncConfig(ctx context.Context, arg UpsertIdpSyncConf
 		arg.ClientID,
 		arg.SecretSealed,
 		arg.TenantID,
+		arg.DelegatedAdminEmail,
 		arg.Enabled,
 	)
 	var i IdpSyncConfig
@@ -476,6 +544,7 @@ func (q *Queries) UpsertIdpSyncConfig(ctx context.Context, arg UpsertIdpSyncConf
 		&i.LastSyncError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DelegatedAdminEmail,
 	)
 	return i, err
 }

@@ -20,6 +20,7 @@ type Querier interface {
 	// Returns rows-affected: 0 on ON CONFLICT (already a member) so the caller can skip
 	// the audit event for a no-op re-add (idempotent, still 204).
 	AddGroupMember(ctx context.Context, arg AddGroupMemberParams) (int64, error)
+	AddIdpAccessSource(ctx context.Context, arg AddIdpAccessSourceParams) error
 	// Idempotent add of a synced member, recording the directory external id. Explicit origin='idp_sync'.
 	// Returns rows-affected: 0 on conflict = already present → the caller reports didChange=false and
 	// skips BOTH the audit and the org-wide re-push.
@@ -115,6 +116,7 @@ type Querier interface {
 	// a challenge written by a previous version that did not know the column. No such version exists — 0058 created
 	// this table in the same release — so the fallback could only ever match rows this version wrote itself.
 	ConsumeRekeyChallenge(ctx context.Context, arg ConsumeRekeyChallengeParams) (NodeRekeyChallenge, error)
+	CountAccessSources(ctx context.Context, arg CountAccessSourcesParams) (int64, error)
 	CountActiveDevicesByOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
 	// ⛔ AGENTS ARE EXCLUDED FROM THE HUMAN DEVICE SURFACES. An AI agent is a `devices` row because it IS a
 	// WireGuard peer — the peer set, the pool allocation, the revocation sweep and the liveness upsert all read
@@ -481,6 +483,7 @@ type Querier interface {
 	// active" must never resolve to "carry on".
 	GetMachineOwnerStanding(ctx context.Context, id uuid.UUID) (bool, error)
 	GetMembership(ctx context.Context, arg GetMembershipParams) (Membership, error)
+	GetMembershipIncludingRevoked(ctx context.Context, arg GetMembershipIncludingRevokedParams) (Membership, error)
 	// lint:cross-org — user-scoped login challenge; the token itself is the credential.
 	// Verify path: fetch a LIVE challenge under a row lock (attempt-count + burn serialize here).
 	GetMfaChallengeForUpdate(ctx context.Context, tokenHash []byte) (MfaChallenge, error)
@@ -633,6 +636,7 @@ type Querier interface {
 	// far-future created_at + a max uuid so the whole feed is < the cursor. Uses
 	// access_events_org_created_id_idx.
 	ListAccessEvents(ctx context.Context, arg ListAccessEventsParams) ([]AccessEvent, error)
+	ListAccessSources(ctx context.Context, arg ListAccessSourcesParams) ([]ListAccessSourcesRow, error)
 	// The org's live tunnel allocations (flat pool, across all nodes) WITH the owning
 	// device (id, name). The SINGLE definition of "live allocation" — used by BOTH
 	// device-create's lowest-free choice AND resize's orphan check/409 objects, so
@@ -1070,6 +1074,7 @@ type Querier interface {
 	// marker cannot disagree with the serial it describes.
 	RekeyNode(ctx context.Context, arg RekeyNodeParams) (Node, error)
 	RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) (int64, error)
+	RemoveIdpAccessSource(ctx context.Context, arg RemoveIdpAccessSourceParams) error
 	// Remove a synced member — scoped to origin='idp_sync' so the reconcile can NEVER delete a
 	// manual membership even if one somehow shared the (group,user) key.
 	RemoveIdpGroupMember(ctx context.Context, arg RemoveIdpGroupMemberParams) (int64, error)
@@ -1107,6 +1112,8 @@ type Querier interface {
 	// RestoreCascadeRevokedDevice.
 	// lint:cross-org — keyed by device_id, which the caller read from the org-scoped candidate set.
 	RestoreCascadeRevokedOVPNCertsForDevice(ctx context.Context, deviceID uuid.UUID) ([]RestoreCascadeRevokedOVPNCertsForDeviceRow, error)
+	RestoreMembershipAccess(ctx context.Context, arg RestoreMembershipAccessParams) error
+	RestoreMembershipAfterIdpGrant(ctx context.Context, arg RestoreMembershipAfterIdpGrantParams) error
 	// ⛔ THE SYMMETRIC HALF, AND SHIPPING WITHOUT IT WOULD BE A ONE-WAY DOOR. Reactivation restores memberships,
 	// sessions and the peer set; if the certificate stayed revoked the user would come back `active` everywhere
 	// while their OpenVPN client was refused by the CRL — control plane green, data plane refusing, and the
@@ -1156,6 +1163,7 @@ type Querier interface {
 	// Org-scoped + idempotent (already-revoked returns 0 rows). Revocation severs on the very next request
 	// (the auth path re-reads the row every time — no session cache).
 	RevokeMachineCredential(ctx context.Context, arg RevokeMachineCredentialParams) (int64, error)
+	RevokeMembershipAccess(ctx context.Context, arg RevokeMembershipAccessParams) (int64, error)
 	// KEEPS THE SITE BINDING. The unbind added for WF-S11-14 was RULED REVERSED ON EVIDENCE after review, because the
 	// status filter on ListSiteNodesForOrg was sufficient for the compiler input on its own and the unbind bought
 	// nothing while costing three things:

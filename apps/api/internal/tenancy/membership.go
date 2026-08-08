@@ -90,6 +90,41 @@ func (s *MembershipService) DeactivateMemberBySync(ctx context.Context, orgID, t
 	})
 }
 
+// RevokeOrgAccessBySync removes only this org's remaining access when directory
+// provenance is exhausted. The global identity and memberships in other orgs
+// remain intact; the membership row is retained for audit/rejoin purposes.
+func (s *MembershipService) RevokeOrgAccessBySync(ctx context.Context, orgID, targetUserID uuid.UUID, cause string) (bool, error) {
+	if _, err := s.q.GetMembershipIncludingRevoked(ctx, sqlc.GetMembershipIncludingRevokedParams{OrgID: orgID, UserID: targetUserID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	var changed int64
+	if err := s.withTx(ctx, func(q *sqlc.Queries) error {
+		var err error
+		changed, err = q.RevokeMembershipAccess(ctx, sqlc.RevokeMembershipAccessParams{OrgID: orgID, UserID: targetUserID})
+		if err != nil || changed == 0 {
+			return err
+		}
+		return writeSystemAudit(ctx, q, orgID, "idp-sync", "user.org_access_revoked", "user", targetUserID.String(), map[string]any{"cause": cause})
+	}); err != nil {
+		return false, err
+	}
+	if changed == 0 {
+		return false, nil
+	}
+	if s.revoker != nil {
+		if err := s.revoker.DeleteAllForUser(ctx, targetUserID); err != nil {
+			return false, err
+		}
+	}
+	if s.pusher != nil {
+		s.pusher.PushOrgNodes(ctx, orgID)
+	}
+	return true, nil
+}
+
 // deactivate is the shared core: last-owner guard, status flip + CLI-cred sweep + audit (in one tx),
 // then live-session revoke + org-wide push. The audit row is written by writeAuditFn so the human
 // and system callers attribute the SAME action to different, legible actors. Returns didAct=false

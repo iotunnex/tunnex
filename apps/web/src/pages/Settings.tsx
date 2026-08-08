@@ -757,6 +757,8 @@ function IdpSyncSection({
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [tenantId, setTenantId] = useState("");
+  const [serviceAccountJSON, setServiceAccountJSON] = useState("");
+  const [delegatedAdminEmail, setDelegatedAdminEmail] = useState("");
   const [idpGroupId, setIdpGroupId] = useState("");
   const [newName, setNewName] = useState("");
   const [unmapping, setUnmapping] = useState<UserGroup | null>(null);
@@ -825,6 +827,8 @@ function IdpSyncSection({
           client_id: clientId,
           client_secret: clientSecret,
           tenant_id: tenantId || undefined,
+          service_account_json: serviceAccountJSON || undefined,
+          delegated_admin_email: delegatedAdminEmail || undefined,
           enabled: true,
         },
       },
@@ -832,6 +836,7 @@ function IdpSyncSection({
     setBusy(null);
     if (error) return setErr(idpErrorCopy(apiErrorCode(error)));
     setClientSecret(""); // never keep a secret in page state after the write
+    setServiceAccountJSON("");
     setShowForm(false);
     await load(() => false);
   }
@@ -1034,6 +1039,30 @@ function IdpSyncSection({
                 disabled={!canEdit}
               />
             </Field>
+          )}
+          {provider === "google" && (
+            <>
+              <Field label="Google service-account JSON (DWD)">
+                <textarea
+                  className="min-h-24 w-full rounded-md border border-ink-600 bg-ink-950 p-2 font-mono text-xs text-slate-300"
+                  value={serviceAccountJSON}
+                  onChange={(e) => setServiceAccountJSON(e.target.value)}
+                  required
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={!canEdit}
+                />
+              </Field>
+              <Field label="Delegated Workspace admin email">
+                <Input
+                  type="email"
+                  value={delegatedAdminEmail}
+                  onChange={(e) => setDelegatedAdminEmail(e.target.value)}
+                  required
+                  disabled={!canEdit}
+                />
+              </Field>
+            </>
           )}
           <div className="flex gap-2">
             <Button type="submit" disabled={busy === "config" || !canEdit}>
@@ -1655,21 +1684,23 @@ function SsoProvider({
               removed it. Both are annotated for that reason.
               `new-password` (not `off`) is what actually suppresses saved-password fill in
               Chrome — `off` is widely ignored on password inputs. */}
-          <Field label={`${providerName} client ID`}>
-            <Input
-              name={`${provider}-oauth-client-id`}
-              autoComplete="off"
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              required
-              disabled={!canEdit}
-            />
-          </Field>
+          {provider === "microsoft" && (
+            <Field label={`${providerName} client ID`}>
+              <Input
+                name={`${provider}-oauth-client-id`}
+                autoComplete="off"
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+                required
+                disabled={!canEdit}
+              />
+            </Field>
+          )}
           {/* WRITE-ONLY secret: the current secret is NEVER fetched or shown. We
               display only its keyed fingerprint as proof-of-storage, and the
               input is a "replace" affordance (blank = leave unchanged is not
               supported by the API, so a save requires re-entering it). */}
-          <Field
+          {provider === "microsoft" && <Field
             label={
               configured
                 ? `${providerName} client secret (enter to replace)`
@@ -1686,7 +1717,7 @@ function SsoProvider({
               disabled={!canEdit}
               placeholder={secretPlaceholder(configured)}
             />
-          </Field>
+          </Field>}
           {configured && view?.secret_fingerprint && (
             <p className="font-mono text-xs text-slate-500">
               stored secret fingerprint: {view.secret_fingerprint}

@@ -43,6 +43,9 @@ type nopDeprov struct{}
 func (nopDeprov) DeactivateForSync(context.Context, uuid.UUID, uuid.UUID, string) (bool, error) {
 	return true, nil
 }
+func (nopDeprov) RevokeOrgAccess(context.Context, uuid.UUID, uuid.UUID, string) (bool, error) {
+	return true, nil
+}
 
 func testSealer(t *testing.T) *crypto.Sealer {
 	t.Helper()
