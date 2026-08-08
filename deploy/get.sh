@@ -28,6 +28,52 @@ set -eu
 # ── plumbing ────────────────────────────────────────────────────────────────────────────────────
 die() { printf '\n  \033[31m✗\033[0m %s\n\n' "$*" >&2; exit 1; }
 
+# BEGIN INSTALL VERSION RESOLVER — kept byte-identical in install.sh and get.sh; the regression test
+# extracts this block from both files and refuses drift.
+resolve_install_version() {
+	VERSION="${TUNNEX_VERSION:-}"
+	SOURCE_REF="${TUNNEX_SOURCE_REF:-}"
+	SOURCE_COMMIT=""
+	VERSION_PROVENANCE=""
+
+	if [ -z "$VERSION" ]; then
+		# ⛔ A RELEASE IS NOT THE LATEST GREEN BUILD. Main CI publishes :latest and :sha-<commit> after
+		# its gates, while GitHub's latest-release pointer advances only when somebody cuts a release. The old resolver
+		# therefore served July's v0.3.0-rc5 during an August install even though newer green images existed.
+		#
+		# The successful CI WORKFLOW is the atomic publication pointer: it cannot be success until every
+		# image in the publish matrix has finished. Bind the compose manifest and all image tags to that
+		# same commit, so an install cannot mix a new manifest with old or partially-published images.
+		_runs="$(curl -fsSL "${API}/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=1" 2>/dev/null || true)"
+		SOURCE_COMMIT="$(printf '%s' "$_runs" |
+			sed -n 's/.*"head_sha"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{40\}\)".*/\1/p' |
+			head -1)"
+		[ -n "$SOURCE_COMMIT" ] || die "could not resolve the newest fully-published green main build. Refusing to fall back to an older release."
+		VERSION="sha-$(printf '%.7s' "$SOURCE_COMMIT")"
+		SOURCE_REF="$SOURCE_COMMIT"
+		VERSION_PROVENANCE="successful main CI commit ${SOURCE_COMMIT}"
+	else
+		case "$VERSION" in
+		latest)
+			SOURCE_REF="${SOURCE_REF:-main}"
+			;;
+		sha-*)
+			# Docker's sha-* image tag is not a Git ref; raw.githubusercontent.com accepts the abbreviated
+			# commit after the prefix is removed. TUNNEX_SOURCE_REF remains available for an explicit full SHA.
+			SOURCE_REF="${SOURCE_REF:-${VERSION#sha-}}"
+			;;
+		*)
+			SOURCE_REF="${SOURCE_REF:-$VERSION}"
+			;;
+		esac
+		VERSION_PROVENANCE="operator override ${VERSION} (manifest ref ${SOURCE_REF})"
+	fi
+
+	case "$VERSION" in '' | *[!A-Za-z0-9._-]*) die "resolved image tag '${VERSION}' contains unsupported characters" ;; esac
+	case "$SOURCE_REF" in '' | *[!A-Za-z0-9._/-]*) die "resolved manifest ref '${SOURCE_REF}' contains unsupported characters" ;; esac
+}
+# END INSTALL VERSION RESOLVER
+
 # step/ok — a progress line OVERWRITTEN by its own result, so the transcript reads as a checklist rather
 # than a log. \033[K clears the rest of the line: without it the tail of a longer previous message survives
 # underneath a shorter one.
@@ -552,18 +598,14 @@ report_ports() {
 	printf '\n'
 }
 
-# ── 1. pin a real RELEASE — never :latest for a real deploy ─────────────────────────────────────
+# ── 1. pin the newest fully-published green main build ──────────────────────────────────────────
 API="https://api.github.com/repos/iotunnex/tunnex"
 RAW="https://raw.githubusercontent.com/iotunnex/tunnex"
-VERSION="${TUNNEX_VERSION:-}"
-if [ -z "$VERSION" ]; then
-	VERSION="$(curl -fsSL "${API}/releases/latest" 2>/dev/null |
-		grep -m1 '"tag_name"' | sed -E 's/.*"tag_name" *: *"([^"]+)".*/\1/')"
-fi
-[ -n "$VERSION" ] || die "could not resolve a released Tunnex version. Set TUNNEX_VERSION to pin one."
+resolve_install_version
 
 
 printf '  \033[2mInstalling %s\033[0m\n' "$VERSION"
+printf '  \033[2mProvenance: %s\033[0m\n' "$VERSION_PROVENANCE"
 
 [ "$HAVE_TTY" = "1" ] || [ "$ASSUME_YES" = "1" ] || no_tty_help
 
@@ -629,6 +671,7 @@ fi
 # ── 3. THE SUMMARY — the one moment the whole decision is visible before anything happens ───────
 printf '\n  \033[1mReady to install\033[0m\n'
 printf '    Version          %s\n' "$VERSION"
+printf '    Source commit    %s\n' "$SOURCE_REF"
 printf '    Public address   %s\n' "$ADDR"
 printf '    Dashboard        http://%s/\n' "$ADDR"
 printf '    Administrator    %s\n' "$ADMIN_EMAIL"
@@ -652,8 +695,8 @@ mkdir -p tunnex
 cd tunnex
 
 step "fetching the release manifest"
-curl -fsSL "${RAW}/${VERSION}/deploy/tunnex.yml" -o tunnex.yml 2>/dev/null ||
-	die "could not download deploy/tunnex.yml for ${VERSION}"
+curl -fsSL "${RAW}/${SOURCE_REF}/deploy/tunnex.yml" -o tunnex.yml 2>/dev/null ||
+	die "could not download deploy/tunnex.yml at ${SOURCE_REF}"
 
 # ⛔ CONFIRM WHAT WE FETCHED IS A PRODUCTION COMPOSE FILE rather than trusting the tag. A dev compose file
 # reaching a customer is a Mailpit that swallows every invitation and a non-production environment flag —
@@ -682,6 +725,8 @@ cat >.env <<EOF
 # a single layer — with "required variable X is missing a value", and the four with \${VAR:?} are
 # APP_BASE_URL, DATABASE_URL, POSTGRES_PASSWORD and TUNNEX_NODE_ENDPOINT.
 TUNNEX_VERSION=${VERSION}
+# Exact Git ref the installer used for tunnex.yml; image tag + manifest provenance stay inspectable.
+TUNNEX_SOURCE_REF=${SOURCE_REF}
 TUNNEX_LOG_LEVEL=info
 APP_BASE_URL=http://${ADDR}
 # The WireGuard endpoint peers dial. Host:port, not a URL — it goes into every device config.

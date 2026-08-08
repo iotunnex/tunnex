@@ -21,6 +21,9 @@ concurrency:
 
 env:
   ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+  # Installer derives sha-<7> from the successful workflow's head_sha. Pin metadata-action's otherwise
+  # implicit abbreviation length so artifact naming and version resolution cannot drift independently.
+  DOCKER_METADATA_SHORT_SHA_LENGTH: "7"
 
 jobs:
   # Linux: the existing make gates + web typecheck/build. RED BLOCKS MERGE.
@@ -37,6 +40,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Installer version provenance contract
+        run: sh deploy/install-version-provenance_test.sh
 
       # ⛔ THE DIFF CLASSIFIER. MEASURED FINDING (S14.10): `gates` is 8.1 min and is the ENTIRE critical path
       # of a PR run, and 78% of that is Go steps a web-only diff cannot affect. A UI section pushes 3-6 times,
@@ -447,7 +453,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}-${{ matrix.image.name }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,format=short,enable={{is_default_branch}}
+            type=sha,format=short,prefix=sha-,enable={{is_default_branch}}
             type=ref,event=tag
       - uses: docker/build-push-action@v6
         with:
