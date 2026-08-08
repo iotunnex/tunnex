@@ -10,4 +10,3 @@ func TestGoogleWorkspaceCredentialsValidateDWDInputs(t *testing.T) {
 		t.Fatal("invalid delegated admin email must be rejected")
 	}
 }
-
