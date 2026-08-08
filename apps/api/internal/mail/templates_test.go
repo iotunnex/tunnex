@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"encoding/base64"
 	"io"
 	"mime/quotedprintable"
 	"strings"
@@ -19,6 +20,34 @@ func decodeQP(t *testing.T, s string) string {
 		t.Fatalf("decode quoted-printable: %v", err)
 	}
 	return string(out)
+}
+
+func decodeBase64Bodies(t *testing.T, s string) string {
+	t.Helper()
+	const marker = "Content-Transfer-Encoding: base64\r\n\r\n"
+	var decoded strings.Builder
+	for rest := s; ; {
+		i := strings.Index(rest, marker)
+		if i < 0 {
+			break
+		}
+		rest = rest[i+len(marker):]
+		end := strings.Index(rest, "\r\n--")
+		if end < 0 {
+			end = strings.Index(rest, "\r\n")
+		}
+		if end < 0 {
+			end = len(rest)
+		}
+		encoded := strings.ReplaceAll(rest[:end], "\r\n", "")
+		body, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			t.Fatalf("decode base64 body: %v", err)
+		}
+		decoded.Write(body)
+		rest = rest[end:]
+	}
+	return decoded.String()
 }
 
 const acceptURL = "https://vpn.acme.test/accept-invite?token=SECRET-TOKEN"
@@ -70,16 +99,38 @@ func TestEveryTemplateCarriesAWorkingPlaintextBody(t *testing.T) {
 }
 
 func TestBuildRFC822SanitizesHeaderInjection(t *testing.T) {
-	raw := string(buildRFC822("from@example.test\r\nX-Injected: yes", Message{
+	if got := buildRFC822("from@example.test\r\nX-Injected: yes", Message{
 		To:      "to@example.test\nBcc: attacker@example.test",
 		Subject: "subject\r\nX-Injected: yes",
 		Text:    "body",
+	}); got != nil {
+		t.Fatalf("invalid sender/recipient should be rejected")
+	}
+	raw := string(buildRFC822("Tunnex\r\nX-Injected: yes <from@example.test>", Message{
+		To:      "to@example.test",
+		Subject: "subject\r\nX-Injected: yes",
+		Text:    "body",
 	}))
+	if raw != "" {
+		t.Fatalf("sender display-name injection should be rejected")
+	}
 	if strings.Contains(raw, "\r\nX-Injected:") {
 		t.Fatalf("header injection survived: %q", raw)
 	}
-	if strings.Count(raw, "\r\n\r\n") != 1 {
-		t.Fatalf("unexpected header/body boundary count: %d", strings.Count(raw, "\r\n\r\n"))
+}
+
+func TestBuildRFC822EncodesBodyBoundaries(t *testing.T) {
+	raw := string(buildRFC822("from@example.test", Message{
+		To:      "to@example.test",
+		Subject: "hello",
+		Text:    "before\r\nX-Injected: yes\r\nafter",
+	}))
+	headerEnd := strings.Index(raw, "\r\n\r\n")
+	if headerEnd < 0 || strings.Contains(raw[:headerEnd], "\r\nX-Injected:") {
+		t.Fatalf("body boundary escaped into a header: %q", raw)
+	}
+	if !strings.Contains(decodeBase64Bodies(t, raw), "before\r\nX-Injected: yes\r\nafter") {
+		t.Fatalf("body did not survive base64 encoding: %q", raw)
 	}
 }
 
@@ -175,13 +226,11 @@ func TestPlainTextAndHTMLSurviveTheRelatedWrapper(t *testing.T) {
 	if relAt < 0 || altAt < 0 || relAt > altAt {
 		t.Fatalf("multipart/alternative must be nested INSIDE multipart/related: rel=%d alt=%d", relAt, altAt)
 	}
-	if !strings.Contains(decodeQP(t, raw), acceptURL) {
+	if !strings.Contains(decodeBase64Bodies(t, raw), acceptURL) {
 		t.Fatal("the plaintext half must still carry the URL through the extra wrapper and the encoding")
 	}
-	// ⛔ AND THE ENCODING IS DECLARED. A body encoded quoted-printable without the header is delivered as
-	// literal `=3D` to the recipient — the failure looks like a typo in the template and is an envelope bug.
-	if strings.Count(raw, "Content-Transfer-Encoding: quoted-printable") != 2 {
-		t.Fatal("both text parts must declare quoted-printable")
+	if strings.Count(raw, "Content-Transfer-Encoding: base64") != 3 {
+		t.Fatal("text, HTML, and logo parts must declare base64")
 	}
 }
 
@@ -191,7 +240,7 @@ func TestPlainTextMessagesAreUnchangedOnTheWire(t *testing.T) {
 	if strings.Contains(raw, "multipart") {
 		t.Fatal("a message with no HTML must still be a bare text/plain message")
 	}
-	if !strings.HasSuffix(raw, "\r\n\r\nbody") {
+	if !strings.Contains(raw, base64.StdEncoding.EncodeToString([]byte("body"))) {
 		t.Fatalf("the plaintext wire format changed:\n%q", raw)
 	}
 }
