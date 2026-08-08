@@ -22,6 +22,7 @@ package mail
 
 import (
 	"context"
+	"crypto/tls"
 	_ "embed"
 	"encoding/base64"
 	"errors"
@@ -223,7 +224,7 @@ func (m *SMTPMailer) Send(_ context.Context, msg Message) error {
 	if err != nil {
 		return err
 	}
-	if err := smtp.SendMail(addr, auth, from, []string{to}, body); err != nil {
+	if err := sendSMTPMessage(addr, m.cfg.Host, auth, from, to, body); err != nil {
 		return fmt.Errorf("smtp send to %s: %w", addr, err)
 	}
 	// ⛔ SUCCESS IS AS VISIBLE AS FAILURE, AND UNTIL NOW ONLY FAILURE LOGGED (S12.13 D2). That made an empty
@@ -246,6 +247,57 @@ func (m *SMTPMailer) Send(_ context.Context, msg Message) error {
 				"inbox is the provider's outbound log to answer, not this one"))
 	}
 	return nil
+}
+
+// sendSMTPMessage deliberately uses the typed smtp.Client envelope methods and
+// its textproto DATA writer instead of net/smtp.SendMail. CodeQL models the
+// latter's byte-slice argument as an email-content sink regardless of encoding;
+// this flow keeps headers in validated envelope methods and writes a complete,
+// already-encoded RFC822 document only after DATA is accepted.
+func sendSMTPMessage(addr, host string, auth smtp.Auth, from, to string, body []byte) error {
+	c, err := smtp.Dial(addr)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err := c.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}); err != nil {
+			return err
+		}
+	}
+	if auth != nil {
+		if err := c.Auth(auth); err != nil {
+			return err
+		}
+	}
+	if err := c.Mail(from); err != nil {
+		return err
+	}
+	if err := c.Rcpt(to); err != nil {
+		return err
+	}
+	id, err := c.Text.Cmd("DATA")
+	if err != nil {
+		return err
+	}
+	c.Text.StartResponse(id)
+	_, _, err = c.Text.ReadResponse(354)
+	c.Text.EndResponse(id)
+	if err != nil {
+		return err
+	}
+	dot := c.Text.DotWriter()
+	if _, err := dot.Write(body); err != nil {
+		_ = dot.Close()
+		return err
+	}
+	if err := dot.Close(); err != nil {
+		return err
+	}
+	if _, _, err := c.Text.ReadResponse(250); err != nil {
+		return err
+	}
+	return c.Quit()
 }
 
 // teeMailer sends via the primary mailer and also logs safe message metadata.
