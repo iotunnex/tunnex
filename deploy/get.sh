@@ -186,11 +186,11 @@ ask() {
 	ANSWER="$REPLY_RAW"
 }
 
-# ask_secret PROMPT — like ask, with terminal echo OFF. Sets ANSWER.
+# BEGIN MASKED SECRET READER — kept behaviorally identical with install.sh; the contract test checks both.
+# ask_secret PROMPT — masked raw terminal input. Sets ANSWER.
 #
-# ⛔ A PASSWORD MUST NOT BE ECHOED, AND IT WAS. It went onto the operator's screen, into their scrollback,
-# and into any recording of that session — an SMTP credential that is now in a terminal buffer for as long
-# as the window lives.
+# ⛔ A PASSWORD MUST NOT BE ECHOED. The reader below shows one `*` per byte, so the operator can see that
+# input is arriving without exposing the secret or putting it in scrollback.
 #
 # ⚠ THE RESTORE IS UNCONDITIONAL, via a trap: if the read is interrupted (Ctrl-C mid-prompt) without it,
 # the operator is left with a shell that does not echo anything they type and no obvious way back.
@@ -200,21 +200,31 @@ ask_secret() {
 		ANSWER=""
 		return 0
 	fi
-	# ⚠ ECHO GOES OFF BEFORE THE PROMPT IS PRINTED, NOT AFTER. Printing first leaves a window between the
-	# prompt appearing and the terminal being silenced — and anything typed or PASTED into that window is
-	# echoed. It is microseconds for a human typing and reliably lost for one pasting, or for a driver that
-	# reacts the instant it sees the prompt.
 	_saved="$(stty -g <&3 2>/dev/null || true)"
+	[ -n "$_saved" ] || no_tty_help
 	# shellcheck disable=SC2064
 	trap "stty '$_saved' <&3 2>/dev/null || stty echo <&3 2>/dev/null; exit 130" INT TERM
-	stty -echo <&3 2>/dev/null || true
+	stty raw -echo <&3 2>/dev/null || { stty "$_saved" <&3 2>/dev/null || true; no_tty_help; }
 	printf '  %b ' "$_prompt" >&3
-	read_tty || { stty echo <&3 2>/dev/null || true; no_tty_help; }
-	if [ -n "$_saved" ]; then stty "$_saved" <&3 2>/dev/null || true; else stty echo <&3 2>/dev/null || true; fi
+	_secret=''
+	while :; do
+		_byte="$(dd if=/dev/fd/3 bs=1 count=1 2>/dev/null || true)"
+		[ -n "$_byte" ] || { stty "$_saved" <&3 2>/dev/null || true; trap - INT TERM; no_tty_help; }
+		case "$_byte" in
+		"$(printf '\r')" | "$(printf '\n')") break ;;
+		"$(printf '\003')") stty "$_saved" <&3 2>/dev/null || true; trap - INT TERM; exit 130 ;;
+		"$(printf '\177')" | "$(printf '\010')")
+			if [ -n "$_secret" ]; then _secret="${_secret%?}"; printf '\b \b' >&3; fi
+			;;
+		*) _secret="${_secret}${_byte}"; printf '*' >&3 ;;
+		esac
+	done
+	stty "$_saved" <&3 2>/dev/null || stty echo <&3 2>/dev/null || true
 	trap - INT TERM
 	printf '\n' >&3
-	ANSWER="$REPLY_RAW"
+	ANSWER="$_secret"
 }
+# END MASKED SECRET READER
 
 # choose PROMPT DEFAULT_INDEX LABEL... — a numbered menu. Sets CHOICE to the 1-based index.
 #

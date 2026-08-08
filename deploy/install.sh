@@ -85,6 +85,36 @@ ask() {
 	IFS= read -r reply </dev/tty || die "no input on the terminal"
 	printf '%s' "$reply"
 }
+# BEGIN MASKED SECRET READER — kept behaviorally identical with get.sh; the contract test checks both.
+# ask_secret PROMPT — masked raw terminal input. Sets ANSWER while never echoing the secret itself.
+# Non-interactive callers must provide SMTP_PASSWORD through the environment; there is no stdin fallback.
+ask_secret() {
+	_prompt="$1"
+	if ! have_tty; then ANSWER=""; return 0; fi
+	_saved="$(stty -g </dev/tty 2>/dev/null || true)"
+	[ -n "$_saved" ] || die "could not configure the terminal for secret input"
+	trap "stty '$_saved' </dev/tty 2>/dev/null || stty echo </dev/tty 2>/dev/null; exit 130" INT TERM
+	stty raw -echo </dev/tty 2>/dev/null || { stty "$_saved" </dev/tty 2>/dev/null || true; die "could not disable terminal echo for secret input"; }
+	printf '%s ' "$_prompt" >/dev/tty
+	_secret=''
+	while :; do
+		_byte="$(dd if=/dev/tty bs=1 count=1 2>/dev/null || true)"
+		[ -n "$_byte" ] || { stty "$_saved" </dev/tty 2>/dev/null || true; trap - INT TERM; die "secret input ended before Enter"; }
+		case "$_byte" in
+		"$(printf '\r')" | "$(printf '\n')") break ;;
+		"$(printf '\003')") stty "$_saved" </dev/tty 2>/dev/null || true; trap - INT TERM; exit 130 ;;
+		"$(printf '\177')" | "$(printf '\010')")
+			if [ -n "$_secret" ]; then _secret="${_secret%?}"; printf '\b \b' >/dev/tty; fi
+			;;
+		*) _secret="${_secret}${_byte}"; printf '*' >/dev/tty ;;
+		esac
+	done
+	stty "$_saved" </dev/tty 2>/dev/null || stty echo </dev/tty 2>/dev/null || true
+	trap - INT TERM
+	printf '\n' >/dev/tty
+	ANSWER="$_secret"
+}
+# END MASKED SECRET READER
 # A public address must NOT be loopback/empty or carry a scheme (POC item 3: verify/reset/invite
 # links + the WG endpoint are emitted from it — localhost is unreachable off-box).
 addr_ok() {
@@ -156,7 +186,7 @@ configure)
 		[ -n "$SMTP_HOST" ] || SMTP_HOST="$(ask '  SMTP host: ')"
 		[ -n "$SMTP_PORT" ] || SMTP_PORT="$(ask '  SMTP port [587]: ')"
 		[ -n "$SMTP_USERNAME" ] || SMTP_USERNAME="$(ask '  SMTP username: ')"
-		[ -n "$SMTP_PASSWORD" ] || SMTP_PASSWORD="$(ask '  SMTP password: ')"
+		[ -n "$SMTP_PASSWORD" ] || { ask_secret '  SMTP password:'; SMTP_PASSWORD="$ANSWER"; }
 		[ -n "$SMTP_FROM" ] || SMTP_FROM="$(ask "  From address [no-reply@${ADDR}]: ")"
 	fi
 	SMTP_PORT="${SMTP_PORT:-587}"
