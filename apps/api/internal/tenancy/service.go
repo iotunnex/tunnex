@@ -516,7 +516,7 @@ type Overview struct {
 
 // Overview returns the org's counts + a recent audit slice for the dashboard
 // home in a single service call (one API round-trip). Every read is org-scoped.
-func (s *Service) Overview(ctx context.Context, orgID uuid.UUID) (Overview, error) {
+func (s *Service) Overview(ctx context.Context, orgID uuid.UUID, activityActor *uuid.UUID) (Overview, error) {
 	var o Overview
 	var err error
 	if o.Members, err = s.q.CountMembersByOrg(ctx, orgID); err != nil {
@@ -534,9 +534,11 @@ func (s *Service) Overview(ctx context.Context, orgID uuid.UUID) (Overview, erro
 	}
 	// Latest 10, no filters/cursor — the same extended query the audit viewer uses
 	// (all narg filters left nil/NULL = the unfiltered head of the feed).
-	o.RecentActivity, err = s.q.ListAuditLogsByOrg(ctx, sqlc.ListAuditLogsByOrgParams{
-		OrgID: pgtype.UUID{Bytes: orgID, Valid: true}, Lim: 10,
-	})
+	p := sqlc.ListAuditLogsByOrgParams{OrgID: pgtype.UUID{Bytes: orgID, Valid: true}, Lim: 10}
+	if activityActor != nil {
+		p.Actor = pgtype.UUID{Bytes: *activityActor, Valid: true}
+	}
+	o.RecentActivity, err = s.q.ListAuditLogsByOrg(ctx, p)
 	if err != nil {
 		return Overview{}, err
 	}

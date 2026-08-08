@@ -9,16 +9,22 @@ import (
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
+	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 )
 
 // GetOrgOverview GET /api/v1/organizations/{orgId}/overview — the dashboard home
 // aggregate: counts + a recent-activity slice from the audit log.
 func (s apiServer) GetOrgOverview(ctx context.Context, req api.GetOrgOverviewRequestObject) (api.GetOrgOverviewResponseObject, error) {
-	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgView); err != nil {
+	authorized, err := authorize(ctx, req.OrgId, rbac.PermOrgView)
+	if err != nil {
 		return nil, err
 	}
-	o, err := s.orgs.Overview(ctx, req.OrgId)
+	var activityActor *uuid.UUID
+	if p, ok := authctx.PrincipalFrom(authorized); ok {
+		activityActor = auditActorScope(p, req.OrgId)
+	}
+	o, err := s.orgs.Overview(ctx, req.OrgId, activityActor)
 	if err != nil {
 		return nil, err
 	}

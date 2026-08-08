@@ -7,6 +7,7 @@ import {
   type Org,
 } from "../lib/api";
 import { useOrg } from "../lib/useOrg";
+import { useAuth } from "../lib/auth";
 import { relativeAge } from "../lib/format";
 import {
   UNATTRIBUTED_NOTE,
@@ -40,6 +41,7 @@ export default function AuditLog() {
   // ⛔ THE ORG COMES FROM THE SEAM (S12.5) — the page no longer picks index zero out of a list it
   // fetched itself, which is what made a second organization unreachable.
   const { org: currentOrg, loading: orgLoading, failed: orgFailed } = useOrg();
+  const { state: authState } = useAuth();
   const [org, setOrg] = useState<Org | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [entries, setEntries] = useState<AuditLogEntry[]>([]);
@@ -51,6 +53,7 @@ export default function AuditLog() {
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [memberScoped, setMemberScoped] = useState(false);
   // Generation token: each fetch bumps it; a response whose token is stale (a
   // newer fetch started, or the component unmounted) is discarded — so out-of-
   // order responses can't leave a stale page as the final list.
@@ -128,6 +131,14 @@ export default function AuditLog() {
         { params: { path: { orgId: first.id } } },
       );
       if (!cancelled) setMembers(ms ?? []);
+      if (!cancelled && authState.status === "authed") {
+        setMemberScoped(
+          (ms ?? []).some(
+            (m) =>
+              m.user_id === authState.user.id && m.role === "member",
+          ),
+        );
+      }
       if (!cancelled) await fetchPage(first.id, NO_FILTERS);
     })();
     return () => {
@@ -142,7 +153,7 @@ export default function AuditLog() {
     //
     // ⚠ THE SAME DEPENDENCY ALSO MAKES THE SWITCHER WORK. One line, two properties: without it the page
     // either never loads at all, or loads once and then lies about which tenant it is showing.
-  }, [currentOrg]);
+  }, [currentOrg, authState]);
 
   function applyFilters(e: FormEvent) {
     e.preventDefault();
@@ -154,6 +165,11 @@ export default function AuditLog() {
     <div>
       <h1 className="text-xl font-semibold text-white">Audit log</h1>
       <p className="text-sm text-slate-400">{org ? org.name : "…"}</p>
+      {memberScoped && (
+        <p className="mt-1 text-sm text-slate-400">
+          Showing your activity only. Organization-wide activity is visible to admins and owners.
+        </p>
+      )}
       <ErrorText>{error}</ErrorText>
 
       <form onSubmit={applyFilters} className="mt-6">

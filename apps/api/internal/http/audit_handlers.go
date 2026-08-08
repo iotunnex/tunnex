@@ -11,6 +11,7 @@ import (
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
 	"github.com/tunnexio/tunnex/apps/api/internal/apierr"
+	"github.com/tunnexio/tunnex/apps/api/internal/authctx"
 	"github.com/tunnexio/tunnex/apps/api/internal/rbac"
 	"github.com/tunnexio/tunnex/apps/api/internal/tenancy"
 )
@@ -20,15 +21,28 @@ const (
 	auditMaxLimit     = 100
 )
 
+func auditActorScope(p *authctx.Principal, orgID uuid.UUID) *uuid.UUID {
+	if p == nil {
+		return nil
+	}
+	if role, _ := p.RoleIn(orgID); role == rbac.RoleMember {
+		actor := p.UserID
+		return &actor
+	}
+	return nil
+}
+
 // ListAuditLogs GET /api/v1/organizations/{orgId}/audit-logs — the org's audit
 // feed, filterable + keyset-paginated. READ-ONLY: audit rows are append-only (DB
 // triggers reject UPDATE/DELETE) and there is deliberately no mutation endpoint.
 // Gated on PermOrgView — the same read the dashboard's activity slice uses; every
 // read is org-scoped (query-lint), so the actor filter can't probe other orgs.
 func (s apiServer) ListAuditLogs(ctx context.Context, req api.ListAuditLogsRequestObject) (api.ListAuditLogsResponseObject, error) {
-	if _, err := authorize(ctx, req.OrgId, rbac.PermOrgView); err != nil {
+	authorized, err := authorize(ctx, req.OrgId, rbac.PermOrgView)
+	if err != nil {
 		return nil, err
 	}
+	principal, _ := authctx.PrincipalFrom(authorized)
 	p := req.Params
 	f := tenancy.AuditFilter{Limit: auditDefaultLimit, Action: p.Action, From: p.From, To: p.To, CursorTS: p.CursorTs}
 	if p.Limit != nil {
@@ -44,6 +58,12 @@ func (s apiServer) ListAuditLogs(ctx context.Context, req api.ListAuditLogsReque
 	if p.Actor != nil {
 		a := uuid.UUID(*p.Actor)
 		f.Actor = &a
+	}
+	// Members retain the audit surface, but it is a self-activity view. Force the
+	// actor predicate server-side so filters and cursors can never probe another
+	// user's rows or infer their count.
+	if scoped := auditActorScope(principal, req.OrgId); scoped != nil {
+		f.Actor = scoped
 	}
 	// A keyset cursor is both halves or neither — a half-cursor is a client bug
 	// that would otherwise SILENTLY reset to page 1 (and the row-value comparison
