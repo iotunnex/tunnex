@@ -43,6 +43,12 @@ func DefaultProviderFactory(cfg sqlc.IdpSyncConfig, secret string) (DirectoryPro
 			tenant = *cfg.TenantID
 		}
 		return NewEntraProvider(tenant, cfg.ClientID, secret, nil), nil
+	case "google":
+		admin := ""
+		if cfg.DelegatedAdminEmail != nil {
+			admin = *cfg.DelegatedAdminEmail
+		}
+		return NewGoogleWorkspaceProvider(secret, admin, nil)
 	default:
 		return nil, apierr.BadRequest("provider_not_supported", "directory sync for this provider is not yet available")
 	}
@@ -97,12 +103,8 @@ func (s *Service) SetClock(now func() time.Time) { s.now = now }
 const perConfigPollTimeout = 2 * time.Minute
 
 func supportedProvider(p string) error {
-	// v1 syncs Microsoft Entra only; Google is a planned fast-follow behind the same DirectoryProvider
-	// interface. The OpenAPI enum still lists google for forward-compat, so the sync-capability gate
-	// lives HERE — reject an unsupported provider at CONFIG time with a clean 400 (#6), instead of
-	// accepting it and surfacing only perpetual-degraded health at sync time.
-	if p != "microsoft" {
-		return apierr.BadRequest("provider_not_supported", "directory sync currently supports microsoft only")
+	if p != "microsoft" && p != "google" {
+		return apierr.BadRequest("provider_not_supported", "directory sync provider is not supported")
 	}
 	return nil
 }
@@ -114,11 +116,20 @@ func (s *Service) UpsertConfig(ctx context.Context, orgID uuid.UUID, provider st
 	if err := supportedProvider(provider); err != nil {
 		return idpsyncspec.ConfigView{}, err
 	}
-	sealed, err := s.sealer.Seal([]byte(in.ClientSecret))
+	secret := in.ClientSecret
+	if provider == "google" {
+		secret = in.ServiceAccountJSON
+		if strings.TrimSpace(secret) == "" || strings.TrimSpace(in.DelegatedAdminEmail) == "" {
+			return idpsyncspec.ConfigView{}, apierr.BadRequest("invalid_google_credentials", "Google Workspace sync requires service-account JSON and a delegated admin email")
+		}
+	} else if strings.TrimSpace(secret) == "" || strings.TrimSpace(in.ClientID) == "" || strings.TrimSpace(in.TenantID) == "" {
+		return idpsyncspec.ConfigView{}, apierr.BadRequest("invalid_microsoft_credentials", "Microsoft sync requires client id, client secret, and tenant id")
+	}
+	sealed, err := s.sealer.Seal([]byte(secret))
 	if err != nil {
 		return idpsyncspec.ConfigView{}, err
 	}
-	fp := s.sealer.Fingerprint([]byte(in.ClientSecret)) // keyed proof-of-secret (S4.5) — never the secret
+	fp := s.sealer.Fingerprint([]byte(secret)) // keyed proof-of-secret (S4.5) — never the secret
 	var tid *string
 	if strings.TrimSpace(in.TenantID) != "" {
 		t := in.TenantID
@@ -129,7 +140,7 @@ func (s *Service) UpsertConfig(ctx context.Context, orgID uuid.UUID, provider st
 		var e error
 		row, e = q.UpsertIdpSyncConfig(ctx, sqlc.UpsertIdpSyncConfigParams{
 			OrgID: orgID, Provider: provider, ClientID: in.ClientID,
-			SecretSealed: []byte(sealed), TenantID: tid, Enabled: in.Enabled,
+			SecretSealed: []byte(sealed), TenantID: tid, DelegatedAdminEmail: nullableString(in.DelegatedAdminEmail), Enabled: in.Enabled,
 		})
 		if e != nil {
 			return e
@@ -391,6 +402,12 @@ func (s *Service) AddIdpGroupMember(ctx context.Context, orgID, groupID, userID 
 	if n == 0 {
 		return false, nil // already present (ON CONFLICT DO NOTHING) — no audit, no push
 	}
+	if err := s.q.AddIdpAccessSource(ctx, sqlc.AddIdpAccessSourceParams{OrgID: orgID, UserID: userID, SourceKey: groupID.String()}); err != nil {
+		return false, err
+	}
+	if err := s.q.RestoreMembershipAfterIdpGrant(ctx, sqlc.RestoreMembershipAfterIdpGrantParams{OrgID: orgID, UserID: userID}); err != nil {
+		return false, err
+	}
 	return true, s.systemAudit(ctx, orgID, "group.member_synced_added", groupID, userID, "present_in_directory_group")
 }
 
@@ -401,6 +418,18 @@ func (s *Service) RemoveIdpGroupMember(ctx context.Context, orgID, groupID, user
 	}
 	if n == 0 {
 		return false, nil // nothing to remove (concurrent converge already did) — no audit, no push
+	}
+	if err := s.q.RemoveIdpAccessSource(ctx, sqlc.RemoveIdpAccessSourceParams{OrgID: orgID, UserID: userID, SourceKey: groupID.String()}); err != nil {
+		return false, err
+	}
+	count, err := s.q.CountAccessSources(ctx, sqlc.CountAccessSourcesParams{OrgID: orgID, UserID: userID})
+	if err != nil {
+		return false, err
+	}
+	if count == 0 && s.deprov != nil {
+		if _, err := s.deprov.RevokeOrgAccess(ctx, orgID, userID, "removed_from_directory_group"); err != nil {
+			return false, err
+		}
 	}
 	return true, s.systemAudit(ctx, orgID, "group.member_synced_removed", groupID, userID, "absent_from_directory_group")
 }
@@ -427,6 +456,9 @@ func (s *Service) viewOf(row sqlc.IdpSyncConfig) idpsyncspec.ConfigView {
 	if row.TenantID != nil {
 		v.TenantID = *row.TenantID
 	}
+	if row.DelegatedAdminEmail != nil {
+		v.DelegatedAdminEmail = *row.DelegatedAdminEmail
+	}
 	if row.LastSyncError != nil {
 		v.LastSyncError = *row.LastSyncError
 	}
@@ -438,6 +470,13 @@ func (s *Service) viewOf(row sqlc.IdpSyncConfig) idpsyncspec.ConfigView {
 	}
 	v.SyncHealth = ClassifySyncHealth(row.LastSyncOk, lastAt, row.CreatedAt, s.now(), EscalationCeiling).String()
 	return v
+}
+
+func nullableString(v string) *string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	return &v
 }
 
 // humanAudit records a principal-attributed audit row (config changes are human actions via the

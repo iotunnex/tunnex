@@ -10,12 +10,12 @@ RETURNING *;
 -- lint:cross-org — intentionally spans orgs: a user's memberships across all
 -- their organizations (used to resolve which orgs a principal belongs to).
 SELECT * FROM memberships
-WHERE user_id = $1
+WHERE user_id = $1 AND access_revoked_at IS NULL
 ORDER BY created_at;
 
 -- name: ListMembershipsByOrg :many
 SELECT * FROM memberships
-WHERE org_id = $1
+WHERE org_id = $1 AND access_revoked_at IS NULL
 ORDER BY created_at;
 
 -- name: ListOrgMembersWithUser :many
@@ -41,6 +41,23 @@ ORDER BY m.created_at;
 
 -- name: GetMembership :one
 SELECT * FROM memberships
+WHERE org_id = $1 AND user_id = $2 AND access_revoked_at IS NULL;
+
+-- name: GetMembershipIncludingRevoked :one
+SELECT * FROM memberships
+WHERE org_id = $1 AND user_id = $2;
+
+-- name: ListAccessSources :many
+SELECT source_type, source_key FROM membership_access_sources
+WHERE org_id = $1 AND user_id = $2
+ORDER BY source_type, source_key;
+
+-- name: RevokeMembershipAccess :execrows
+UPDATE memberships SET access_revoked_at = now()
+WHERE org_id = $1 AND user_id = $2 AND access_revoked_at IS NULL;
+
+-- name: RestoreMembershipAccess :exec
+UPDATE memberships SET access_revoked_at = NULL
 WHERE org_id = $1 AND user_id = $2;
 
 -- name: ChangeMemberRole :one

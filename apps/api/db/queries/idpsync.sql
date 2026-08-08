@@ -34,12 +34,13 @@ WHERE org_id = $1 AND provider = $2;
 -- Connect / update a provider credential. The secret is pre-sealed (AES-GCM) by the caller;
 -- plaintext never reaches SQL. On re-set, credentials update but the sync-health columns are
 -- left intact (a credential rotation shouldn't fake a green health).
-INSERT INTO idp_sync_configs (org_id, provider, client_id, secret_sealed, tenant_id, enabled)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO idp_sync_configs (org_id, provider, client_id, secret_sealed, tenant_id, delegated_admin_email, enabled)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (org_id, provider) DO UPDATE
     SET client_id = EXCLUDED.client_id,
         secret_sealed = EXCLUDED.secret_sealed,
         tenant_id = EXCLUDED.tenant_id,
+        delegated_admin_email = EXCLUDED.delegated_admin_email,
         enabled = EXCLUDED.enabled,
         updated_at = now()
 RETURNING *;
@@ -101,6 +102,21 @@ ORDER BY user_id;
 INSERT INTO group_members (org_id, group_id, user_id, origin, idp_external_id)
 VALUES ($1, $2, $3, 'idp_sync', $4)
 ON CONFLICT (group_id, user_id) DO NOTHING;
+
+-- name: AddIdpAccessSource :exec
+INSERT INTO membership_access_sources (org_id, user_id, source_type, source_key)
+VALUES ($1, $2, 'idp_sync', $3)
+ON CONFLICT DO NOTHING;
+
+-- name: RemoveIdpAccessSource :exec
+DELETE FROM membership_access_sources
+WHERE org_id = $1 AND user_id = $2 AND source_type = 'idp_sync' AND source_key = $3;
+
+-- name: CountAccessSources :one
+SELECT count(*) FROM membership_access_sources WHERE org_id = $1 AND user_id = $2;
+
+-- name: RestoreMembershipAfterIdpGrant :exec
+UPDATE memberships SET access_revoked_at = NULL WHERE org_id = $1 AND user_id = $2;
 
 -- name: RemoveIdpGroupMember :execrows
 -- Remove a synced member — scoped to origin='idp_sync' so the reconcile can NEVER delete a

@@ -11,23 +11,26 @@ import (
 
 // ConfigInput is a provider-credential upsert (the client_secret is sealed before storage).
 type ConfigInput struct {
-	ClientID     string
-	ClientSecret string
-	TenantID     string // Entra tenant; empty for google
-	Enabled      bool
+	ClientID            string
+	ClientSecret        string
+	TenantID            string // Entra tenant; empty for google
+	DelegatedAdminEmail string // Google Workspace DWD subject
+	ServiceAccountJSON  string // Google service-account JSON; sealed at rest
+	Enabled             bool
 }
 
 // ConfigView is a stored config for display — NEVER carries the secret, only its fingerprint.
 type ConfigView struct {
-	Provider          string
-	ClientID          string
-	SecretFingerprint string // keyed 12-hex proof-of-secret (S4.5); never the secret itself
-	TenantID          string
-	Enabled           bool
-	LastSyncAt        *time.Time
-	LastSyncOk        bool
-	LastSyncError     string
-	SyncHealth        string // ok | degraded | escalated (derived, D2)
+	Provider            string
+	ClientID            string
+	SecretFingerprint   string // keyed 12-hex proof-of-secret (S4.5); never the secret itself
+	TenantID            string
+	DelegatedAdminEmail string
+	Enabled             bool
+	LastSyncAt          *time.Time
+	LastSyncOk          bool
+	LastSyncError       string
+	SyncHealth          string // ok | degraded | escalated (derived, D2)
 }
 
 // HealthView is the two-tier sync-health snapshot.

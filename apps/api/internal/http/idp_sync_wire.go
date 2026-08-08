@@ -25,6 +25,10 @@ func (d syncDeprovisioner) DeactivateForSync(ctx context.Context, orgID, userID 
 	return d.members.DeactivateMemberBySync(ctx, orgID, userID, "disabled_in_directory")
 }
 
+func (d syncDeprovisioner) RevokeOrgAccess(ctx context.Context, orgID, userID uuid.UUID, cause string) (bool, error) {
+	return d.members.RevokeOrgAccessBySync(ctx, orgID, userID, cause)
+}
+
 // NewIdpSyncPort builds the enterprise IdP-sync service: sqlc + AES-GCM sealer + the device pusher
 // (the same org-wide recompile the tenancy sweep uses) + the deactivate sweep behind Deprovisioner.
 func NewIdpSyncPort(pool *pgxpool.Pool, sealer *crypto.Sealer, members *tenancy.MembershipService, pusher *devices.Service, lic *licence.Manager, logger *slog.Logger) idpSyncPort {

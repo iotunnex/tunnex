@@ -16,7 +16,7 @@ const changeMemberRole = `-- name: ChangeMemberRole :one
 UPDATE memberships
 SET role = $3
 WHERE org_id = $1 AND user_id = $2
-RETURNING id, org_id, user_id, role, created_at, updated_at
+RETURNING id, org_id, user_id, role, created_at, updated_at, access_revoked_at
 `
 
 type ChangeMemberRoleParams struct {
@@ -35,6 +35,7 @@ func (q *Queries) ChangeMemberRole(ctx context.Context, arg ChangeMemberRolePara
 		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AccessRevokedAt,
 	)
 	return i, err
 }
@@ -67,8 +68,8 @@ func (q *Queries) CountOwners(ctx context.Context, orgID uuid.UUID) (int64, erro
 }
 
 const getMembership = `-- name: GetMembership :one
-SELECT id, org_id, user_id, role, created_at, updated_at FROM memberships
-WHERE org_id = $1 AND user_id = $2
+SELECT id, org_id, user_id, role, created_at, updated_at, access_revoked_at FROM memberships
+WHERE org_id = $1 AND user_id = $2 AND access_revoked_at IS NULL
 `
 
 type GetMembershipParams struct {
@@ -86,13 +87,75 @@ func (q *Queries) GetMembership(ctx context.Context, arg GetMembershipParams) (M
 		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AccessRevokedAt,
 	)
 	return i, err
 }
 
+const getMembershipIncludingRevoked = `-- name: GetMembershipIncludingRevoked :one
+SELECT id, org_id, user_id, role, created_at, updated_at, access_revoked_at FROM memberships
+WHERE org_id = $1 AND user_id = $2
+`
+
+type GetMembershipIncludingRevokedParams struct {
+	OrgID  uuid.UUID `json:"org_id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) GetMembershipIncludingRevoked(ctx context.Context, arg GetMembershipIncludingRevokedParams) (Membership, error) {
+	row := q.db.QueryRow(ctx, getMembershipIncludingRevoked, arg.OrgID, arg.UserID)
+	var i Membership
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AccessRevokedAt,
+	)
+	return i, err
+}
+
+const listAccessSources = `-- name: ListAccessSources :many
+SELECT source_type, source_key FROM membership_access_sources
+WHERE org_id = $1 AND user_id = $2
+ORDER BY source_type, source_key
+`
+
+type ListAccessSourcesParams struct {
+	OrgID  uuid.UUID `json:"org_id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+type ListAccessSourcesRow struct {
+	SourceType string `json:"source_type"`
+	SourceKey  string `json:"source_key"`
+}
+
+func (q *Queries) ListAccessSources(ctx context.Context, arg ListAccessSourcesParams) ([]ListAccessSourcesRow, error) {
+	rows, err := q.db.Query(ctx, listAccessSources, arg.OrgID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAccessSourcesRow{}
+	for rows.Next() {
+		var i ListAccessSourcesRow
+		if err := rows.Scan(&i.SourceType, &i.SourceKey); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMembershipsByOrg = `-- name: ListMembershipsByOrg :many
-SELECT id, org_id, user_id, role, created_at, updated_at FROM memberships
-WHERE org_id = $1
+SELECT id, org_id, user_id, role, created_at, updated_at, access_revoked_at FROM memberships
+WHERE org_id = $1 AND access_revoked_at IS NULL
 ORDER BY created_at
 `
 
@@ -112,6 +175,7 @@ func (q *Queries) ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]
 			&i.Role,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AccessRevokedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -124,8 +188,8 @@ func (q *Queries) ListMembershipsByOrg(ctx context.Context, orgID uuid.UUID) ([]
 }
 
 const listMembershipsByUser = `-- name: ListMembershipsByUser :many
-SELECT id, org_id, user_id, role, created_at, updated_at FROM memberships
-WHERE user_id = $1
+SELECT id, org_id, user_id, role, created_at, updated_at, access_revoked_at FROM memberships
+WHERE user_id = $1 AND access_revoked_at IS NULL
 ORDER BY created_at
 `
 
@@ -147,6 +211,7 @@ func (q *Queries) ListMembershipsByUser(ctx context.Context, userID uuid.UUID) (
 			&i.Role,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AccessRevokedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -238,12 +303,45 @@ func (q *Queries) RemoveMember(ctx context.Context, arg RemoveMemberParams) (int
 	return result.RowsAffected(), nil
 }
 
+const restoreMembershipAccess = `-- name: RestoreMembershipAccess :exec
+UPDATE memberships SET access_revoked_at = NULL
+WHERE org_id = $1 AND user_id = $2
+`
+
+type RestoreMembershipAccessParams struct {
+	OrgID  uuid.UUID `json:"org_id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) RestoreMembershipAccess(ctx context.Context, arg RestoreMembershipAccessParams) error {
+	_, err := q.db.Exec(ctx, restoreMembershipAccess, arg.OrgID, arg.UserID)
+	return err
+}
+
+const revokeMembershipAccess = `-- name: RevokeMembershipAccess :execrows
+UPDATE memberships SET access_revoked_at = now()
+WHERE org_id = $1 AND user_id = $2 AND access_revoked_at IS NULL
+`
+
+type RevokeMembershipAccessParams struct {
+	OrgID  uuid.UUID `json:"org_id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) RevokeMembershipAccess(ctx context.Context, arg RevokeMembershipAccessParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeMembershipAccess, arg.OrgID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertMembership = `-- name: UpsertMembership :one
 INSERT INTO memberships (org_id, user_id, role)
 VALUES ($1, $2, $3)
 ON CONFLICT (org_id, user_id) DO UPDATE
     SET role = EXCLUDED.role
-RETURNING id, org_id, user_id, role, created_at, updated_at
+RETURNING id, org_id, user_id, role, created_at, updated_at, access_revoked_at
 `
 
 type UpsertMembershipParams struct {
@@ -263,6 +361,7 @@ func (q *Queries) UpsertMembership(ctx context.Context, arg UpsertMembershipPara
 		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AccessRevokedAt,
 	)
 	return i, err
 }

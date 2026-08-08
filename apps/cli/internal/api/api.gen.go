@@ -997,13 +997,14 @@ type IdpGroupMapRequest struct {
 
 // IdpSyncConfig defines model for IdpSyncConfig.
 type IdpSyncConfig struct {
-	ClientId          string                `json:"client_id"`
-	Enabled           bool                  `json:"enabled"`
-	LastSyncAt        *time.Time            `json:"last_sync_at,omitempty"`
-	LastSyncError     *string               `json:"last_sync_error,omitempty"`
-	LastSyncOk        bool                  `json:"last_sync_ok"`
-	Provider          IdpSyncConfigProvider `json:"provider"`
-	SecretFingerprint *string               `json:"secret_fingerprint,omitempty"`
+	ClientId            string                `json:"client_id"`
+	DelegatedAdminEmail *openapi_types.Email  `json:"delegated_admin_email,omitempty"`
+	Enabled             bool                  `json:"enabled"`
+	LastSyncAt          *time.Time            `json:"last_sync_at,omitempty"`
+	LastSyncError       *string               `json:"last_sync_error,omitempty"`
+	LastSyncOk          bool                  `json:"last_sync_ok"`
+	Provider            IdpSyncConfigProvider `json:"provider"`
+	SecretFingerprint   *string               `json:"secret_fingerprint,omitempty"`
 
 	// SyncHealth Two-tier derived health (D2).
 	SyncHealth string  `json:"sync_health"`
@@ -1015,13 +1016,20 @@ type IdpSyncConfigProvider string
 
 // IdpSyncConfigRequest defines model for IdpSyncConfigRequest.
 type IdpSyncConfigRequest struct {
+	// ClientId Entra application client id; required for microsoft.
 	ClientId string `json:"client_id"`
 
-	// ClientSecret Sealed at rest (AES-GCM); never returned.
+	// ClientSecret Entra client secret; sealed at rest and never returned.
 	ClientSecret string `json:"client_secret"`
-	Enabled      *bool  `json:"enabled,omitempty"`
 
-	// TenantId Entra tenant id; omit for google.
+	// DelegatedAdminEmail Google Workspace admin subject for DWD impersonation.
+	DelegatedAdminEmail *openapi_types.Email `json:"delegated_admin_email,omitempty"`
+	Enabled             *bool                `json:"enabled,omitempty"`
+
+	// ServiceAccountJson Google service-account JSON with DWD; sealed at rest and never returned.
+	ServiceAccountJson *string `json:"service_account_json,omitempty"`
+
+	// TenantId Entra tenant id; required for microsoft.
 	TenantId *string `json:"tenant_id,omitempty"`
 }
 

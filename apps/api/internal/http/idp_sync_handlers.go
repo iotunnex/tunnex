@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/tunnexio/tunnex/apps/api/db/sqlc"
 	"github.com/tunnexio/tunnex/apps/api/internal/api"
@@ -38,12 +39,16 @@ func (s apiServer) PutIdpSyncConfig(ctx context.Context, req api.PutIdpSyncConfi
 		return nil, apierr.BadRequest("invalid_request", "request body is required")
 	}
 	in := idpsyncspec.ConfigInput{
-		ClientID:     req.Body.ClientId,
-		ClientSecret: req.Body.ClientSecret,
-		Enabled:      req.Body.Enabled == nil || *req.Body.Enabled, // default enabled
+		ClientID:           req.Body.ClientId,
+		ClientSecret:       req.Body.ClientSecret,
+		ServiceAccountJSON: valueOrEmpty(req.Body.ServiceAccountJson),
+		Enabled:            req.Body.Enabled == nil || *req.Body.Enabled, // default enabled
 	}
 	if req.Body.TenantId != nil {
 		in.TenantID = *req.Body.TenantId
+	}
+	if req.Body.DelegatedAdminEmail != nil {
+		in.DelegatedAdminEmail = string(*req.Body.DelegatedAdminEmail)
 	}
 	view, err := s.idpSync.UpsertConfig(ctx, req.OrgId, req.Provider, in)
 	if err != nil {
@@ -53,6 +58,13 @@ func (s apiServer) PutIdpSyncConfig(ctx context.Context, req api.PutIdpSyncConfi
 		Body:    toAPIIdpSyncConfig(view),
 		Headers: api.PutIdpSyncConfig200ResponseHeaders{XRequestId: middleware.GetReqID(ctx)},
 	}, nil
+}
+
+func valueOrEmpty(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
 }
 
 // GetIdpSyncHealth implements GET /idp-sync/{provider}/health (view-level).
@@ -149,6 +161,10 @@ func toAPIIdpSyncConfig(v idpsyncspec.ConfigView) api.IdpSyncConfig {
 	}
 	if v.TenantID != "" {
 		out.TenantId = &v.TenantID
+	}
+	if v.DelegatedAdminEmail != "" {
+		email := openapi_types.Email(v.DelegatedAdminEmail)
+		out.DelegatedAdminEmail = &email
 	}
 	if v.LastSyncError != "" {
 		out.LastSyncError = &v.LastSyncError

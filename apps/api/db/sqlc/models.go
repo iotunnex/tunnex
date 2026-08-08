@@ -160,18 +160,19 @@ type GroupMember struct {
 }
 
 type IdpSyncConfig struct {
-	ID            uuid.UUID          `json:"id"`
-	OrgID         uuid.UUID          `json:"org_id"`
-	Provider      string             `json:"provider"`
-	ClientID      string             `json:"client_id"`
-	SecretSealed  []byte             `json:"secret_sealed"`
-	TenantID      *string            `json:"tenant_id"`
-	Enabled       bool               `json:"enabled"`
-	LastSyncAt    pgtype.Timestamptz `json:"last_sync_at"`
-	LastSyncOk    bool               `json:"last_sync_ok"`
-	LastSyncError *string            `json:"last_sync_error"`
-	CreatedAt     time.Time          `json:"created_at"`
-	UpdatedAt     time.Time          `json:"updated_at"`
+	ID                  uuid.UUID          `json:"id"`
+	OrgID               uuid.UUID          `json:"org_id"`
+	Provider            string             `json:"provider"`
+	ClientID            string             `json:"client_id"`
+	SecretSealed        []byte             `json:"secret_sealed"`
+	TenantID            *string            `json:"tenant_id"`
+	Enabled             bool               `json:"enabled"`
+	LastSyncAt          pgtype.Timestamptz `json:"last_sync_at"`
+	LastSyncOk          bool               `json:"last_sync_ok"`
+	LastSyncError       *string            `json:"last_sync_error"`
+	CreatedAt           time.Time          `json:"created_at"`
+	UpdatedAt           time.Time          `json:"updated_at"`
+	DelegatedAdminEmail *string            `json:"delegated_admin_email"`
 }
 
 type Invitation struct {
@@ -232,12 +233,21 @@ type MachineCredential struct {
 }
 
 type Membership struct {
-	ID        uuid.UUID `json:"id"`
-	OrgID     uuid.UUID `json:"org_id"`
-	UserID    uuid.UUID `json:"user_id"`
-	Role      string    `json:"role"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID              uuid.UUID          `json:"id"`
+	OrgID           uuid.UUID          `json:"org_id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	Role            string             `json:"role"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+	AccessRevokedAt pgtype.Timestamptz `json:"access_revoked_at"`
+}
+
+type MembershipAccessSource struct {
+	OrgID      uuid.UUID `json:"org_id"`
+	UserID     uuid.UUID `json:"user_id"`
+	SourceType string    `json:"source_type"`
+	SourceKey  string    `json:"source_key"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 type MfaChallenge struct {

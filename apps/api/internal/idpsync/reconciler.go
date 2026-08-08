@@ -73,6 +73,7 @@ type Store interface {
 // doesn't fire a redundant org-wide push on every poll for a still-listed disabled member (#7).
 type Deprovisioner interface {
 	DeactivateForSync(ctx context.Context, orgID, userID uuid.UUID, provider string) (didAct bool, err error)
+	RevokeOrgAccess(ctx context.Context, orgID, userID uuid.UUID, cause string) (didAct bool, err error)
 }
 
 // NewReconciler builds a reconciler. now defaults to time.Now.

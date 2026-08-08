@@ -2853,9 +2853,11 @@ components:
       required: [client_id, client_secret]
       additionalProperties: false
       properties:
-        client_id: { type: string, minLength: 1 }
-        client_secret: { type: string, minLength: 1, description: Sealed at rest (AES-GCM); never returned. }
-        tenant_id: { type: string, description: Entra tenant id; omit for google. }
+        client_id: { type: string, description: Entra application client id; required for microsoft. }
+        client_secret: { type: string, description: Entra client secret; sealed at rest and never returned. }
+        tenant_id: { type: string, description: Entra tenant id; required for microsoft. }
+        service_account_json: { type: string, description: Google service-account JSON with DWD; sealed at rest and never returned. }
+        delegated_admin_email: { type: string, format: email, description: Google Workspace admin subject for DWD impersonation. }
         enabled: { type: boolean, default: true }
 
     IdpSyncConfig:
@@ -2869,6 +2871,7 @@ components:
         # this fingerprint — enough to confirm a secret is set / detect a change, useless to an attacker.
         secret_fingerprint: { type: string }
         tenant_id: { type: string }
+        delegated_admin_email: { type: string, format: email }
         enabled: { type: boolean }
         last_sync_at: { type: string, format: date-time }
         last_sync_ok: { type: boolean }
